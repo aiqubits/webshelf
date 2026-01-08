@@ -1,0 +1,26 @@
+# WebShelf Configuration File
+# Copy this file to config.toml and update values for your environment
+
+# Database connection URL (PostgreSQL)
+database_url = "postgres://postgres:password@localhost:5432/webshelf"
+
+# Redis connection URL (for distributed locking only)
+redis_url = "redis://localhost:6379"
+
+# JWT secret key for token signing (CHANGE THIS IN PRODUCTION!)
+jwt_secret = "your-super-secret-key-change-in-production"
+
+# JWT token expiration time in seconds (default: 1 hour)
+jwt_expiry_seconds = 3600
+
+# Server configuration
+[server]
+host = "0.0.0.0"
+port = 3000
+
+# Rate limiting configuration
+[rate_limit]
+# Requests per second
+per_second = 2
+# Burst size (maximum requests allowed in burst)
+burst_size = 5

@@ -1,0 +1,63 @@
+[package]
+name = "webshelf"
+version = "0.0.1"
+edition = "2024"
+authors = [
+	"aiqubits <aiqubits@hotmail.com>",
+]
+categories = ["asynchronous", "network-programming", "web-programming"]
+keywords = ["web", "server", "backend", "fullstack", "scaffold"]
+description = "The best way to develop your web service with one click."
+license = "MIT"
+readme = "README.md"
+repository = "https://github.com/aiqubits/webshelf"
+homepage = "https://www.openpick.org/webshelf"
+
+[dependencies]
+# Web framework
+axum = "0.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "compression-br", "compression-gzip"] }
+http = "1"
+http-body-util = "0.1"
+
+# Database
+sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+
+# Redis for distributed locking
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Configuration
+config = "0.14"
+clap = { version = "4", features = ["derive"] }
+
+# Authentication
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+# Validation
+validator = { version = "0.19", features = ["derive"] }
+regex = "1"
+once_cell = "1"
+
+# Logging
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+# Error handling
+anyhow = "1"
+thiserror = "2"
+
+# Utilities
+chrono = { version = "0.4", features = ["serde"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+tokio-test = "0.4"
