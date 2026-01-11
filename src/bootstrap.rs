@@ -8,6 +8,7 @@ use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
     trace::TraceLayer,
+    compression::CompressionLayer,
 };
 
 use crate::{
@@ -148,6 +149,7 @@ pub fn configure_cors() -> CorsLayer {
 /// Build application router with all middleware
 pub fn build_app_router(state: AppState, jwt_secret: String) -> Router {
     let cors = configure_cors();
+    let compression = CompressionLayer::new();
 
     Router::new()
         .nest("/api", api_routes())
@@ -155,6 +157,7 @@ pub fn build_app_router(state: AppState, jwt_secret: String) -> Router {
         .layer(axum_middleware::from_fn(panic::panic_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
+        .layer(compression)
         .layer(axum::Extension(JwtSecret(jwt_secret)))
         .with_state(state)
 }
