@@ -1,0 +1,99 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: webshelf
+  namespace: webshelf
+  labels:
+    app: webshelf
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app: webshelf
+  template:
+    metadata:
+      labels:
+        app: webshelf
+    spec:
+      containers:
+      - name: webshelf
+        image: webshelf:latest
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: http
+        env:
+        - name: RUST_LOG
+          value: "info"
+        - name: DATABASE_URL
+          valueFrom:
+            configMapKeyRef:
+              name: webshelf-config
+              key: database_url
+        - name: REDIS_URL
+          valueFrom:
+            configMapKeyRef:
+              name: webshelf-config
+              key: redis_url
+        - name: JWT_SECRET
+          valueFrom:
+            configMapKeyRef:
+              name: webshelf-config
+              key: jwt_secret
+        volumeMounts:
+        - name: config-volume
+          mountPath: /app/config.toml
+          subPath: config.toml
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "250m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+      volumes:
+      - name: config-volume
+        configMap:
+          name: webshelf-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webshelf-service
+  namespace: webshelf
+spec:
+  selector:
+    app: webshelf
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 3000
+    name: http
+  type: ClusterIP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: webshelf-service-nodeport
+  namespace: webshelf
+spec:
+  selector:
+    app: webshelf
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 3000
+    name: http
+  type: NodePort

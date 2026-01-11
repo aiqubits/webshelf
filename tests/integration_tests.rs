@@ -29,9 +29,14 @@ async fn create_test_app() -> Router {
         .await
         .expect("Failed to connect to database");
     
-    // Create Redis client
+    // Run migrations
+    webshelf::migrations::run_migrations(&db)
+        .await
+        .expect("Failed to run migrations");
+    
+    // Create Redis client (optional)
     let redis = RedisClient::open(config.redis_url.as_str())
-        .expect("Failed to create Redis client");
+        .ok();
     
     let state = AppState {
         db,
@@ -39,10 +44,25 @@ async fn create_test_app() -> Router {
         config: Arc::new(config),
     };
     
-    // Build test router
+    use webshelf::middleware::auth::JwtSecret;
+    use tower_http::cors::CorsLayer;
+    use tower_http::trace::TraceLayer;
+    use http::Method;
+    
+    // Configure CORS
+    let cors = CorsLayer::new()
+        .allow_origin(tower_http::cors::Any)
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::PATCH, Method::OPTIONS])
+        .allow_headers(tower_http::cors::Any);
+    
+    // Build test router with same middleware stack as main app
     Router::new()
         .nest("/api", api_routes())
         .nest("/api/public/auth", auth_routes())
+        .layer(axum::Extension(JwtSecret(state.config.jwt_secret.clone())))
+        .layer(axum::middleware::from_fn(webshelf::middleware::panic::panic_middleware))
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
         .with_state(state)
 }
 
@@ -78,7 +98,7 @@ async fn test_user_registration() {
     let app = create_test_app().await;
     
     let payload = json!({
-        "email": "test@example.com",
+        "email": format!("test_user_{}@example.com", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
         "password": "Password123",
         "name": "Test User"
     });
@@ -158,7 +178,7 @@ async fn test_create_and_get_user() {
     
     // Create user
     let payload = json!({
-        "email": "createget@example.com",
+        "email": format!("createget_user_{}@example.com", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
         "password": "Password123",
         "name": "Create Get Test"
     });
@@ -179,7 +199,8 @@ async fn test_create_and_get_user() {
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_to_json(response.into_body()).await;
     let user_id = body["id"].as_str().unwrap();
-    
+    let expected_email = body["email"].as_str().unwrap(); // Get the actual email that was created
+        
     // Get user
     let response = app
         .oneshot(
@@ -190,8 +211,54 @@ async fn test_create_and_get_user() {
         )
         .await
         .unwrap();
-    
+        
     assert_eq!(response.status(), StatusCode::OK);
     let body = body_to_json(response.into_body()).await;
-    assert_eq!(body["email"], "createget@example.com");
+    assert_eq!(body["email"], expected_email);
+}
+
+// Test for email conflict scenario
+#[tokio::test]
+async fn test_user_registration_conflict() {
+    let app = create_test_app().await;
+    
+    // First registration should succeed
+    let email = format!("conflict_test_{}@example.com", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
+    let payload1 = json!({
+        "email": &email,
+        "password": "Password123",
+        "name": "Conflict Test User"
+    });
+    
+    let response1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload1).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    
+    assert_eq!(response1.status(), StatusCode::OK);
+    let body1 = body_to_json(response1.into_body()).await;
+    assert_eq!(body1["message"], "User registered successfully");
+    
+    // Second registration with same email should fail with conflict
+    let response2 = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload1).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    
+    assert_eq!(response2.status(), StatusCode::CONFLICT);
 }

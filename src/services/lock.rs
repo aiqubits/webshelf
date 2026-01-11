@@ -4,12 +4,23 @@ use redis::Client;
 use std::time::Duration;
 use tokio::time::sleep;
 
+/// Error type for Redis not available
+#[derive(Debug, thiserror::Error)]
+pub enum LockError {
+    #[error("Redis is not available. Distributed locking is disabled.")]
+    RedisNotAvailable,
+    #[error("Redis error: {0}")]
+    RedisError(#[from] redis::RedisError),
+    #[error("Lock operation failed: {0}")]
+    LockFailed(String),
+}
+
 const DEFAULT_LOCK_VALUE: &str = "1";
 
 /// Acquire a distributed lock with retry mechanism
 ///
 /// # Arguments
-/// * `redis_client` - Redis client instance
+/// * `redis_client` - Optional Redis client instance (None if not configured)
 /// * `lock_key` - Unique key for the lock
 /// * `expiry_seconds` - Lock expiration time in seconds
 /// * `max_retries` - Maximum number of retry attempts
@@ -17,14 +28,19 @@ const DEFAULT_LOCK_VALUE: &str = "1";
 ///
 /// # Returns
 /// * `Result<bool>` - True if lock was acquired, false if not acquired after retries
+/// 
+/// # Errors
+/// Returns `LockError::RedisNotAvailable` if Redis is not configured
 pub async fn acquire_lock(
-    redis_client: &Client,
+    redis_client: Option<&Client>,
     lock_key: &str,
     expiry_seconds: u64,
     max_retries: u32,
     retry_delay: Duration,
 ) -> Result<bool> {
-    let conn = redis_client
+    let client = redis_client.ok_or(LockError::RedisNotAvailable)?;
+    
+    let conn = client        
         .get_connection_manager()
         .await
         .context("Failed to get async Redis connection")?;
@@ -78,10 +94,12 @@ async fn try_acquire_with_retry(
 /// Release a distributed lock
 ///
 /// # Arguments
-/// * `redis_client` - Redis client instance
+/// * `redis_client` - Optional Redis client instance
 /// * `lock_key` - Unique key for the lock to release
-pub async fn release_lock(redis_client: &Client, lock_key: &str) -> Result<()> {
-    let mut conn = redis_client
+pub async fn release_lock(redis_client: Option<&Client>, lock_key: &str) -> Result<()> {
+    let client = redis_client.ok_or(LockError::RedisNotAvailable)?;
+    
+    let mut conn = client        
         .get_connection_manager()
         .await
         .context("Failed to get async Redis connection")?;
@@ -98,29 +116,34 @@ pub async fn release_lock(redis_client: &Client, lock_key: &str) -> Result<()> {
 
 /// Lock guard that automatically releases the lock when dropped
 pub struct LockGuard {
-    client: Client,
+    client: Option<Client>,
     lock_key: String,
 }
 
 impl LockGuard {
     /// Create a new lock guard (internal use)
-    fn new(client: Client, lock_key: String) -> Self {
+    fn new(client: Option<Client>, lock_key: String) -> Self {
         Self { client, lock_key }
     }
 
     /// Acquire a lock and return a guard that releases it on drop
     pub async fn acquire(
-        redis_client: &Client,
+        redis_client: Option<&Client>,
         lock_key: &str,
         expiry_seconds: u64,
         max_retries: u32,
         retry_delay: Duration,
     ) -> Result<Option<Self>> {
+        if redis_client.is_none() {
+            tracing::warn!("Redis not available, skipping distributed lock for key: {}", lock_key);
+            return Ok(None);
+        }
+
         let acquired =
             acquire_lock(redis_client, lock_key, expiry_seconds, max_retries, retry_delay).await?;
 
         if acquired {
-            Ok(Some(Self::new(redis_client.clone(), lock_key.to_string())))
+            Ok(Some(Self::new(redis_client.cloned(), lock_key.to_string())))
         } else {
             Ok(None)
         }
@@ -128,7 +151,7 @@ impl LockGuard {
 
     /// Release the lock explicitly
     pub async fn release(self) -> Result<()> {
-        release_lock(&self.client, &self.lock_key).await
+        release_lock(self.client.as_ref(), &self.lock_key).await
     }
 }
 
@@ -137,20 +160,20 @@ mod tests {
     use super::*;
 
     // Note: These tests require a running Redis instance
-    // They are marked as ignore by default
+    // They are not ignored by default
     #[tokio::test]
-    #[ignore]
+    // #[ignore]
     async fn test_acquire_and_release_lock() {
         let client = Client::open("redis://127.0.0.1:6379").unwrap();
         let lock_key = "test:lock:1";
 
         // Acquire lock
-        let acquired = acquire_lock(&client, lock_key, 10, 1, Duration::from_millis(100))
+        let acquired = acquire_lock(Some(&client), lock_key, 10, 1, Duration::from_millis(100))
             .await
             .unwrap();
         assert!(acquired);
 
         // Release lock
-        release_lock(&client, lock_key).await.unwrap();
+        release_lock(Some(&client), lock_key).await.unwrap();
     }
 }

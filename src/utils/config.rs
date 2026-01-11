@@ -6,12 +6,15 @@ use serde::Deserialize;
 #[derive(Debug, Deserialize, Clone)]
 pub struct AppConfig {
     /// Database connection URL
+    #[serde(default = "default_database_url")]
     pub database_url: String,
 
     /// Redis connection URL for distributed locking
+    #[serde(default)]
     pub redis_url: String,
 
     /// JWT secret key for token signing
+    #[serde(default = "default_jwt_secret")]
     pub jwt_secret: String,
 
     /// JWT token expiration time in seconds (default: 3600)
@@ -47,6 +50,16 @@ pub struct RateLimitConfig {
     /// Burst size
     #[serde(default = "default_burst_size")]
     pub burst_size: u32,
+}
+
+// Default database connection URL
+fn default_database_url() -> String {
+    "postgres://postgres:password@localhost:5432/postgres".to_string()
+}
+
+// Default JWT secret key
+fn default_jwt_secret() -> String {
+    "your-super-secret-key-change-in-production".to_string()
 }
 
 // Default value functions
@@ -101,7 +114,7 @@ pub fn load_config(config_path: &str, env: &str) -> Result<AppConfig> {
         // Load environment-specific configuration
         .add_source(File::with_name(&format!("config.{}", env)).required(false))
         // Load environment variables with WEBSHELF_ prefix
-        .add_source(Environment::with_prefix("WEBSHELF").separator("__"))
+        .add_source(Environment::with_prefix("WEBSHELF").prefix_separator("_").separator("__"))
         .build()
         .context("Failed to build configuration")?;
 

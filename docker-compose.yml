@@ -1,0 +1,77 @@
+version: '3.8'
+services:
+  webshelf:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    pull_policy: build
+    container_name: webshelf
+    ports:
+      - "3000:3000"
+    environment:
+      - RUST_LOG=info
+      - WEBSHELF_DATABASE_URL=postgres://postgres:password@postgres:5432/webshelf
+      - WEBSHELF_REDIS_URL=redis://redis:6379
+      - WEBSHELF_JWT_SECRET=your-super-secret-key-change-in-production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  postgres:
+    image: postgres:16
+    pull_policy: missing
+    container_name: webshelf-postgres
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=password
+      - POSTGRES_DB=webshelf
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    pull_policy: missing
+    container_name: webshelf-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+
+networks:
+  webshelf-net:
+    driver: bridge

@@ -48,7 +48,7 @@ impl IntoResponse for ApiError {
             ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
             ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
             ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
-            ApiError::Validation(_) => (StatusCode::UNPROCESSABLE_ENTITY, "validation_error"),
+            ApiError::Validation(_) => (StatusCode::BAD_REQUEST, "validation_error"),
             ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
             ApiError::ServiceUnavailable(_) => {
                 (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable")
@@ -145,7 +145,7 @@ mod tests {
         let error = ApiError::Validation("Email is invalid".to_string());
         let response = error.into_response();
         
-        assert_eq!(response.status(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
         
         let json = extract_error_json(response).await;
         assert_eq!(json["error"], "validation_error");

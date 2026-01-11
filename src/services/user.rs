@@ -15,7 +15,6 @@ use uuid::Uuid;
 pub struct UserService {
     db: DatabaseConnection,
 }
-
 /// Pagination parameters
 #[derive(Debug, Default)]
 pub struct PaginationParams {
@@ -41,6 +40,8 @@ impl UserService {
 
     /// Create a new user
     pub async fn create_user(&self, input: CreateUserInput) -> Result<UserResponse> {
+        tracing::debug!("Creating user with email: {}", input.email);
+        
         // Check if email already exists
         let existing = UserEntity::find()
             .filter(Column::Email.eq(&input.email))
@@ -49,11 +50,14 @@ impl UserService {
             .context("Failed to check existing user")?;
 
         if existing.is_some() {
+            tracing::warn!("Email already registered: {}", input.email);
             return Err(anyhow!("Email already registered"));
         }
 
+        tracing::debug!("Hashing password");
         // Hash password
         let password_hash = hash_password(&input.password).context("Failed to hash password")?;
+        tracing::debug!("Password hashed successfully");
 
         let now = Utc::now();
         let user = ActiveModel {
@@ -65,11 +69,13 @@ impl UserService {
             created_at: Set(now),
             updated_at: Set(now),
         };
-
+        
+        tracing::debug!("Inserting user into database");
         let result = user
             .insert(&self.db)
             .await
             .context("Failed to create user")?;
+        tracing::debug!("User inserted successfully");
 
         tracing::info!("User created: {}", result.email);
         Ok(UserResponse::from(result))

@@ -14,7 +14,7 @@ WebShelf is a production-ready Rust web framework built on Axum, providing a com
 
 - 🔐 **JWT Authentication** - Secure token-based authentication with Argon2 password hashing
 - 🗄️ **Database Integration** - PostgreSQL support via SeaORM with async operations
-- 🔒 **Distributed Locking** - Redis-based distributed locks for scalable services
+- 🔒 **Distributed Locking (Optional)** - Redis-based distributed locks for scalable services
 - 🛡️ **Middleware Stack** - Panic capture, CORS, tracing, and authentication layers
 - ✅ **Input Validation** - Request validation with email and password rules
 - 📝 **Structured Logging** - Tracing-based logging with configurable levels
@@ -22,12 +22,13 @@ WebShelf is a production-ready Rust web framework built on Axum, providing a com
 - 🧪 **Testing Support** - Unit tests and integration test framework
 - 🚦 **RESTful API** - Complete CRUD operations for user management
 - 📦 **Production Ready** - Error handling, compression, and graceful shutdown
+- 🔄 **Utility Functions** - Configuration loading, error handling, logging, and so on
 
 ## 📋 Requirements
 
 - Rust 1.92 or higher
-- PostgreSQL 12+
-- Redis 6+ (for distributed locking)
+- PostgreSQL 16+
+- Redis 7+ (for distributed locking)
 
 ## 🚀 Quick Start
 
@@ -40,16 +41,37 @@ cd webshelf
 
 ### 2. Configure Database
 
+Create a Docker network:
+```bash
+docker network create webshelf-net
+```
+
 Create a PostgreSQL database:
 
 ```bash
-creatdb webshelf
+# creatdb webshelf
+docker run --name webshelf-postgres \
+  --network webshelf-net \
+  -e POSTGRES_USER=postgres \
+  -e POSTGRES_PASSWORD=password \
+  -e POSTGRES_DB=webshelf \
+  -p 5432:5432 \
+  -d postgres:16
+```
+
+Start Redis:
+
+```bash
+docker run --name webshelf-redis \
+  --network webshelf-net \
+  -p 6379:6379 \
+  -d redis:7-alpine
 ```
 
 Copy and edit configuration:
 
 ```bash
-cp config.toml.example config.toml
+mv config.toml.example config.toml
 # Edit config.toml with your database credentials
 ```
 
@@ -118,9 +140,17 @@ POST /api/public/auth/register
 Content-Type: application/json
 
 {
-  "email": "user@example.com",
+  "email": "newuser@example.com",
   "password": "Password123",
   "name": "User Name"
+}
+```
+
+Response:
+```json
+{
+  "message": "User registered successfully",
+  "user_id": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
 
@@ -130,7 +160,7 @@ POST /api/public/auth/login
 Content-Type: application/json
 
 {
-  "email": "user@example.com",
+  "email": "newuser@example.com",
   "password": "Password123"
 }
 ```
@@ -138,12 +168,11 @@ Content-Type: application/json
 Response:
 ```json
 {
-  "access_token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
-  "user": {
-    "id": "uuid",
-    "email": "user@example.com",
-    "name": "User Name"
-  }
+  "token": "eyJ0eXAiOiJKV1QiLCJhbGc...",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "user_id": "550e8400-e29b-41d4-a716-446655440000",
+  "role": "user"
 }
 ```
 
@@ -158,6 +187,18 @@ Content-Type: application/json
   "email": "newuser@example.com",
   "password": "SecurePass123",
   "name": "New User"
+}
+```
+
+Response:
+```json
+{
+  "id": "550e8400-e29b-41d4-a716-446655440000",
+  "email": "newuser@example.com",
+  "name": "New User",
+  "role": "user",
+  "created_at": "2026-01-11T06:00:00Z",
+  "updated_at": "2026-01-11T06:00:00Z"
 }
 ```
 
@@ -205,7 +246,13 @@ Response:
 
 ```
 webshelf/
+│── k8s/                     # Kubernetes manifests
+│── migrations/              # Database migrations
 ├── src/
+│   ├── handlers/            # Request handlers
+│   │   ├── api.rs           # API request handlers
+│   │   ├── auth.rs          # Auth request handlers
+│   │   └── mod.rs
 │   ├── middleware/          # Middleware components
 │   │   ├── auth.rs          # JWT authentication
 │   │   ├── panic.rs         # Panic capture
@@ -213,7 +260,7 @@ webshelf/
 │   ├── models/              # Data models
 │   │   ├── user.rs          # User entity
 │   │   └── mod.rs
-│   ├── routes/              # API route handlers
+│   ├── routes/              # API routes
 │   │   ├── api.rs           # User CRUD endpoints
 │   │   ├── auth.rs          # Authentication endpoints
 │   │   └── mod.rs
@@ -229,12 +276,14 @@ webshelf/
 │   │   ├── password.rs      # Password hashing
 │   │   ├── validator.rs     # Input validation
 │   │   └── mod.rs
+│   ├── bootstrap.rs         # Initialization logic
 │   ├── lib.rs               # Library exports
-│   └── main.rs              # Application entry
+│   ├── main.rs              # Application entry
+│   └── migrations.rs        # Database migrations
 ├── tests/
 │   └── integration_tests.rs # Integration tests
 ├── Cargo.toml               # Dependencies
-├── config.toml              # Configuration
+├── config.toml.example      # Configuration
 └── README.md                # This file
 ```
 
@@ -344,17 +393,3 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👥 Authors
 
 - **aiqubits** - *The first complete version* - [aiqubits@hotmail.com](mailto:aiqubits@hotmail.com)
-
-## 📝 Changelog
-
-### Current Version
-
-- ✅ Registration and login functionality
-- ✅ JWT authentication
-- ✅ Input validation for email and password formats
-- ✅ User CRUD operations
-- ✅ PostgreSQL integration
-- ✅ Redis distributed locking
-- ✅ Comprehensive middleware stack, including panic recovery, authentication, tracing, and CORS support for robust web services
-- ✅ Utility functions for configuration loading, error handling, logging, and password hashing
-- ✅ Integration tests
