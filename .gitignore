@@ -26,3 +26,5 @@ target
 
 # Ignore configuration files
 config.toml
+
+.idea

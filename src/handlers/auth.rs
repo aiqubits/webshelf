@@ -5,6 +5,7 @@ use validator::Validate;
 use crate::services::auth::{AuthService, LoginRequest, LoginResponse};
 use crate::utils::error::ApiError;
 use crate::AppState;
+use crate::utils::common::{AppResult, R};
 
 /// Login request with validation
 #[derive(Debug, Deserialize, Validate)]
@@ -20,7 +21,7 @@ pub struct LoginRequestBody {
 pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequestBody>,
-) -> Result<Json<LoginResponse>, ApiError> {
+) -> R<LoginResponse> {
     // Validate request
     payload.validate()?;
 
@@ -37,7 +38,7 @@ pub async fn login(
         })
         .await?;
 
-    Ok(Json(result))
+    AppResult::ok(result).into()
 }
 
 /// Register request with validation
@@ -64,7 +65,7 @@ pub struct RegisterResponse {
 pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequestBody>,
-) -> Result<Json<RegisterResponse>, ApiError> {
+) -> R<RegisterResponse> {
     tracing::debug!("Register endpoint called with email: {}", payload.email);
     
     // Validate request
@@ -98,8 +99,11 @@ pub async fn register(
         })?;
 
     tracing::debug!("User registered successfully with id: {}", user.id);
-    Ok(Json(RegisterResponse {
-        message: "User registered successfully".to_string(),
-        user_id: user.id.to_string(),
-    }))
+
+    AppResult::ok(
+        RegisterResponse {
+            message: "User registered successfully".to_string(),
+            user_id: user.id.to_string(),
+        }
+    ).into()
 }
