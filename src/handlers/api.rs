@@ -10,6 +10,7 @@ use crate::models::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
 use crate::utils::error::ApiError;
 use crate::AppState;
+use crate::utils::common::{*};
 
 /// Health check response
 #[derive(Serialize)]
@@ -19,12 +20,9 @@ pub struct HealthResponse {
 }
 
 /// Health check endpoint
-pub async fn health_check() -> Json<HealthResponse> {
+pub async fn health_check() -> R<()> {
     tracing::info!("Health check endpoint called");
-    Json(HealthResponse {
-        status: "ok".to_string(),
-        version: env!("CARGO_PKG_VERSION").to_string(),
-    })
+    AppResult::ok(()).into()
 }
 
 /// Query parameters for listing users
@@ -70,7 +68,7 @@ impl From<PaginatedResponse<UserResponse>> for PaginatedUsersResponse {
 pub async fn list_users(
     State(state): State<AppState>,
     Query(query): Query<ListUsersQuery>,
-) -> Result<Json<PaginatedUsersResponse>, ApiError> {
+) -> R<PaginatedUsersResponse> {
     let service = UserService::new(state.db.clone());
     let result = service
         .list_users(PaginationParams {
@@ -79,7 +77,7 @@ pub async fn list_users(
         })
         .await?;
 
-    Ok(Json(PaginatedUsersResponse::from(result)))
+    AppResult::ok(PaginatedUsersResponse::from(result)).into()
 }
 
 /// Create user request with validation
@@ -99,7 +97,7 @@ pub struct CreateUserRequest {
 pub async fn create_user(
     State(state): State<AppState>,
     Json(payload): Json<CreateUserRequest>,
-) -> Result<Json<UserResponse>, ApiError> {
+) -> R<UserResponse> {
     // Validate request payload
     payload.validate()?;
 
@@ -123,21 +121,21 @@ pub async fn create_user(
             }
         })?;
 
-    Ok(Json(result))
+    AppResult::ok(result).into()
 }
 
 /// Get a user by ID
 pub async fn get_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<UserResponse>, ApiError> {
+) -> R<UserResponse> {
     let service = UserService::new(state.db.clone());
     let result = service
         .get_user(id)
         .await?
         .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
-    Ok(Json(result))
+    AppResult::ok(result).into()
 }
 
 /// Update user request with validation
@@ -157,7 +155,7 @@ pub async fn update_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
     Json(payload): Json<UpdateUserRequest>,
-) -> Result<Json<UserResponse>, ApiError> {
+) -> R<UserResponse> {
     // Validate request payload
     payload.validate()?;
 
@@ -173,18 +171,16 @@ pub async fn update_user(
         )
         .await?;
 
-    Ok(Json(result))
+    AppResult::ok(result).into()
 }
 
 /// Delete a user
 pub async fn delete_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-) -> Result<Json<serde_json::Value>, ApiError> {
+) -> R<()>{
     let service = UserService::new(state.db.clone());
     service.delete_user(id).await?;
 
-    Ok(Json(serde_json::json!({
-        "message": "User deleted successfully"
-    })))
+    AppResult::ok(()).into()
 }

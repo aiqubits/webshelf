@@ -3,6 +3,7 @@ pub mod error;
 pub mod logger;
 pub mod password;
 pub mod validator;
+pub mod common;
 
 pub use config::{load_config, AppConfig};
 pub use error::ApiError;
