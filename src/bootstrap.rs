@@ -3,7 +3,7 @@ use axum::{middleware as axum_middleware, Router};
 use clap::Parser;
 use http::Method;
 use redis::Client as RedisClient;
-use sea_orm::Database;
+use sea_orm::{Database, ConnectOptions};
 use std::sync::Arc;
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -71,9 +71,21 @@ pub fn load_app_config(cli_args: &CliArgs) -> Result<AppConfig> {
 /// Initialize database connection
 pub async fn init_database(config: &AppConfig) -> Result<sea_orm::DatabaseConnection> {
     tracing::info!("Connecting to database...");
-    let db = Database::connect(&config.database_url)
+    
+    let mut connect_options = ConnectOptions::new(&config.database_url);
+    connect_options
+        .max_connections(10)                                 // 设置最大连接数
+        .min_connections(1)                                  // 设置最小连接数
+        .connect_timeout(std::time::Duration::from_secs(8))  // 设置连接超时时间
+        .acquire_timeout(std::time::Duration::from_secs(30)) // 设置获取连接超时时间
+        .idle_timeout(std::time::Duration::from_secs(600))   // 设置空闲连接超时时间
+        .max_lifetime(std::time::Duration::from_secs(1800))  // 设置连接最大生命周期
+        .test_before_acquire(true);
+    
+    let db = Database::connect(connect_options)
         .await
         .context("Failed to connect to database")?;
+    
     tracing::info!("Database connection established");
     Ok(db)
 }
