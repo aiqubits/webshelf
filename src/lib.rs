@@ -1,7 +1,7 @@
 pub mod bootstrap;
-pub mod middleware;
+pub mod middlewares;
 pub mod migrations;
-pub mod models;
+pub mod repositories;
 pub mod handlers;
 pub mod routes;
 pub mod services;

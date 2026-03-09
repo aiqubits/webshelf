@@ -1,4 +1,4 @@
-use crate::models::user::{
+use crate::repositories::user::{
     ActiveModel, Column, CreateUserInput, Entity as UserEntity, Model as UserModel,
     UpdateUserInput, UserResponse,
 };
@@ -247,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_paginated_response_with_items() {
-        use crate::models::user::UserResponse;
+        use crate::repositories::user::UserResponse;
         use chrono::Utc;
         use uuid::Uuid;
 

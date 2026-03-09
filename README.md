@@ -253,11 +253,11 @@ webshelf/
 │   │   ├── api.rs           # API request handlers
 │   │   ├── auth.rs          # Auth request handlers
 │   │   └── mod.rs
-│   ├── middleware/          # Middleware components
+│   ├── middlewares/         # Middleware components
 │   │   ├── auth.rs          # JWT authentication
 │   │   ├── panic.rs         # Panic capture
 │   │   └── mod.rs
-│   ├── models/              # Data models
+│   ├── repositories/        # Data Access Layer (DAL)
 │   │   ├── user.rs          # User entity
 │   │   └── mod.rs
 │   ├── routes/              # API routes

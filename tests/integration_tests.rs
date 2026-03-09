@@ -44,7 +44,7 @@ async fn create_test_app() -> Router {
         config: Arc::new(config),
     };
     
-    use webshelf::middleware::auth::JwtSecret;
+    use webshelf::middlewares::auth::JwtSecret;
     use tower_http::cors::CorsLayer;
     use tower_http::trace::TraceLayer;
     use http::Method;
@@ -60,7 +60,7 @@ async fn create_test_app() -> Router {
         .nest("/api", api_routes())
         .nest("/api/public/auth", auth_routes())
         .layer(axum::Extension(JwtSecret(state.config.jwt_secret.clone())))
-        .layer(axum::middleware::from_fn(webshelf::middleware::panic::panic_middleware))
+        .layer(axum::middleware::from_fn(webshelf::middlewares::panic::panic_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state)

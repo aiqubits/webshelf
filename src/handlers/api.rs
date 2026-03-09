@@ -6,7 +6,7 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
-use crate::models::user::{CreateUserInput, UpdateUserInput, UserResponse};
+use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
 use crate::utils::error::ApiError;
 use crate::AppState;

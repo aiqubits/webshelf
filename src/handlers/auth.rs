@@ -74,7 +74,7 @@ pub async fn register(
             ApiError::Validation(e.to_string())
         })?;
 
-    use crate::models::user::CreateUserInput;
+    use crate::repositories::user::CreateUserInput;
     use crate::services::user::UserService;
 
     let service = UserService::new(state.db.clone());

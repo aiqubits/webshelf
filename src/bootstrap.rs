@@ -12,7 +12,7 @@ use tower_http::{
 };
 
 use crate::{
-    middleware::{panic, auth::JwtSecret},
+    middlewares::{panic, auth::JwtSecret},
     migrations,
     routes::{api_routes, auth_routes},
     utils::{init_logger, load_config},

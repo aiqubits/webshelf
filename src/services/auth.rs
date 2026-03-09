@@ -1,5 +1,5 @@
-use crate::middleware::auth::generate_token;
-use crate::models::user::{Entity as UserEntity, Model as UserModel};
+use crate::middlewares::auth::generate_token;
+use crate::repositories::user::{Entity as UserEntity, Model as UserModel};
 use crate::utils::password::{hash_password, verify_password};
 use anyhow::{anyhow, Context, Result};
 use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
@@ -49,7 +49,7 @@ impl AuthService {
     pub async fn login(&self, request: LoginRequest) -> Result<LoginResponse> {
         // Find user by email
         let user = UserEntity::find()
-            .filter(crate::models::user::Column::Email.eq(&request.email))
+            .filter(crate::repositories::user::Column::Email.eq(&request.email))
             .one(&self.db)
             .await
             .context("Failed to query user")?
@@ -85,7 +85,7 @@ impl AuthService {
 
     /// Validate a token and return user info
     pub async fn validate_token(&self, token: &str) -> Result<UserModel> {
-        use crate::middleware::auth::Claims;
+        use crate::middlewares::auth::Claims;
         use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 
         let mut validation = Validation::new(Algorithm::HS256);
