@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use redis::aio::ConnectionManager;
 use redis::Client;
+use redis::aio::ConnectionManager;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -28,7 +28,7 @@ const DEFAULT_LOCK_VALUE: &str = "1";
 ///
 /// # Returns
 /// * `Result<bool>` - True if lock was acquired, false if not acquired after retries
-/// 
+///
 /// # Errors
 /// Returns `LockError::RedisNotAvailable` if Redis is not configured
 pub async fn acquire_lock(
@@ -39,8 +39,8 @@ pub async fn acquire_lock(
     retry_delay: Duration,
 ) -> Result<bool> {
     let client = redis_client.ok_or(LockError::RedisNotAvailable)?;
-    
-    let conn = client        
+
+    let conn = client
         .get_connection_manager()
         .await
         .context("Failed to get async Redis connection")?;
@@ -68,7 +68,11 @@ async fn try_acquire_with_retry(
             .context("Failed to execute SET NX EX command")?;
 
         if result.is_some() {
-            tracing::debug!("Lock acquired for key: {} on attempt {}", lock_key, attempt + 1);
+            tracing::debug!(
+                "Lock acquired for key: {} on attempt {}",
+                lock_key,
+                attempt + 1
+            );
             return Ok(true);
         }
 
@@ -98,8 +102,8 @@ async fn try_acquire_with_retry(
 /// * `lock_key` - Unique key for the lock to release
 pub async fn release_lock(redis_client: Option<&Client>, lock_key: &str) -> Result<()> {
     let client = redis_client.ok_or(LockError::RedisNotAvailable)?;
-    
-    let mut conn = client        
+
+    let mut conn = client
         .get_connection_manager()
         .await
         .context("Failed to get async Redis connection")?;
@@ -135,12 +139,21 @@ impl LockGuard {
         retry_delay: Duration,
     ) -> Result<Option<Self>> {
         if redis_client.is_none() {
-            tracing::warn!("Redis not available, skipping distributed lock for key: {}", lock_key);
+            tracing::warn!(
+                "Redis not available, skipping distributed lock for key: {}",
+                lock_key
+            );
             return Ok(None);
         }
 
-        let acquired =
-            acquire_lock(redis_client, lock_key, expiry_seconds, max_retries, retry_delay).await?;
+        let acquired = acquire_lock(
+            redis_client,
+            lock_key,
+            expiry_seconds,
+            max_retries,
+            retry_delay,
+        )
+        .await?;
 
         if acquired {
             Ok(Some(Self::new(redis_client.cloned(), lock_key.to_string())))
@@ -160,9 +173,8 @@ mod tests {
     use super::*;
 
     // Note: These tests require a running Redis instance
-    // They are not ignored by default
     #[tokio::test]
-    // #[ignore]
+    #[ignore]
     async fn test_acquire_and_release_lock() {
         let client = Client::open("redis://127.0.0.1:6379").unwrap();
         let lock_key = "test:lock:1";

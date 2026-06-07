@@ -1,9 +1,9 @@
 use axum::{
+    Json,
     extract::Request,
     http::StatusCode,
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
 use serde::Serialize;
 use std::panic::catch_unwind;
@@ -15,17 +15,16 @@ use std::panic::catch_unwind;
 pub async fn panic_middleware(request: Request, next: Next) -> Response {
     // We need to use catch_unwind in a sync context
     // For async code, we'll wrap the response handling
-    let response = next.run(request).await;
 
     // The actual panic catching happens at the tokio runtime level
     // This middleware ensures graceful error responses
-    response
+    next.run(request).await
 }
 
 /// Synchronous panic handler for use in route handlers
-/// 
+///
 /// Wraps a closure and catches any panics, returning an error response instead
-pub fn catch_panic<F, T>(f: F) -> Result<T, Response>
+pub fn catch_panic<F, T>(f: F) -> Result<T, Box<Response>>
 where
     F: FnOnce() -> T + std::panic::UnwindSafe,
 {
@@ -42,7 +41,9 @@ where
 
             tracing::error!("Panic caught: {}", panic_message);
 
-            Err(internal_error_response("An unexpected error occurred"))
+            Err(Box::new(internal_error_response(
+                "An unexpected error occurred",
+            )))
         }
     }
 }
@@ -80,7 +81,7 @@ fn internal_error_response(message: &str) -> Response {
 }
 
 /// Tower layer for panic catching
-/// 
+///
 /// This can be used to set up panic hooks at the application level
 pub fn setup_panic_hook() {
     std::panic::set_hook(Box::new(|panic_info| {
@@ -116,10 +117,8 @@ mod tests {
 
     #[test]
     fn test_catch_panic_success() {
-        let result = catch_panic(|| {
-            42
-        });
-        
+        let result = catch_panic(|| 42);
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 42);
     }
@@ -129,7 +128,7 @@ mod tests {
         let result = catch_panic(|| {
             panic!("Test panic message");
         });
-        
+
         assert!(result.is_err());
     }
 
@@ -138,7 +137,7 @@ mod tests {
         let result = catch_panic(|| -> i32 {
             panic!("Static str panic");
         });
-        
+
         assert!(result.is_err());
     }
 
@@ -149,17 +148,15 @@ mod tests {
             let b = 20;
             a + b
         });
-        
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 30);
     }
 
     #[tokio::test]
     async fn test_panic_safe_success() {
-        let result = panic_safe(|| async {
-            "success"
-        }).await;
-        
+        let result = panic_safe(|| async { "success" }).await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), "success");
     }
@@ -169,8 +166,9 @@ mod tests {
         let result = panic_safe(|| async {
             let value = 100;
             value * 2
-        }).await;
-        
+        })
+        .await;
+
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), 200);
     }
@@ -184,15 +182,15 @@ mod tests {
     #[tokio::test]
     async fn test_internal_error_response_body() {
         use http_body_util::BodyExt;
-        
+
         let response = internal_error_response("Test error message");
-        
+
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-        
+
         let body = response.into_body();
         let bytes = body.collect().await.unwrap().to_bytes();
         let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
-        
+
         assert_eq!(json["error"], "internal_error");
         assert_eq!(json["message"], "Test error message");
     }

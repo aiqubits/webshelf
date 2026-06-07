@@ -114,7 +114,11 @@ pub fn load_config(config_path: &str, env: &str) -> Result<AppConfig> {
         // Load environment-specific configuration
         .add_source(File::with_name(&format!("config.{}", env)).required(false))
         // Load environment variables with WEBSHELF_ prefix
-        .add_source(Environment::with_prefix("WEBSHELF").prefix_separator("_").separator("__"))
+        .add_source(
+            Environment::with_prefix("WEBSHELF")
+                .prefix_separator("_")
+                .separator("__"),
+        )
         .build()
         .context("Failed to build configuration")?;
 

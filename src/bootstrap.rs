@@ -1,28 +1,35 @@
 use anyhow::{Context, Result};
-use axum::{middleware as axum_middleware, Router};
+use axum::{Router, middleware as axum_middleware};
 use clap::Parser;
 use http::Method;
 use redis::Client as RedisClient;
-use sea_orm::{Database, ConnectOptions};
+use sea_orm::{ConnectOptions, Database};
 use std::sync::Arc;
 use tower_http::{
+    compression::CompressionLayer,
     cors::{Any, CorsLayer},
     trace::TraceLayer,
-    compression::CompressionLayer,
 };
 
 use crate::{
-    middlewares::{panic, auth::JwtSecret},
+    AppConfig, AppState,
+    middlewares::{
+        auth::{JwtSecret, auth_middleware},
+        panic,
+    },
     migrations,
     routes::{api_routes, auth_routes},
     utils::{init_logger, load_config},
-    AppConfig, AppState,
 };
 
 /// Command-line arguments
 #[derive(Parser, Debug, Clone)]
 #[command(name = "webshelf")]
-#[command(author, version, about = "The best way to develop your web service with one click.")]
+#[command(
+    author,
+    version,
+    about = "The best way to develop your web service with one click."
+)]
 pub struct CliArgs {
     /// Server bind address (overrides config file)
     #[arg(short = 'H', long)]
@@ -71,21 +78,21 @@ pub fn load_app_config(cli_args: &CliArgs) -> Result<AppConfig> {
 /// Initialize database connection
 pub async fn init_database(config: &AppConfig) -> Result<sea_orm::DatabaseConnection> {
     tracing::info!("Connecting to database...");
-    
+
     let mut connect_options = ConnectOptions::new(&config.database_url);
     connect_options
-        .max_connections(10)                                 // 设置最大连接数
-        .min_connections(1)                                  // 设置最小连接数
-        .connect_timeout(std::time::Duration::from_secs(8))  // 设置连接超时时间
+        .max_connections(10) // 设置最大连接数
+        .min_connections(1) // 设置最小连接数
+        .connect_timeout(std::time::Duration::from_secs(8)) // 设置连接超时时间
         .acquire_timeout(std::time::Duration::from_secs(30)) // 设置获取连接超时时间
-        .idle_timeout(std::time::Duration::from_secs(600))   // 设置空闲连接超时时间
-        .max_lifetime(std::time::Duration::from_secs(1800))  // 设置连接最大生命周期
+        .idle_timeout(std::time::Duration::from_secs(600)) // 设置空闲连接超时时间
+        .max_lifetime(std::time::Duration::from_secs(1800)) // 设置连接最大生命周期
         .test_before_acquire(true);
-    
+
     let db = Database::connect(connect_options)
         .await
         .context("Failed to connect to database")?;
-    
+
     tracing::info!("Database connection established");
     Ok(db)
 }
@@ -111,7 +118,10 @@ pub async fn init_redis(config: &AppConfig) -> Result<Option<RedisClient>> {
     let redis_client = match RedisClient::open(config.redis_url.as_str()) {
         Ok(client) => client,
         Err(e) => {
-            tracing::warn!("Failed to create Redis client: {}. System will run without distributed locking support.", e);
+            tracing::warn!(
+                "Failed to create Redis client: {}. System will run without distributed locking support.",
+                e
+            );
             return Ok(None);
         }
     };
@@ -120,12 +130,12 @@ pub async fn init_redis(config: &AppConfig) -> Result<Option<RedisClient>> {
         .get_multiplexed_async_connection()
         .await
         .context("Failed to establish Redis connection")?;
-    
+
     let pong: String = redis::cmd("PING")
         .query_async(&mut redis_conn)
         .await
         .context("Redis PING failed")?;
-    
+
     tracing::info!("Redis client initialized and connection verified: {}", pong);
     Ok(Some(redis_client))
 }
@@ -163,9 +173,12 @@ pub fn build_app_router(state: AppState, jwt_secret: String) -> Router {
     let cors = configure_cors();
     let compression = CompressionLayer::new();
 
+    // Middleware layers are applied in reverse order (last added = first to execute).
+    // Extension(JwtSecret) must be outermost so it injects the secret before auth_middleware reads it.
     Router::new()
         .nest("/api", api_routes())
         .nest("/api/public/auth", auth_routes())
+        .layer(axum_middleware::from_fn(auth_middleware))
         .layer(axum_middleware::from_fn(panic::panic_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
@@ -180,8 +193,10 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
 
     let app_config = load_app_config(&cli_args)?;
 
-    let host = cli_args.host.unwrap_or_else(|| app_config.server.host.clone());
-    let port = cli_args.port.unwrap_or_else(|| app_config.server.port);
+    let host = cli_args
+        .host
+        .unwrap_or_else(|| app_config.server.host.clone());
+    let port = cli_args.port.unwrap_or(app_config.server.port);
 
     let db = init_database(&app_config).await?;
     run_database_migrations(&db).await?;
@@ -213,7 +228,7 @@ pub async fn start_server(bootstrap_result: BootstrapResult) -> Result<()> {
         .await
         .context("Server failed")?;
 
-    tracing::info!("Server shutdown completed");    
+    tracing::info!("Server shutdown completed");
     Ok(())
 }
 

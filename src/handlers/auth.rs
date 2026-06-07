@@ -1,10 +1,11 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use serde::{Deserialize, Serialize};
 use validator::Validate;
 
+use crate::AppState;
 use crate::services::auth::{AuthService, LoginRequest, LoginResponse};
 use crate::utils::error::ApiError;
-use crate::AppState;
+use crate::utils::validator::require_password;
 
 /// Login request with validation
 #[derive(Debug, Deserialize, Validate)]
@@ -49,7 +50,11 @@ pub struct RegisterRequestBody {
     #[validate(length(min = 8, message = "password must be at least 8 characters"))]
     password: String,
 
-    #[validate(length(min = 2, max = 50, message = "name must be between 2 and 50 characters"))]
+    #[validate(length(
+        min = 2,
+        max = 50,
+        message = "name must be between 2 and 50 characters"
+    ))]
     name: String,
 }
 
@@ -65,14 +70,15 @@ pub async fn register(
     State(state): State<AppState>,
     Json(payload): Json<RegisterRequestBody>,
 ) -> Result<Json<RegisterResponse>, ApiError> {
-    tracing::debug!("Register endpoint called with email: {}", payload.email);
-    
     // Validate request
-    payload.validate()
-        .map_err(|e| {
-            tracing::error!("Validation error: {:?}", e);
-            ApiError::Validation(e.to_string())
-        })?;
+    payload.validate().map_err(|e| {
+        tracing::error!("Validation error: {:?}", e);
+        ApiError::Validation(e.to_string())
+    })?;
+
+    if let Err(msg) = require_password(&payload.password) {
+        return Err(ApiError::Validation(msg));
+    }
 
     use crate::repositories::user::CreateUserInput;
     use crate::services::user::UserService;
@@ -88,7 +94,7 @@ pub async fn register(
         .map_err(|e| {
             let error_msg = e.to_string();
             tracing::error!("Failed to create user: {}", error_msg);
-            
+
             // Check if it's an email conflict error
             if error_msg.contains("Email already registered") {
                 ApiError::Conflict(error_msg.replace("Internal server error: ", ""))

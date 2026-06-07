@@ -1,15 +1,16 @@
 use axum::{
-    extract::{Path, Query, State},
     Json,
+    extract::{Path, Query, State},
 };
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
+use crate::AppState;
 use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
 use crate::utils::error::ApiError;
-use crate::AppState;
+use crate::utils::validator::require_password;
 
 /// Health check response
 #[derive(Serialize)]
@@ -20,7 +21,7 @@ pub struct HealthResponse {
 
 /// Health check endpoint
 pub async fn health_check() -> Json<HealthResponse> {
-    tracing::info!("Health check endpoint called");
+    tracing::trace!("Health check endpoint called");
     Json(HealthResponse {
         status: "ok".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
@@ -91,7 +92,11 @@ pub struct CreateUserRequest {
     #[validate(length(min = 8, message = "password must be at least 8 characters"))]
     password: String,
 
-    #[validate(length(min = 2, max = 50, message = "name must be between 2 and 50 characters"))]
+    #[validate(length(
+        min = 2,
+        max = 50,
+        message = "name must be between 2 and 50 characters"
+    ))]
     name: String,
 }
 
@@ -102,6 +107,10 @@ pub async fn create_user(
 ) -> Result<Json<UserResponse>, ApiError> {
     // Validate request payload
     payload.validate()?;
+
+    if let Err(msg) = require_password(&payload.password) {
+        return Err(ApiError::Validation(msg));
+    }
 
     let service = UserService::new(state.db.clone());
     let result = service
@@ -114,7 +123,7 @@ pub async fn create_user(
         .map_err(|e| {
             let error_msg = e.to_string();
             tracing::error!("Failed to create user: {}", error_msg);
-            
+
             // Check if it's an email conflict error
             if error_msg.contains("Email already registered") {
                 ApiError::Conflict(error_msg.replace("Internal server error: ", ""))
@@ -146,7 +155,11 @@ pub struct UpdateUserRequest {
     #[validate(email(message = "must be a valid email address"))]
     email: Option<String>,
 
-    #[validate(length(min = 2, max = 50, message = "name must be between 2 and 50 characters"))]
+    #[validate(length(
+        min = 2,
+        max = 50,
+        message = "name must be between 2 and 50 characters"
+    ))]
     name: Option<String>,
 
     role: Option<String>,

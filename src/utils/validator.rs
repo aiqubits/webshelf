@@ -10,12 +10,21 @@ pub fn validate_password(password: &str) -> bool {
     if password.len() < 8 {
         return false;
     }
-    
+
     let has_lowercase = password.chars().any(|c| c.is_ascii_lowercase());
     let has_uppercase = password.chars().any(|c| c.is_ascii_uppercase());
     let has_digit = password.chars().any(|c| c.is_ascii_digit());
-    
+
     has_lowercase && has_uppercase && has_digit
+}
+
+/// Validate password strength, returning a descriptive error on failure.
+pub fn require_password(password: &str) -> Result<(), String> {
+    if validate_password(password) {
+        Ok(())
+    } else {
+        Err("Password must be at least 8 characters and contain at least one uppercase letter, one lowercase letter, and one digit".to_string())
+    }
 }
 
 /// Email regex pattern for basic email validation
@@ -46,6 +55,20 @@ mod tests {
         assert!(!validate_password("PASSWORD1")); // No lowercase
         assert!(!validate_password("Password")); // No digit
         assert!(!validate_password("Pass1")); // Too short
+    }
+
+    #[test]
+    fn test_require_password_ok() {
+        assert!(require_password("Password1").is_ok());
+    }
+
+    #[test]
+    fn test_require_password_err() {
+        let err = require_password("weak").unwrap_err();
+        assert!(err.contains("at least 8 characters"));
+        assert!(err.contains("uppercase"));
+        assert!(err.contains("lowercase"));
+        assert!(err.contains("digit"));
     }
 
     #[test]

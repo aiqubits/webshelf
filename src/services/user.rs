@@ -3,7 +3,7 @@ use crate::repositories::user::{
     UpdateUserInput, UserResponse,
 };
 use crate::utils::password::hash_password;
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
@@ -41,7 +41,7 @@ impl UserService {
     /// Create a new user
     pub async fn create_user(&self, input: CreateUserInput) -> Result<UserResponse> {
         tracing::debug!("Creating user with email: {}", input.email);
-        
+
         // Check if email already exists
         let existing = UserEntity::find()
             .filter(Column::Email.eq(&input.email))
@@ -69,7 +69,7 @@ impl UserService {
             created_at: Set(now),
             updated_at: Set(now),
         };
-        
+
         tracing::debug!("Inserting user into database");
         let result = user
             .insert(&self.db)
@@ -163,8 +163,14 @@ impl UserService {
             .order_by_desc(Column::CreatedAt)
             .paginate(&self.db, per_page);
 
-        let total = paginator.num_items().await.context("Failed to count users")?;
-        let total_pages = paginator.num_pages().await.context("Failed to count pages")?;
+        let total = paginator
+            .num_items()
+            .await
+            .context("Failed to count users")?;
+        let total_pages = paginator
+            .num_pages()
+            .await
+            .context("Failed to count pages")?;
 
         let users = paginator
             .fetch_page(page - 1)
@@ -211,7 +217,7 @@ mod tests {
             per_page: 10,
             total_pages: 10,
         };
-        
+
         assert_eq!(response.total, 100);
         assert_eq!(response.page, 1);
         assert_eq!(response.per_page, 10);
@@ -281,7 +287,7 @@ mod tests {
             per_page: 10,
             total_pages: 1,
         };
-        
+
         assert_eq!(response.items.len(), 2);
         assert_eq!(response.items[0], "a");
         assert_eq!(response.items[1], "b");
@@ -296,7 +302,7 @@ mod tests {
             per_page: 10,
             total_pages: 1,
         };
-        
+
         assert_eq!(response.items.len(), 3);
         assert_eq!(response.total, 3);
     }
@@ -320,7 +326,7 @@ mod tests {
             per_page: 10,
             total_pages: 0,
         };
-        
+
         assert!(response.items.is_empty());
         assert_eq!(response.total, 0);
         assert_eq!(response.total_pages, 0);
@@ -335,8 +341,11 @@ mod tests {
             per_page: 10,
             total_pages: 10,
         };
-        
+
         // Verify pagination math: 95 items / 10 per_page = 10 pages
-        assert_eq!(response.total_pages, (response.total + response.per_page - 1) / response.per_page);
+        assert_eq!(
+            response.total_pages,
+            response.total.div_ceil(response.per_page)
+        );
     }
 }

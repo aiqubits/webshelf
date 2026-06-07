@@ -1,11 +1,11 @@
 use axum::{
+    Json,
     extract::Request,
-    http::{header::AUTHORIZATION, StatusCode},
+    http::{StatusCode, header::AUTHORIZATION},
     middleware::Next,
     response::{IntoResponse, Response},
-    Json,
 };
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -47,7 +47,7 @@ impl From<Claims> for AuthUser {
 }
 
 /// Authentication middleware
-/// 
+///
 /// Validates JWT token from Authorization header and injects AuthUser into request extensions.
 /// Skips authentication for paths starting with /api/public or /api/health.
 pub async fn auth_middleware(mut request: Request, next: Next) -> Response {
@@ -78,17 +78,6 @@ pub async fn auth_middleware(mut request: Request, next: Next) -> Response {
     // Validate token with strict checks
     match validate_token(&token, &jwt_secret) {
         Ok(claims) => {
-            // Check if token is expired
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-
-            if claims.exp < now {
-                return unauthorized_response("Token has expired");
-            }
-
-            // Inject authenticated user into request extensions
             let auth_user = AuthUser::from(claims);
             request.extensions_mut().insert(auth_user);
 
@@ -110,11 +99,7 @@ fn extract_bearer_token(request: &Request) -> Option<String> {
     let auth_header = request.headers().get(AUTHORIZATION)?;
     let auth_str = auth_header.to_str().ok()?;
 
-    if auth_str.starts_with("Bearer ") {
-        Some(auth_str[7..].to_string())
-    } else {
-        None
-    }
+    auth_str.strip_prefix("Bearer ").map(|s| s.to_string())
 }
 
 /// Validate JWT token with strict signature, algorithm, and expiration validation
@@ -157,7 +142,7 @@ pub fn generate_token(
     expiry_seconds: u64,
 ) -> anyhow::Result<String> {
     use anyhow::Context;
-    use jsonwebtoken::{encode, EncodingKey, Header};
+    use jsonwebtoken::{EncodingKey, Header, encode};
 
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -197,7 +182,7 @@ mod tests {
     fn test_validate_token_success() {
         let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600).unwrap();
         let claims = validate_token(&token, TEST_SECRET).unwrap();
-        
+
         assert_eq!(claims.sub, TEST_USER_ID);
         assert_eq!(claims.role, TEST_ROLE);
         assert!(claims.exp > claims.iat);
@@ -207,7 +192,7 @@ mod tests {
     fn test_validate_token_wrong_secret() {
         let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600).unwrap();
         let result = validate_token(&token, "wrong-secret");
-        
+
         assert!(result.is_err());
     }
 
@@ -223,16 +208,16 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        
+
         let claims = Claims {
             sub: TEST_USER_ID.to_string(),
             exp: now + 3600,
             iat: now,
             role: TEST_ROLE.to_string(),
         };
-        
+
         let auth_user = AuthUser::from(claims);
-        
+
         assert_eq!(auth_user.user_id, TEST_USER_ID);
         assert_eq!(auth_user.role, TEST_ROLE);
         assert_eq!(auth_user.exp, now + 3600);
@@ -241,19 +226,16 @@ mod tests {
 
     #[test]
     fn test_extract_bearer_token_success() {
-        use axum::http::{HeaderValue, Request};
         use axum::body::Body;
-        
-        let mut request = Request::builder()
-            .uri("/test")
-            .body(Body::empty())
-            .unwrap();
-        
+        use axum::http::{HeaderValue, Request};
+
+        let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
         request.headers_mut().insert(
             AUTHORIZATION,
             HeaderValue::from_static("Bearer test-token-123"),
         );
-        
+
         let token = extract_bearer_token(&request).unwrap();
         assert_eq!(token, "test-token-123");
     }
@@ -261,31 +243,25 @@ mod tests {
     #[test]
     fn test_extract_bearer_token_missing_header() {
         use axum::body::Body;
-        
-        let request = Request::builder()
-            .uri("/test")
-            .body(Body::empty())
-            .unwrap();
-        
+
+        let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
         let token = extract_bearer_token(&request);
         assert!(token.is_none());
     }
 
     #[test]
     fn test_extract_bearer_token_wrong_scheme() {
-        use axum::http::{HeaderValue, Request};
         use axum::body::Body;
-        
-        let mut request = Request::builder()
-            .uri("/test")
-            .body(Body::empty())
-            .unwrap();
-        
+        use axum::http::{HeaderValue, Request};
+
+        let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
         request.headers_mut().insert(
             AUTHORIZATION,
             HeaderValue::from_static("Basic dGVzdDp0ZXN0"),
         );
-        
+
         let token = extract_bearer_token(&request);
         assert!(token.is_none());
     }
@@ -294,14 +270,14 @@ mod tests {
     fn test_token_expiry() {
         // Generate token that expires in 1 second
         let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 1).unwrap();
-        
+
         // Should be valid immediately
         let claims = validate_token(&token, TEST_SECRET).unwrap();
         assert!(claims.exp > claims.iat);
-        
+
         // Wait for expiry (in real scenario, validation middleware would check this)
         std::thread::sleep(std::time::Duration::from_secs(2));
-        
+
         // Token is still decodable, but exp check would fail in middleware
         let claims = validate_token(&token, TEST_SECRET).unwrap();
         let now = SystemTime::now()

@@ -83,7 +83,7 @@ mod tests {
     fn test_user_response_from_model() {
         let now = Utc::now();
         let user_id = Uuid::new_v4();
-        
+
         let model = Model {
             id: user_id,
             email: "test@example.com".to_string(),
@@ -93,9 +93,9 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        
+
         let response = UserResponse::from(model.clone());
-        
+
         assert_eq!(response.id, user_id);
         assert_eq!(response.email, "test@example.com");
         assert_eq!(response.name, "Test User");
@@ -111,7 +111,7 @@ mod tests {
             "password": "password123",
             "name": "John Doe"
         }"#;
-        
+
         let input: CreateUserInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.email, "user@example.com");
         assert_eq!(input.password, "password123");
@@ -125,7 +125,7 @@ mod tests {
             "name": "Updated Name",
             "role": "admin"
         }"#;
-        
+
         let input: UpdateUserInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.email, Some("newemail@example.com".to_string()));
         assert_eq!(input.name, Some("Updated Name".to_string()));
@@ -137,7 +137,7 @@ mod tests {
         let json = r#"{
             "name": "Only Name"
         }"#;
-        
+
         let input: UpdateUserInput = serde_json::from_str(json).unwrap();
         assert_eq!(input.email, None);
         assert_eq!(input.name, Some("Only Name".to_string()));
@@ -155,7 +155,7 @@ mod tests {
             created_at: now,
             updated_at: now,
         };
-        
+
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("test@example.com"));
         assert!(json.contains("Test User"));

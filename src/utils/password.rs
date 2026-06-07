@@ -1,7 +1,7 @@
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use argon2::{
-    password_hash::{rand_core::OsRng, SaltString},
     Argon2, PasswordHash, PasswordHasher, PasswordVerifier,
+    password_hash::{SaltString, rand_core::OsRng},
 };
 
 /// Hash a password using Argon2
@@ -31,8 +31,8 @@ pub fn hash_password(password: &str) -> Result<String> {
 /// # Returns
 /// * `Result<bool>` - True if the password matches the hash
 pub fn verify_password(password: &str, password_hash: &str) -> Result<bool> {
-    let parsed_hash =
-        PasswordHash::new(password_hash).map_err(|e| anyhow!("Failed to parse password hash: {}", e))?;
+    let parsed_hash = PasswordHash::new(password_hash)
+        .map_err(|e| anyhow!("Failed to parse password hash: {}", e))?;
 
     Ok(Argon2::default()
         .verify_password(password.as_bytes(), &parsed_hash)
