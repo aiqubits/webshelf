@@ -66,10 +66,7 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
 
             // Use a savepoint for each statement so that failures don't abort
             // the entire migration transaction (PostgreSQL requires this)
-            let savepoint = db
-                .begin()
-                .await
-                .context("Failed to begin savepoint")?;
+            let savepoint = db.begin().await.context("Failed to begin savepoint")?;
 
             match savepoint
                 .execute(Statement::from_string(

@@ -79,9 +79,15 @@ jobs:
       uses: cargo-bins/cargo-binstall@main
     - name: Install dioxus-cli
       run: cargo binstall dioxus-cli --version 0.7.9 -y
-    - name: Add cargo bin to PATH
-      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+    - name: Verify dx installation
+      run: |
+        echo "Cargo bin directory: $HOME/.cargo/bin"
+        ls -la $HOME/.cargo/bin/ || echo "Directory not found"
+        which dx || echo "dx not in PATH"
+        find $HOME/.cargo -name "dx" -type f 2>/dev/null || echo "dx binary not found"
     - name: Run Web Tests
       run: cargo test --package webshelf-web --verbose
     - name: Build Web
-      run: cd web && dx build --release
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cd web && dx build --release
