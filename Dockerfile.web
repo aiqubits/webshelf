@@ -1,0 +1,86 @@
+# ============================================
+# WebShelf Web - Frontend Dockerfile
+# ============================================
+# Build context: project root directory
+# Usage: docker build -f Dockerfile.web -t webshelf-web .
+#
+# Nginx configuration is COPY'd at build time as default.
+# To override at runtime, mount nginx/default.conf as a volume
+# (see docker-compose.yml).
+
+FROM rust:1.92.0-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install wasm32 target needed for Dioxus WASM compilation
+RUN rustup target add wasm32-unknown-unknown
+
+# Install dioxus-cli via cargo-binstall for pre-built binaries (much faster than cargo install).
+# Uses a pinned version and optional SHA256 checksum verification to prevent supply-chain attacks.
+# For CI/production builds, set BINSTALL_SHA256 via --build-arg:
+#   docker build --build-arg BINSTALL_SHA256=<sha256> -f Dockerfile.web .
+# To obtain the SHA256:
+#   curl -sL "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.22/cargo-binstall-$(uname -m)-unknown-linux-musl.tgz" | sha256sum
+ENV BINSTALL_VERSION=v1.10.22
+ARG BINSTALL_SHA256=
+RUN curl -L --proto '=https' --tlsv1.2 -sSf \
+    "https://github.com/cargo-bins/cargo-binstall/releases/download/${BINSTALL_VERSION}/cargo-binstall-$(uname -m)-unknown-linux-musl.tgz" \
+    -o /tmp/binstall.tgz && \
+    if [ -n "${BINSTALL_SHA256}" ]; then \
+        echo "${BINSTALL_SHA256}  /tmp/binstall.tgz" | sha256sum -c -; \
+    else \
+        echo "WARNING: BINSTALL_SHA256 not set — skipping checksum verification."; \
+        echo "         For production builds, set --build-arg BINSTALL_SHA256=<hash>"; \
+    fi && \
+    tar xzf /tmp/binstall.tgz -C /usr/local/cargo/bin && \
+    rm /tmp/binstall.tgz
+RUN cargo binstall dioxus-cli --version 0.7.9 -y
+
+# Copy workspace root and web crate manifests for dependency caching
+COPY Cargo.toml Cargo.lock ./
+COPY web/Cargo.toml ./web/Cargo.toml
+COPY web/Dioxus.toml ./web/Dioxus.toml
+
+# Create dummy source files to cache dependencies
+RUN mkdir -p web/src && echo 'fn main() {}' > web/src/main.rs
+RUN mkdir -p server/src && echo 'fn main() {}' > server/src/main.rs
+COPY server/Cargo.toml ./server/Cargo.toml
+
+# Fetch all dependencies first (fails on network errors, not on compilation)
+RUN cargo fetch
+
+# Pre-build to compile dependencies and cache them.
+# || true is needed because dummy source files (placeholder main/lib) cause
+# compilation errors — this is expected and harmless. Dependency download errors
+# are already caught by the cargo fetch step above.
+RUN cargo build --package webshelf-web --target wasm32-unknown-unknown --release || true
+
+# Copy real source code
+COPY web/src ./web/src
+
+# Build the Dioxus frontend
+WORKDIR /app/web
+RUN dx build --release
+
+# ============================================
+# Runtime stage - nginx static file server
+# ============================================
+FROM nginx:alpine AS runtime
+
+# Install curl for health checks
+RUN apk add --no-cache curl
+
+# Copy built frontend assets
+COPY --from=builder /app/web/dist /usr/share/nginx/html
+
+# Copy default nginx configuration (can be overridden via volume mount)
+COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 80
+
+CMD ["nginx", "-g", "daemon off;"]

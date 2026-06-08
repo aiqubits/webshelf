@@ -4,10 +4,25 @@ metadata:
   name: webshelf-ingress
   namespace: webshelf
   annotations:
-    nginx.ingress.kubernetes.io/rewrite-target: /
+    # Set to "true" after deploying TLS certificates (see tls section below)
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
 spec:
   ingressClassName: nginx
+  # ==========================================
+  # TLS configuration (uncomment to enable HTTPS)
+  #
+  # Prerequisites:
+  # 1. Create a TLS secret:
+  #      kubectl create secret tls webshelf-tls \
+  #        --cert=/path/to/cert.pem \
+  #        --key=/path/to/key.pem \
+  #        -n webshelf
+  # 2. Or use cert-manager to auto-provision Let's Encrypt certificates.
+  # ==========================================
+  # tls:
+  # - hosts:
+  #   - webshelf.local
+  #   secretName: webshelf-tls
   rules:
   - host: webshelf.local
     http:
@@ -16,6 +31,6 @@ spec:
         pathType: Prefix
         backend:
           service:
-            name: webshelf-service
+            name: webshelf-web-service
             port:
               number: 80

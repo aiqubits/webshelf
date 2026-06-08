@@ -1,14 +1,28 @@
-# WebShelf Configuration File
+# ==============================================
+# WebShelf Shared Configuration File
+# ==============================================
 # Copy this file to config.toml and update values for your environment
+# This configuration is shared between server and web (frontend)
 
 # Database connection URL (PostgreSQL)
-database_url = "postgres://postgres:password@localhost:5432/webshelf"
+# Replace CHANGE_ME_POSTGRES_PASSWORD with a strong password
+# Format: postgres://user:password@host:port/database
+database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@localhost:5432/webshelf"
 
 # Redis connection URL (for distributed locking only)
-redis_url = "redis://localhost:6379"
+# NOTE: When using Docker Compose, this is overridden by WEBSHELF_REDIS_URL
+#       which includes the Redis password. Make sure to include the password
+#       if your Redis instance has requirepass enabled.
+# ⚠️  Use percent-encoding for special characters in the password
+#     (e.g., p%40ss for p@ss, p%2Fss for p/ss).
+#     To avoid this, generate passwords with: openssl rand -hex 32
+# Format: redis://[:password]@host:port
+redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@localhost:6379"
 
-# JWT secret key for token signing (CHANGE THIS IN PRODUCTION!)
-jwt_secret = "your-super-secret-key-change-in-production"
+# ⚠️  SECURITY WARNING: MUST change this in production!
+# Generate a strong secret with: openssl rand -base64 64
+# The server will refuse to start with this placeholder in non-development mode.
+jwt_secret = "REPLACE_ME_WITH_A_STRONG_SECRET"
 
 # JWT token expiration time in seconds (default: 1 hour)
 jwt_expiry_seconds = 3600
@@ -17,10 +31,12 @@ jwt_expiry_seconds = 3600
 [server]
 host = "0.0.0.0"
 port = 3000
+# Allowed CORS origins (REQUIRED for staging/production environments)
+# In non-development mode, the server will log an error and block all
+# cross-origin requests if this list is empty.
+# allowed_origins = ["https://example.com", "https://app.example.com"]
 
-# Rate limiting configuration
-[rate_limit]
-# Requests per second
-per_second = 2
-# Burst size (maximum requests allowed in burst)
-burst_size = 5
+# Database connection pool configuration
+[database]
+max_connections = 10
+min_connections = 1

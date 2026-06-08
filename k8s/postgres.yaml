@@ -1,12 +1,23 @@
 apiVersion: apps/v1
-kind: Deployment
+kind: StatefulSet
 metadata:
   name: postgres
   namespace: webshelf
   labels:
     app: postgres
 spec:
+  serviceName: postgres-service
   replicas: 1
+  podManagementPolicy: Parallel
+  # OnDelete is intentional for a single-replica database StatefulSet:
+  # it prevents automatic Pod restarts on spec changes (e.g., resource
+  # limits adjustments), giving operators full control over when the
+  # database restarts. For multi-replica setups, use RollingUpdate.
+  updateStrategy:
+    type: OnDelete
+  # NOTE: Uses a manually-managed PVC instead of volumeClaimTemplates.
+  # For a single-replica database, manual PVC management is simpler and
+  # sufficient. If you scale beyond 1 replica, switch to volumeClaimTemplates.
   selector:
     matchLabels:
       app: postgres
@@ -15,6 +26,10 @@ spec:
       labels:
         app: postgres
     spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
       containers:
       - name: postgres
         image: postgres:16
@@ -24,7 +39,10 @@ spec:
         - name: POSTGRES_USER
           value: postgres
         - name: POSTGRES_PASSWORD
-          value: webshelf-password
+          valueFrom:
+            secretKeyRef:
+              name: webshelf-secrets
+              key: postgres_password
         - name: POSTGRES_DB
           value: webshelf
         volumeMounts:

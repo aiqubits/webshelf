@@ -8,13 +8,16 @@ data:
     # WebShelf Configuration File
     
     # Database connection URL (PostgreSQL)
-    database_url = "postgres://postgres:webshelf-password@postgres-service:5432/webshelf"
+    # NOTE: database_url is stored in K8s Secret (webshelf-secrets), not ConfigMap
+    # It is injected via secretKeyRef in the Deployment env
     
     # Redis connection URL (for distributed locking only)
-    redis_url = "redis://redis-service:6379"
+    # NOTE: redis_url is stored in K8s Secret (webshelf-secrets), not ConfigMap
+    # It is injected via secretKeyRef in the Deployment env
     
-    # JWT secret key for token signing (CHANGE THIS IN PRODUCTION!)
-    jwt_secret = "your-super-secret-key-change-in-production"
+    # JWT secret key for token signing
+    # NOTE: jwt_secret is stored in K8s Secret (webshelf-secrets), not ConfigMap
+    # It is injected via secretKeyRef in the Deployment env
     
     # JWT token expiration time in seconds (default: 1 hour)
     jwt_expiry_seconds = 3600
@@ -23,10 +26,18 @@ data:
     [server]
     host = "0.0.0.0"
     port = 3000
+    # Allowed CORS origins
+    # NOTE: In K8s, the nginx sidecar handles reverse proxy, so same-origin
+    # requests may not need this. Set only if direct browser-to-API access is needed.
+    # allowed_origins = ["https://example.com"]
     
-    # Rate limiting configuration
-    [rate_limit]
-    # Requests per second
-    per_second = 2
-    # Burst size (maximum requests allowed in burst)
-    burst_size = 5
+    # Database connection pool configuration
+    [database]
+    max_connections = 10
+    min_connections = 1
+
+  # ------------------------------------------
+  # Individual keys for env var injection
+  # (used by Deployment envFrom / configMapKeyRef)
+  # NOTE: database_url and redis_url are in Secret, not here
+  # ------------------------------------------

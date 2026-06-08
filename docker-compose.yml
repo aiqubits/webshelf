@@ -1,18 +1,33 @@
-version: '3.8'
 services:
-  webshelf:
+  # ========================================
+  # Backend - WebShelf Server
+  # ========================================
+  webshelf-server:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.server
     pull_policy: build
-    container_name: webshelf
+    container_name: webshelf-server
+    # Only expose backend port on localhost — all external traffic
+    # MUST go through the nginx reverse proxy (webshelf-web) which provides
+    # rate limiting, security headers, and request body size limits.
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     environment:
       - RUST_LOG=info
-      - WEBSHELF_DATABASE_URL=postgres://postgres:password@postgres:5432/webshelf
-      - WEBSHELF_REDIS_URL=redis://redis:6379
-      - WEBSHELF_JWT_SECRET=your-super-secret-key-change-in-production
+      - WEBSHELF_ENV=${WEBSHELF_ENV:-development}
+      # ⚠️  For production, always set WEBSHELF_POSTGRES_PASSWORD in .env; the fallback below
+      #     is for local development only and MUST be changed before deploying.
+      - WEBSHELF_DATABASE_URL=postgres://postgres:${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}@postgres:5432/webshelf
+      # Redis URL with password authentication.
+      # ⚠️  IMPORTANT: If WEBSHELF_REDIS_PASSWORD contains URL-special characters
+      #     (@  :  /  #  ?), they MUST be percent-encoded in the URL
+      #     (e.g., p%40ss for p@ss, p%2Fss for p/ss).
+      #     To avoid this issue, generate passwords with:
+      #       openssl rand -hex 32
+      #     (hex-only passwords are URL-safe.)
+      - WEBSHELF_REDIS_URL=redis://:${WEBSHELF_REDIS_PASSWORD:-CHANGE_ME_REDIS_PASSWORD}@redis:6379
+      - WEBSHELF_JWT_SECRET=${WEBSHELF_JWT_SECRET:?Set WEBSHELF_JWT_SECRET in .env file}
     depends_on:
       postgres:
         condition: service_healthy
@@ -28,13 +43,43 @@ services:
       retries: 3
       start_period: 40s
 
+  # ========================================
+  # Frontend - WebShelf Web
+  # ========================================
+  webshelf-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    pull_policy: build
+    container_name: webshelf-web
+    ports:
+      - "80:80"
+    volumes:
+      # Mount nginx config for runtime override without rebuilding
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      webshelf-server:
+        condition: service_healthy
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:80/nginx-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ========================================
+  # PostgreSQL Database
+  # ========================================
   postgres:
     image: postgres:16
     pull_policy: missing
     container_name: webshelf-postgres
     environment:
       - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=password
+      - POSTGRES_PASSWORD=${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}
       - POSTGRES_DB=webshelf
     ports:
       - "5432:5432"
@@ -49,10 +94,16 @@ services:
       timeout: 5s
       retries: 5
 
+  # ========================================
+  # Redis Cache
+  # ========================================
   redis:
     image: redis:7-alpine
     pull_policy: missing
     container_name: webshelf-redis
+    command: redis-server --requirepass ${WEBSHELF_REDIS_PASSWORD:-CHANGE_ME_REDIS_PASSWORD}
+    environment:
+      - REDIS_PASSWORD=${WEBSHELF_REDIS_PASSWORD:-CHANGE_ME_REDIS_PASSWORD}
     ports:
       - "6379:6379"
     volumes:
@@ -61,7 +112,9 @@ services:
       - webshelf-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # Use REDISCLI_AUTH env var instead of -a flag to avoid password
+      # appearing in process list (ps aux).
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping"]
       interval: 10s
       timeout: 5s
       retries: 5

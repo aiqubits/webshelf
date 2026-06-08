@@ -1,0 +1,356 @@
+use anyhow::{Context, Result};
+use axum::{Router, middleware as axum_middleware};
+use clap::Parser;
+use http::Method;
+use redis::Client as RedisClient;
+use sea_orm::{ConnectOptions, Database};
+use std::sync::Arc;
+use tower_http::{
+    compression::CompressionLayer,
+    cors::{Any, CorsLayer},
+    limit::RequestBodyLimitLayer,
+    trace::TraceLayer,
+};
+
+use crate::{
+    AppConfig, AppState,
+    middlewares::{
+        auth::{JwtSecret, auth_middleware},
+        panic::{self, panic_middleware},
+    },
+    migrations,
+    routes::{api_routes, auth_routes},
+    utils::{init_logger, load_config},
+};
+
+/// Command-line arguments
+#[derive(Parser, Debug, Clone)]
+#[command(name = "webshelf")]
+#[command(
+    author,
+    version,
+    about = "The best way to develop your web service with one click."
+)]
+pub struct CliArgs {
+    /// Server bind address (overrides config file)
+    #[arg(short = 'H', long)]
+    pub host: Option<String>,
+
+    /// Server port (overrides config file)
+    #[arg(short = 'P', long)]
+    pub port: Option<u16>,
+
+    /// Environment (development, staging, production)
+    #[arg(short = 'E', long, default_value = "development")]
+    pub env: String,
+
+    /// Configuration file path
+    #[arg(short = 'C', long, default_value = "config.toml")]
+    pub config: String,
+
+    /// Log level (trace, debug, info, warn, error)
+    #[arg(short = 'L', long, default_value = "info")]
+    pub log_level: String,
+}
+
+/// Application bootstrap result containing all initialized components
+pub struct BootstrapResult {
+    pub app: Router,
+    pub bind_addr: String,
+}
+
+/// Initialize application logger
+pub fn init_logging(log_level: &str) {
+    init_logger(log_level);
+}
+
+/// Setup panic hook for graceful panic handling
+pub fn setup_panic_handler() {
+    panic::setup_panic_hook();
+}
+
+/// Load and merge configuration from file and CLI arguments
+pub fn load_app_config(cli_args: &CliArgs) -> Result<AppConfig> {
+    let app_config = load_config(&cli_args.config, &cli_args.env)
+        .context("Failed to load application configuration")?;
+    Ok(app_config)
+}
+
+/// Initialize database connection
+pub async fn init_database(config: &AppConfig) -> Result<sea_orm::DatabaseConnection> {
+    tracing::info!("Connecting to database...");
+
+    let mut connect_options = ConnectOptions::new(&config.database_url);
+    connect_options
+        .max_connections(config.database.max_connections)
+        .min_connections(config.database.min_connections)
+        .connect_timeout(std::time::Duration::from_secs(8))
+        .acquire_timeout(std::time::Duration::from_secs(30))
+        .idle_timeout(std::time::Duration::from_secs(600))
+        .max_lifetime(std::time::Duration::from_secs(1800))
+        .test_before_acquire(true);
+
+    let db = Database::connect(connect_options)
+        .await
+        .context("Failed to connect to database")?;
+
+    tracing::info!("Database connection established");
+    Ok(db)
+}
+
+/// Run database migrations
+pub async fn run_database_migrations(db: &sea_orm::DatabaseConnection) -> Result<()> {
+    tracing::info!("Running database migrations...");
+    migrations::run_migrations(db)
+        .await
+        .context("Failed to run migrations")?;
+    tracing::info!("Migrations completed");
+    Ok(())
+}
+
+/// Initialize and verify Redis client
+pub async fn init_redis(config: &AppConfig) -> Result<Option<RedisClient>> {
+    tracing::info!("Initializing Redis client...");
+    if config.redis_url.is_empty() {
+        tracing::warn!("Redis URL is empty. System will run without distributed locking support.");
+        return Ok(None);
+    }
+
+    let redis_client = RedisClient::open(config.redis_url.as_str())
+        .context("Failed to create Redis client from configured redis_url")?;
+
+    let mut redis_conn = redis_client
+        .get_multiplexed_async_connection()
+        .await
+        .context("Failed to establish Redis connection")?;
+
+    let pong: String = redis::cmd("PING")
+        .query_async(&mut redis_conn)
+        .await
+        .context("Redis PING failed")?;
+
+    tracing::info!("Redis client initialized and connection verified: {}", pong);
+    Ok(Some(redis_client))
+}
+
+/// Create shared application state
+pub fn create_app_state(
+    db: sea_orm::DatabaseConnection,
+    redis: Option<RedisClient>,
+    config: AppConfig,
+) -> AppState {
+    AppState {
+        db,
+        redis,
+        config: Arc::new(config),
+    }
+}
+
+/// Configure CORS layer
+///
+/// Uses allowed_origins from config if specified. In non-development environments
+/// with no allowed_origins, logs an error and returns a restrictive CORS layer that
+/// effectively blocks all cross-origin requests (only OPTIONS preflight is allowed).
+/// In development, falls back to `Any` with a warning log.
+pub fn configure_cors(allowed_origins: &[String], env: &str) -> CorsLayer {
+    let use_any = || {
+        tracing::warn!(
+            "CORS: using Any (allow all origins). \
+             This is acceptable for development but NOT recommended for production."
+        );
+        CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods([
+                Method::GET,
+                Method::POST,
+                Method::PUT,
+                Method::DELETE,
+                Method::PATCH,
+                Method::OPTIONS,
+            ])
+            .allow_headers(Any)
+    };
+
+    if allowed_origins.is_empty() {
+        if env != "development" {
+            tracing::warn!(
+                "CORS: no allowed_origins configured in {} environment. \
+                 If using a reverse proxy (nginx) for same-origin serving, this is expected. \
+                 Otherwise, set server.allowed_origins in config.toml or via WEBSHELF_SERVER__ALLOWED_ORIGINS.",
+                env
+            );
+            // Return a restrictive CORS layer that effectively denies all cross-origin requests.
+            // An empty allow_origin list means no origin matches; OPTIONS is allowed only
+            // so preflight requests return a response instead of hanging.
+            //
+            // NOTE: allow_headers(Any) here is safe because no origin is allowed —
+            // it only ensures the preflight response includes the correct
+            // Access-Control-Allow-Headers header for debugging convenience.
+            return CorsLayer::new()
+                .allow_methods([Method::OPTIONS])
+                .allow_headers(tower_http::cors::Any);
+        }
+        return use_any();
+    }
+
+    let mut origins: Vec<http::HeaderValue> = Vec::with_capacity(allowed_origins.len());
+    for origin in allowed_origins {
+        match origin.parse::<http::HeaderValue>() {
+            Ok(header_value) => origins.push(header_value),
+            Err(e) => {
+                tracing::error!(
+                    "CORS: failed to parse allowed_origin '{}': {}. \
+                     This origin will be ignored — check your config.toml or WEBSHELF_SERVER__ALLOWED_ORIGINS.",
+                    origin,
+                    e
+                );
+            }
+        }
+    }
+
+    if origins.is_empty() {
+        // In non-development environments, a misconfigured (all-invalid) origin list
+        // is treated the same as an empty list: return a restrictive CORS layer.
+        // This prevents accidentally opening up CORS to all origins due to a typo.
+        if env != "development" {
+            tracing::warn!(
+                "CORS: all configured allowed_origins failed to parse, returning restrictive CORS"
+            );
+            return CorsLayer::new()
+                .allow_methods([Method::OPTIONS])
+                .allow_headers(tower_http::cors::Any);
+        }
+        tracing::warn!(
+            "CORS: all configured allowed_origins failed to parse: {:?}, falling back to Any (development only)",
+            allowed_origins
+        );
+        return use_any();
+    }
+
+    tracing::info!("CORS: allowing origins: {:?}", origins);
+    CorsLayer::new()
+        .allow_origin(origins)
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::PATCH,
+            Method::OPTIONS,
+        ])
+        .allow_headers(Any)
+}
+
+/// Build application router with all middleware
+pub fn build_app_router(state: AppState, jwt_secret: String, env: &str) -> Router {
+    let allowed_origins = state.config.server.allowed_origins.clone();
+    let cors = configure_cors(&allowed_origins, env);
+    let compression = CompressionLayer::new();
+
+    // Middleware layers are applied in reverse order (last added = first to execute).
+    // Extension(JwtSecret) must be outermost so it injects the secret before auth_middleware reads it.
+    Router::new()
+        .nest("/api", api_routes())
+        .nest("/api/public/auth", auth_routes())
+        .layer(axum_middleware::from_fn(auth_middleware))
+        .layer(axum_middleware::from_fn(panic_middleware))
+        .layer(TraceLayer::new_for_http())
+        .layer(cors)
+        .layer(compression)
+        .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // 10MB max request body
+        .layer(axum::Extension(JwtSecret(jwt_secret)))
+        .with_state(state)
+}
+
+/// Bootstrap the entire application
+pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
+    tracing::info!("Starting webshelf in {} mode", cli_args.env);
+
+    let app_config = load_app_config(&cli_args)?;
+
+    // Reject default or weak JWT secret in non-development environments
+    if cli_args.env != "development" {
+        let is_default = app_config.jwt_secret == "REPLACE_ME_WITH_A_STRONG_SECRET";
+        if is_default {
+            anyhow::bail!(
+                "JWT secret must be changed from the default value in {} environment! \
+                 Set WEBSHELF_JWT_SECRET environment variable or update config.toml.",
+                cli_args.env
+            );
+        }
+        if app_config.jwt_secret.len() < 32 {
+            anyhow::bail!(
+                "JWT secret must be at least 32 characters long in {} environment (current: {}). \
+                 Generate a strong secret with: openssl rand -base64 64",
+                cli_args.env,
+                app_config.jwt_secret.len()
+            );
+        }
+    }
+
+    let host = cli_args
+        .host
+        .unwrap_or_else(|| app_config.server.host.clone());
+    let port = cli_args.port.unwrap_or(app_config.server.port);
+
+    let db = init_database(&app_config).await?;
+    run_database_migrations(&db).await?;
+
+    let redis_client = init_redis(&app_config).await?;
+
+    let jwt_secret = app_config.jwt_secret.clone();
+    let state = create_app_state(db, redis_client, app_config);
+    let app = build_app_router(state, jwt_secret, &cli_args.env);
+
+    let bind_addr = format!("{}:{}", host, port);
+
+    Ok(BootstrapResult { app, bind_addr })
+}
+
+/// Start HTTP server with graceful shutdown
+pub async fn start_server(bootstrap_result: BootstrapResult) -> Result<()> {
+    let BootstrapResult { app, bind_addr } = bootstrap_result;
+
+    tracing::info!("Starting server on {}", bind_addr);
+
+    let listener = tokio::net::TcpListener::bind(&bind_addr)
+        .await
+        .context("Failed to bind to address")?;
+
+    tracing::info!("Server is ready to accept connections");
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await
+        .context("Server failed")?;
+
+    tracing::info!("Server shutdown completed");
+    Ok(())
+}
+
+/// Wait for shutdown signal (SIGTERM or SIGINT)
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+        tracing::info!("Received Ctrl+C signal, initiating graceful shutdown");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install signal handler")
+            .recv()
+            .await;
+        tracing::info!("Received SIGTERM signal, initiating graceful shutdown");
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
+}

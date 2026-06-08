@@ -1,22 +1,40 @@
+# Build artifacts
 target/
+
+# VCS
 .git/
 .gitignore
 .github/
+
+# Documentation
 *.md
 !README.md
+
+# Environment / Configuration (local only)
 .env
 .env.*
 config.toml
+
+# Logs
 *.log
+
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
+
+# OS files
 .DS_Store
-tests/
-examples/
-benchmarks/
+
+# Test / CI
 coverage/
 *.profraw
 *.profdata
+
+# Dioxus build output
+web/dist/
+
+# Node
+node_modules/

@@ -1,4 +1,4 @@
-name: webshelf-coverage-test
+name: webshelf-ci
 
 on:
   push:
@@ -10,7 +10,10 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  build:
+  # ========================================
+  # Backend - Server CI
+  # ========================================
+  server:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -35,13 +38,46 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      # NOTE: CI Redis runs without password authentication, unlike
+      # docker-compose / K8s which use requirepass. CI tests that need
+      # Redis should use a non-auth connection URL (redis://localhost:6379).
 
     steps:
     - uses: actions/checkout@v4
-    - name: Build
-      run: cargo build --verbose
-    - name: Edit Configuration File
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: "server"
+    - name: Setup Configuration
       run: |
         mv config.toml.example config.toml
-    - name: Run tests
-      run: cargo test --verbose
+        # CI Redis runs without password — override to ensure no-auth connection
+        echo "WEBSHELF_REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+    - name: Format Check
+      run: cargo fmt --check
+    - name: Lint (Clippy)
+      run: cargo clippy --package webshelf-server -- -D warnings
+    - name: Build Server
+      run: cargo build --package webshelf-server --verbose
+    - name: Run Server Tests
+      run: cargo test --package webshelf-server --verbose
+
+  # ========================================
+  # Frontend - Web CI
+  # ========================================
+  web:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: "web"
+    - name: Install wasm32 target
+      run: rustup target add wasm32-unknown-unknown
+    - name: Install cargo-binstall
+      uses: cargo-bins/cargo-binstall@main
+    - name: Install dioxus-cli
+      run: cargo binstall dioxus-cli --version 0.7.9 -y
+    - name: Run Web Tests
+      run: cargo test --package webshelf-web --verbose
+    - name: Build Web
+      run: cd web && dx build --release

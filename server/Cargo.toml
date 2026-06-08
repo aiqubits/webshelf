@@ -1,0 +1,52 @@
+[package]
+name = "webshelf-server"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+categories = ["asynchronous", "network-programming", "web-programming"]
+keywords = ["web", "server", "backend", "fullstack", "scaffold"]
+description = "The best way to develop your web service with one click."
+license.workspace = true
+readme = "../README.md"
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]
+# Web framework
+axum = "0.8.8"
+tokio = { version = "1", features = ["full"] }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "compression-br", "compression-gzip", "limit"] }
+http = "1"
+http-body-util = "0.1"
+
+# Database
+sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+
+# Redis for distributed locking
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+
+# Configuration
+config = "0.14"
+clap = { version = "4", features = ["derive"] }
+
+# Authentication
+jsonwebtoken = "9"
+argon2 = "0.5"
+
+# Validation
+validator = { version = "0.19", features = ["derive"] }
+
+# Shared workspace dependencies
+serde.workspace = true
+serde_json.workspace = true
+anyhow.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true
+chrono.workspace = true
+uuid.workspace = true
+
+[dev-dependencies]
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"

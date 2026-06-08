@@ -1,0 +1,76 @@
+# ============================================
+# WebShelf Server - Backend Dockerfile
+# ============================================
+# Build context: project root directory
+# Usage: docker build -f Dockerfile.server -t webshelf-server .
+
+FROM rust:1.92.0-slim AS builder
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy workspace root and server crate manifests for dependency caching
+COPY Cargo.toml Cargo.lock ./
+COPY server/Cargo.toml ./server/Cargo.toml
+
+# Create dummy source files to cache dependencies
+RUN mkdir -p server/src && \
+    echo 'pub fn placeholder() {}' > server/src/lib.rs && \
+    echo 'fn main() {}' > server/src/main.rs
+RUN mkdir -p web/src && echo 'fn main() {}' > web/src/main.rs
+COPY web/Cargo.toml ./web/Cargo.toml
+
+# Fetch all dependencies first (fails on network errors, not on compilation)
+RUN cargo fetch
+
+# Pre-build to compile dependencies and cache them.
+# || true is needed because dummy source files (placeholder main/lib) cause
+# compilation errors — this is expected and harmless. Dependency download errors
+# are already caught by the cargo fetch step above.
+RUN cargo build --release --package webshelf-server || true
+
+# Copy real source code and rebuild
+COPY server/src ./server/src
+COPY server/migrations ./server/migrations
+
+# Touch files to ensure rebuild after caching layer
+RUN touch server/src/main.rs
+
+RUN cargo build --release --package webshelf-server
+
+# Runtime stage
+FROM debian:bookworm-slim AS runtime
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    ca-certificates \
+    libssl3 \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Create non-root user matching K8s securityContext (UID 1000)
+RUN groupadd -r webshelf && \
+    useradd -r -g webshelf -u 1000 webshelf
+
+COPY --from=builder /app/target/release/webshelf-server /app/webshelf-server
+
+# Ensure the binary is owned by the webshelf user
+RUN chown webshelf:webshelf /app/webshelf-server
+
+USER webshelf
+
+EXPOSE 3000
+
+ENV RUST_LOG=info
+# Database and Redis connection URLs are injected at runtime
+# (via docker-compose environment or K8s secrets)
+
+CMD ["/app/webshelf-server"]
