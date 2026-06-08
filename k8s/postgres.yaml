@@ -28,11 +28,12 @@ spec:
     spec:
       securityContext:
         runAsNonRoot: true
-        runAsUser: 999
-        fsGroup: 999
+        # postgres:16-alpine uses UID 70 (not 999 like Debian-based)
+        runAsUser: 70
+        fsGroup: 70
       containers:
       - name: postgres
-        image: postgres:16
+        image: postgres:16-alpine
         ports:
         - containerPort: 5432
         env:

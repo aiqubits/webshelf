@@ -27,7 +27,7 @@ sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls", 
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 
 # Configuration
-config = "0.14"
+config = "0.15"
 clap = { version = "4", features = ["derive"] }
 
 # Authentication

@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:16-alpine
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: password
@@ -52,6 +52,8 @@ jobs:
         mv config.toml.example config.toml
         # CI Redis runs without password — override to ensure no-auth connection
         echo "WEBSHELF_REDIS_URL=redis://localhost:6379" >> $GITHUB_ENV
+        # CI PostgreSQL uses password 'password' as configured in the service
+        echo "WEBSHELF_DATABASE_URL=postgres://postgres:password@localhost:5432/webshelf" >> $GITHUB_ENV
     - name: Format Check
       run: cargo fmt --check
     - name: Lint (Clippy)

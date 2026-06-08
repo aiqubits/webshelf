@@ -57,7 +57,7 @@ docker run --name webshelf-postgres \
   -e POSTGRES_PASSWORD=password \
   -e POSTGRES_DB=webshelf \
   -p 5432:5432 \
-  -d postgres:16
+  -d postgres:16-alpine
 ```
 
 启动 Redis：
@@ -708,4 +708,4 @@ cargo build --release --package webshelf-server
 
 ## 👥 作者
 
-- **aiqubits** - 初始完整版本 - [aiqubits@hotmail.com](mailto:aiqubits@hotmail.com)
+- **aiqubits** - [aiqubits@hotmail.com](mailto:aiqubits@hotmail.com)

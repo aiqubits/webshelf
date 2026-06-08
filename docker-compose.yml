@@ -74,15 +74,19 @@ services:
   # PostgreSQL Database
   # ========================================
   postgres:
-    image: postgres:16
+    image: postgres:16-alpine
     pull_policy: missing
     container_name: webshelf-postgres
     environment:
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}
       - POSTGRES_DB=webshelf
+    # Only expose PostgreSQL on localhost — all inter-container traffic
+    # goes through the internal Docker network (webshelf-net).
+    # Remove the bind address prefix if you need to connect from a remote host
+    # (not recommended for production).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres-data:/var/lib/postgresql/data
     networks:

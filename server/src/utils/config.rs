@@ -127,7 +127,10 @@ pub fn load_config(config_path: &str, env: &str) -> Result<AppConfig> {
         .add_source(
             Environment::with_prefix("WEBSHELF")
                 .prefix_separator("_")
-                .separator("__"),
+                .separator("__")
+                .try_parsing(true)
+                .list_separator(",")
+                .with_list_parse_key("server.allowed_origins"),
         )
         .build()
         .context("Failed to build configuration")?;
@@ -199,5 +202,70 @@ mod tests {
         let cloned = config.clone();
         assert_eq!(config.database_url, cloned.database_url);
         assert_eq!(config.jwt_expiry_seconds, cloned.jwt_expiry_seconds);
+    }
+
+    /// Verify that `WEBSHELF_SERVER__ALLOWED_ORIGINS` is correctly parsed
+    /// as a comma-separated list via `list_separator` + `with_list_parse_key`.
+    #[test]
+    fn test_allowed_origins_from_env_list() {
+        use config::{Config, Environment};
+        use std::collections::HashMap;
+
+        let mut source = HashMap::new();
+        source.insert(
+            "WEBSHELF_SERVER__ALLOWED_ORIGINS".to_string(),
+            "https://example.com,https://app.example.com".to_string(),
+        );
+
+        let settings = Config::builder()
+            .add_source(
+                Environment::with_prefix("WEBSHELF")
+                    .prefix_separator("_")
+                    .separator("__")
+                    .try_parsing(true)
+                    .list_separator(",")
+                    .with_list_parse_key("server.allowed_origins")
+                    .source(Some(source)),
+            )
+            .build()
+            .unwrap();
+
+        let config: AppConfig = settings.try_deserialize().unwrap();
+        assert_eq!(config.server.allowed_origins.len(), 2);
+        assert_eq!(config.server.allowed_origins[0], "https://example.com");
+        assert_eq!(config.server.allowed_origins[1], "https://app.example.com");
+    }
+
+    /// Verify that a single-value allowed_origins env var is still parsed as a list.
+    #[test]
+    fn test_allowed_origins_single_value_from_env() {
+        use config::{Config, Environment};
+        use std::collections::HashMap;
+
+        let mut source = HashMap::new();
+        source.insert(
+            "WEBSHELF_SERVER__ALLOWED_ORIGINS".to_string(),
+            "https://single.example.com".to_string(),
+        );
+
+        let settings = Config::builder()
+            .add_source(
+                Environment::with_prefix("WEBSHELF")
+                    .prefix_separator("_")
+                    .separator("__")
+                    .try_parsing(true)
+                    .list_separator(",")
+                    .with_list_parse_key("server.allowed_origins")
+                    .source(Some(source)),
+            )
+            .build()
+            .unwrap();
+
+        let config: AppConfig = settings.try_deserialize().unwrap();
+        assert_eq!(config.server.allowed_origins.len(), 1);
+        assert_eq!(
+            config.server.allowed_origins[0],
+            "https://single.example.com"
+        );
     }
 }
