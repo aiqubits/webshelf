@@ -78,13 +78,19 @@ jobs:
     - name: Install cargo-binstall
       uses: cargo-bins/cargo-binstall@main
     - name: Install dioxus-cli
-      run: cargo binstall dioxus-cli --version 0.7.9 -y
+      run: cargo binstall dioxus-cli --version 0.7.9 -y --force
     - name: Verify dx installation
       run: |
         echo "Cargo bin directory: $HOME/.cargo/bin"
-        ls -la $HOME/.cargo/bin/ || echo "Directory not found"
+        ls -la $HOME/.cargo/bin/ | grep dx || echo "dx not found in cargo/bin"
         which dx || echo "dx not in PATH"
-        find $HOME/.cargo -name "dx" -type f 2>/dev/null || echo "dx binary not found"
+        if [ -f "$HOME/.cargo/bin/dx" ]; then
+          echo "dx found at: $HOME/.cargo/bin/dx"
+          $HOME/.cargo/bin/dx --version
+        else
+          echo "ERROR: dx binary not found, installing via cargo install as fallback"
+          cargo install dioxus-cli --version 0.7.9
+        fi
     - name: Run Web Tests
       run: cargo test --package webshelf-web --verbose
     - name: Build Web
