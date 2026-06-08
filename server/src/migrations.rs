@@ -53,43 +53,57 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
         include_str!("../migrations/001_create_users_table.sql"),
     )];
 
-    // Execute all migration statements within a transaction for atomicity
-    let txn = db
-        .begin()
-        .await
-        .context("Failed to begin migration transaction")?;
-
     for (name, sql) in migrations {
         tracing::info!("Running migration: {}", name);
 
-        // Split by semicolon and execute each statement
+        // Split by semicolon and execute each statement in its own savepoint
+        // to prevent one failing statement from aborting the entire transaction
         for statement in sql.split(';') {
             let trimmed = statement.trim();
-            if !trimmed.is_empty()
-                && let Err(e) = txn
-                    .execute(Statement::from_string(
-                        DatabaseBackend::Postgres,
-                        trimmed.to_string(),
-                    ))
-                    .await
-            {
-                // Try structured error matching first via sea-orm's sql_err()
-                let is_expected_error = is_duplicate_table_or_index_error(&e);
+            if trimmed.is_empty() {
+                continue;
+            }
 
-                if is_expected_error {
-                    tracing::warn!("Migration statement skipped (already exists): {}", trimmed);
-                } else {
-                    return Err(e).context(format!("Failed to execute migration: {}", name));
+            // Use a savepoint for each statement so that failures don't abort
+            // the entire migration transaction (PostgreSQL requires this)
+            let savepoint = db
+                .begin()
+                .await
+                .context("Failed to begin savepoint")?;
+
+            match savepoint
+                .execute(Statement::from_string(
+                    DatabaseBackend::Postgres,
+                    trimmed.to_string(),
+                ))
+                .await
+            {
+                Ok(_) => {
+                    savepoint
+                        .commit()
+                        .await
+                        .context("Failed to commit savepoint")?;
+                }
+                Err(e) => {
+                    savepoint
+                        .rollback()
+                        .await
+                        .context("Failed to rollback savepoint")?;
+
+                    // Try structured error matching first via sea-orm's sql_err()
+                    let is_expected_error = is_duplicate_table_or_index_error(&e);
+
+                    if is_expected_error {
+                        tracing::warn!("Migration statement skipped (already exists): {}", trimmed);
+                    } else {
+                        return Err(e).context(format!("Failed to execute migration: {}", name));
+                    }
                 }
             }
         }
 
         tracing::info!("Migration completed: {}", name);
     }
-
-    txn.commit()
-        .await
-        .context("Failed to commit migration transaction")?;
 
     tracing::info!("All migrations completed successfully");
     Ok(())

@@ -79,6 +79,8 @@ jobs:
       uses: cargo-bins/cargo-binstall@main
     - name: Install dioxus-cli
       run: cargo binstall dioxus-cli --version 0.7.9 -y
+    - name: Add cargo bin to PATH
+      run: echo "$HOME/.cargo/bin" >> $GITHUB_PATH
     - name: Run Web Tests
       run: cargo test --package webshelf-web --verbose
     - name: Build Web
