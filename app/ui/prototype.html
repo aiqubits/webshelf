@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>WebShelf 全栈管理系统脚手架 - Dashboard Prototype</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: {
+                            50: '#f5f3ff',
+                            100: '#ede9fe',
+                            500: '#6366f1',
+                            600: '#4f46e5',
+                            700: '#4338ca',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+        
+        body {
+            font-family: 'Plus Jakarta Sans', 'Noto Sans SC', sans-serif;
+            background: linear-gradient(135deg, #f0f4ff 0%, #fbf8ff 40%, #fff4f4 100%);
+        }
+        
+        /* 毛玻璃质感 */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.7);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.5);
+        }
+        
+        .glass-sidebar {
+            background: rgba(255, 255, 255, 0.85);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border-right: 1px solid rgba(226, 232, 240, 0.8);
+        }
+
+        /* 舒缓柔和的渐变微特效 */
+        .btn-gradient {
+            background: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+            transition: all 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .btn-gradient:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px -5px rgba(99, 102, 241, 0.4);
+            filter: brightness(1.05);
+        }
+
+        .interactive-card {
+            transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+        }
+        .interactive-card:hover {
+            transform: translateY(-4px);
+            box-shadow: 0 20px 25px -5px rgba(99, 102, 241, 0.08), 0 10px 10px -5px rgba(99, 102, 241, 0.03);
+            border-color: rgba(99, 102, 241, 0.2);
+        }
+
+        /* 隐藏滚动条 */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+    </style>
+</head>
+<body class="min-h-screen flex text-slate-800 antialiased overflow-x-hidden">
+
+    <div id="toast-container" class="fixed top-6 right-6 z-50 flex flex-col gap-3 max-w-sm w-full pointer-events-none"></div>
+
+    <div id="sidebar-overlay" class="fixed inset-0 bg-slate-900/20 backdrop-blur-sm z-40 hidden md:hidden" onclick="toggleSidebar()"></div>
+
+    <aside id="main-sidebar" class="fixed inset-y-0 left-0 z-40 w-64 glass-sidebar flex flex-col transform -translate-x-full transition-transform duration-300 ease-in-out md:translate-x-0 md:static">
+        <div class="h-20 px-6 flex items-center justify-between border-b border-slate-100">
+            <div class="flex items-center gap-3">
+                <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-between shadow-md shadow-indigo-200 p-2">
+                    <i class="fa-solid fa-layer-group text-white text-sm"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-base bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">WebShelf Admin</h1>
+                    <p class="text-[10px] text-slate-400 font-medium tracking-wider uppercase">Rust Fullstack Framework</p>
+                </div>
+            </div>
+            <button class="md:hidden text-slate-400 hover:text-slate-600" onclick="toggleSidebar()">
+                <i class="fa-solid fa-xmark text-lg"></i>
+            </button>
+        </div>
+
+        <nav class="flex-1 px-4 py-6 space-y-1.5 overflow-y-auto no-scrollbar">
+            <p class="px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase mb-2">核心系统监控</p>
+            
+            <a href="#" onclick="switchView('dashboard')" id="nav-dashboard" class="flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 bg-indigo-50/60 text-indigo-600">
+                <i class="fa-solid fa-chart-pie text-base w-5 text-center"></i>
+                <span>控制中心 (/health)</span>
+            </a>
+
+            <div class="pt-4 mb-2 flex items-center justify-between px-3">
+                <p class="text-[11px] font-bold tracking-wider text-slate-400 uppercase">数据管理</p>
+                <span class="text-[9px] font-semibold bg-amber-50 text-amber-600 px-1.5 py-0.5 rounded border border-amber-200/60">admin_layer</span>
+            </div>
+
+            <a href="#" onclick="switchView('users')" id="nav-users" class="flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900">
+                <i class="fa-solid fa-users-gear text-base w-5 text-center"></i>
+                <span class="flex-1">用户管理 (/users)</span>
+            </a>
+
+            <p class="pt-6 px-3 text-[11px] font-bold tracking-wider text-slate-400 uppercase mb-2">网关鉴权演示</p>
+            
+            <a href="#" onclick="switchView('auth')" id="nav-auth" class="flex items-center gap-3 px-3 py-2.5 rounded-xl font-medium text-sm transition-all duration-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900">
+                <i class="fa-solid fa-shield-lock text-base w-5 text-center"></i>
+                <span>身份认证门禁</span>
+            </a>
+        </nav>
+
+        <div class="p-4 border-t border-slate-100 bg-slate-50/50">
+            <a href="https://github.com/aiqubits/webshelf" target="_blank" class="flex items-center gap-3 p-2.5 rounded-xl bg-white border border-slate-100 shadow-sm hover:border-indigo-200 transition-all duration-200 group">
+                <i class="fa-brands fa-github text-xl text-slate-700 group-hover:text-indigo-600 transition-colors"></i>
+                <div class="flex-1 overflow-hidden">
+                    <p class="text-xs font-semibold text-slate-700 truncate">aiqubits/webshelf</p>
+                    <p class="text-[10px] text-slate-400 truncate">在 GitHub 上查看源码</p>
+                </div>
+                <i class="fa-solid fa-arrow-up-right-from-square text-[10px] text-slate-300 group-hover:text-indigo-500"></i>
+            </a>
+            <div class="mt-3 text-center">
+                <p class="text-[10px] text-slate-400">© 2026 WebShelf Scaffold.</p>
+                <p class="text-[9px] text-slate-400/80 mt-0.5">Powered by Rust & Axum</p>
+            </div>
+        </div>
+    </aside>
+
+    <div class="flex-1 flex flex-col min-w-0 h-screen overflow-y-auto relative z-10">
+        
+        <header class="h-20 px-6 flex items-center justify-between glass-panel sticky top-0 z-30 border-b border-slate-100/60 shrink-0">
+            <div class="flex items-center gap-4">
+                <button class="md:hidden text-slate-600 p-2 -ml-2 rounded-lg hover:bg-slate-100" onclick="toggleSidebar()">
+                    <i class="fa-solid fa-bars text-lg"></i>
+                </button>
+                <div class="hidden sm:flex items-center gap-2 bg-slate-100/80 px-3 py-1.5 rounded-xl border border-slate-200/40 w-64 focus-within:border-indigo-400 focus-within:bg-white transition-all">
+                    <i class="fa-solid fa-magnifying-glass text-xs text-slate-400"></i>
+                    <input type="text" placeholder="搜索资源与 API 端点..." class="bg-transparent border-none text-xs w-full focus:outline-none text-slate-700">
+                </div>
+            </div>
+
+            <div class="flex items-center gap-4">
+                <div class="text-right hidden sm:block">
+                    <span class="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-600 border border-emerald-200/50">
+                        <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                        Axum Node Online
+                    </span>
+                </div>
+                
+                <div class="h-8 w-[1px] bg-slate-200/60 hidden sm:block"></div>
+                
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-full bg-gradient-to-tr from-purple-100 to-indigo-100 border border-white flex items-center justify-center font-bold text-sm text-indigo-600 shadow-inner">
+                        WS
+                    </div>
+                    <div class="hidden lg:block text-left">
+                        <p class="text-xs font-bold text-slate-700">WebShelf Admin</p>
+                        <p class="text-[10px] text-slate-400">root@aiqubits.io</p>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <main id="view-dashboard" class="flex-1 p-6 space-y-6 max-w-7xl w-full mx-auto">
+            <div class="p-6 rounded-3xl glass-panel relative overflow-hidden flex flex-col md:flex-row md:items-center justify-between gap-4 border border-indigo-100/40 shadow-sm shadow-indigo-50">
+                <div class="absolute -right-10 -top-10 w-40 h-40 bg-indigo-200/20 rounded-full blur-2xl"></div>
+                <div class="absolute -left-10 -bottom-10 w-40 h-40 bg-pink-200/20 rounded-full blur-2xl"></div>
+                <div class="relative z-10">
+                    <h2 class="text-xl font-bold text-slate-800">欢迎来到 WebShelf Rust 微服务脚手架系统 🚀</h2>
+                    <p class="text-slate-500 text-xs mt-1">当前基于最新的 Axum 异步 Web 框架构建，路由定义清晰，底层采用安全的高并发线程模型。</p>
+                </div>
+                <button onclick="simulateHealthCheck()" class="btn-gradient text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md inline-flex items-center gap-2 relative z-10 shrink-0">
+                    <i class="fa-solid fa-heart-pulse"></i>
+                    <span>点此调用健康检查 (GET /health)</span>
+                </button>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="p-5 rounded-2xl glass-panel interactive-card flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-slate-400">服务健康度</p>
+                        <h3 id="health-status-text" class="text-xl font-bold text-emerald-600 mt-1">UP (200 OK)</h3>
+                        <p class="text-[10px] text-slate-400 mt-1">探测点: /api/health</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-500 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-circle-check"></i>
+                    </div>
+                </div>
+
+                <div class="p-5 rounded-2xl glass-panel interactive-card flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-slate-400">当前管控用户数</p>
+                        <h3 id="dash-user-count" class="text-xl font-bold text-slate-800 mt-1">3 名</h3>
+                        <p class="text-[10px] text-slate-400 mt-1">实时拉取: /api/users</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-indigo-50 text-indigo-500 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-user-group"></i>
+                    </div>
+                </div>
+
+                <div class="p-5 rounded-2xl glass-panel interactive-card flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-slate-400">接口平均耗时</p>
+                        <h3 class="text-xl font-bold text-slate-800 mt-1">0.84 ms</h3>
+                        <p class="text-[10px] text-slate-400 mt-1">Rust 原生高效运行时</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-purple-50 text-purple-500 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-bolt"></i>
+                    </div>
+                </div>
+
+                <div class="p-5 rounded-2xl glass-panel interactive-card flex items-center justify-between">
+                    <div>
+                        <p class="text-xs font-medium text-slate-400">中间件拦截器状态</p>
+                        <h3 class="text-xl font-bold text-amber-600 mt-1">Active</h3>
+                        <p class="text-[10px] text-slate-400 mt-1">拦截器: require_admin</p>
+                    </div>
+                    <div class="w-12 h-12 rounded-xl bg-amber-50 text-amber-500 flex items-center justify-center text-xl">
+                        <i class="fa-solid fa-shield-halved"></i>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                <div class="p-6 rounded-2xl glass-panel lg:col-span-2 flex flex-col h-[340px]">
+                    <div class="flex items-center justify-between mb-4">
+                        <div>
+                            <h4 class="font-bold text-sm text-slate-800">服务链路追踪监控</h4>
+                            <p class="text-[11px] text-slate-400">实时拦截捕获的 WebShelf Axum 后端路由流量</p>
+                        </div>
+                        <span class="text-[10px] font-mono bg-slate-100 px-2 py-1 rounded text-slate-500">Live Stream</span>
+                    </div>
+                    <div id="api-log-stream" class="flex-1 bg-slate-900 rounded-xl p-4 font-mono text-xs text-slate-300 overflow-y-auto space-y-2 no-scrollbar shadow-inner">
+                        <div class="text-slate-500 text-[11px]">// 监控引擎准备就绪，等待捕获操作...</div>
+                        <div class="text-emerald-400 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span> [GET] 2026-06-09 01:48:00 /api/health -> 200 OK (0.42ms)</div>
+                        <div class="text-indigo-400 flex items-center gap-2"><span class="w-1.5 h-1.5 rounded-full bg-indigo-400"></span> [GET] 2026-06-09 01:48:02 /api/users -> 200 OK (1.10ms)</div>
+                    </div>
+                </div>
+
+                <div class="p-6 rounded-2xl glass-panel flex flex-col justify-between h-[340px]">
+                    <div>
+                        <h4 class="font-bold text-sm text-slate-800 mb-3">WebShelf 路由架构图解</h4>
+                        <div class="space-y-2.5">
+                            <div class="p-2.5 rounded-xl bg-indigo-50/50 border border-indigo-100 flex items-center gap-3">
+                                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-indigo-500 text-white w-12 text-center shrink-0">POST</span>
+                                <div class="text-xs"><p class="font-semibold text-slate-700">/auth/login</p><p class="text-[10px] text-slate-400">面向全端用户鉴权</p></div>
+                            </div>
+                            <div class="p-2.5 rounded-xl bg-purple-50/50 border border-purple-100 flex items-center gap-3">
+                                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-500 text-white w-12 text-center shrink-0">GET</span>
+                                <div class="text-xs"><p class="font-semibold text-slate-700">/api/users</p><p class="text-[10px] text-slate-400">中间件级联控制列表层</p></div>
+                            </div>
+                            <div class="p-2.5 rounded-xl bg-pink-50/50 border border-pink-100 flex items-center gap-3">
+                                <span class="text-[10px] font-bold px-1.5 py-0.5 rounded bg-rose-500 text-white w-12 text-center shrink-0">PUT</span>
+                                <div class="text-xs"><p class="font-semibold text-slate-700">/api/users/{id}</p><p class="text-[10px] text-slate-400">精准定位实体对象更新</p></div>
+                            </div>
+                        </div>
+                    </div>
+                    <p class="text-[11px] text-slate-400 italic mt-4"><i class="fa-solid fa-info-circle mr-1"></i>基于安全考量，所有针对 /users 路径的变动操作已被管理员策略拦截器妥善锚定保护。</p>
+                </div>
+            </div>
+        </main>
+
+        <main id="view-users" class="flex-1 p-6 space-y-6 max-w-7xl w-full mx-auto hidden">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                        <span>核心用户矩阵管控</span>
+                        <span class="text-xs font-semibold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full border border-indigo-100"><i class="fa-solid fa-lock mr-1"></i>require_admin 中间件保护区域</span>
+                    </h2>
+                    <p class="text-slate-500 text-xs mt-0.5">直接操纵后台系统实体模型。对应接口：GET/POST/PUT/DELETE `/api/users`</p>
+                </div>
+                <button onclick="openModal('create')" class="btn-gradient text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md inline-flex items-center gap-1.5 self-start sm:self-auto">
+                    <i class="fa-solid fa-plus"></i>
+                    <span>创建新用户 (POST)</span>
+                </button>
+            </div>
+
+            <div class="rounded-3xl glass-panel shadow-sm overflow-hidden border border-slate-100">
+                <div class="overflow-x-auto w-full">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50/70 border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                                <th class="py-4 px-6 w-16">ID</th>
+                                <th class="py-4 px-6">账户身份</th>
+                                <th class="py-4 px-6">安全邮箱</th>
+                                <th class="py-4 px-6">系统授权标签</th>
+                                <th class="py-4 px-6">实例孵化时间</th>
+                                <th class="py-4 px-6 w-32 text-center">系统决策操纵</th>
+                            </tr>
+                        </thead>
+                        <tbody id="users-table-body" class="divide-y divide-slate-100/60 text-xs font-medium text-slate-600">
+                            </tbody>
+                    </table>
+                </div>
+            </div>
+        </main>
+
+        <main id="view-auth" class="flex-1 p-6 flex items-center justify-center max-w-7xl w-full mx-auto hidden">
+            <div class="w-full max-w-md rounded-3xl glass-panel p-8 shadow-xl shadow-purple-100/30 relative overflow-hidden">
+                <div class="absolute -right-16 -top-16 w-36 h-36 bg-purple-200/30 rounded-full blur-2xl"></div>
+                <div class="absolute -left-16 -bottom-16 w-36 h-36 bg-indigo-200/30 rounded-full blur-2xl"></div>
+                
+                <div class="flex p-1 bg-slate-100/80 rounded-2xl mb-8 relative z-10">
+                    <button id="auth-tab-login" onclick="toggleAuthForm('login')" class="flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-300 bg-white shadow-sm text-indigo-600">
+                        登录入口 (/login)
+                    </button>
+                    <button id="auth-tab-register" onclick="toggleAuthForm('register')" class="flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-300 text-slate-500 hover:text-slate-800">
+                        注册端口 (/register)
+                    </button>
+                </div>
+
+                <form id="form-login" onsubmit="handleAuthSubmit(event, 'login')" class="space-y-4 relative z-10">
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase">注册绑定的邮箱</label>
+                        <input type="email" required placeholder="name@domain.com" class="w-full px-4 py-3 rounded-xl bg-white/60 border border-slate-200/60 focus:outline-none focus:border-indigo-400 focus:bg-white text-xs transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase">鉴权安全口令</label>
+                        <input type="password" required placeholder="••••••••" class="w-full px-4 py-3 rounded-xl bg-white/60 border border-slate-200/60 focus:outline-none focus:border-indigo-400 focus:bg-white text-xs transition-all">
+                    </div>
+                    <div class="flex items-center justify-between pt-1 text-[11px]">
+                        <label class="flex items-center gap-1.5 text-slate-500 cursor-pointer">
+                            <input type="checkbox" class="rounded border-slate-300 text-indigo-600 focus:ring-indigo-400"> 维持持久化登录
+                        </label>
+                        <a href="#" class="text-indigo-600 font-medium hover:underline">忘记凭证?</a>
+                    </div>
+                    <button type="submit" class="w-full btn-gradient text-white text-xs font-semibold py-3 rounded-xl shadow-md mt-6">
+                        提交请求验证 [POST /login]
+                    </button>
+                </form>
+
+                <form id="form-register" onsubmit="handleAuthSubmit(event, 'register')" class="space-y-4 relative z-10 hidden">
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase">拟定用户昵称</label>
+                        <input type="text" required placeholder="e.g., rust_master" class="w-full px-4 py-3 rounded-xl bg-white/60 border border-slate-200/60 focus:outline-none focus:border-indigo-400 focus:bg-white text-xs transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase">电子邮箱载体</label>
+                        <input type="email" required placeholder="master@rust.org" class="w-full px-4 py-3 rounded-xl bg-white/60 border border-slate-200/60 focus:outline-none focus:border-indigo-400 focus:bg-white text-xs transition-all">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] font-bold text-slate-400 mb-1.5 uppercase">强安全密码</label>
+                        <input type="password" required placeholder="••••••••" class="w-full px-4 py-3 rounded-xl bg-white/60 border border-slate-200/60 focus:outline-none focus:border-indigo-400 focus:bg-white text-xs transition-all">
+                    </div>
+                    <button type="submit" class="w-full btn-gradient text-white text-xs font-semibold py-3 rounded-xl shadow-md mt-6">
+                        初始化账户实例 [POST /register]
+                    </button>
+                </form>
+            </div>
+        </main>
+    </div>
+
+    <div id="user-modal" class="fixed inset-0 z-50 bg-slate-900/20 backdrop-blur-sm flex items-center justify-center p-4 hidden">
+        <div class="w-full max-w-md rounded-2xl glass-panel p-6 shadow-xl transform scale-95 transition-all duration-300">
+            <div class="flex items-center justify-between mb-5">
+                <h3 id="modal-title" class="font-bold text-sm text-slate-800">编辑用户节点</h3>
+                <button onclick="closeModal()" class="w-6 h-6 rounded-lg bg-slate-50 flex items-center justify-center text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark text-xs"></i></button>
+            </div>
+            <form id="modal-form" onsubmit="handleModalSubmit(event)" class="space-y-4">
+                <input type="hidden" id="modal-user-id">
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1 uppercase">账户名</label>
+                    <input type="text" id="modal-username" required class="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs focus:outline-none focus:border-indigo-400">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1 uppercase">邮箱地址</label>
+                    <input type="email" id="modal-email" required class="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs focus:outline-none focus:border-indigo-400">
+                </div>
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1 uppercase">角色分配</label>
+                    <select id="modal-role" class="w-full px-3 py-2 rounded-xl bg-white border border-slate-200 text-xs focus:outline-none focus:border-indigo-400">
+                        <option value="管理员">管理员 (Admin)</option>
+                        <option value="普通用户">普通用户 (User)</option>
+                    </select>
+                </div>
+                <button type="submit" id="modal-submit-btn" class="w-full btn-gradient text-white text-xs font-semibold py-2.5 rounded-xl shadow-md pt-2">
+                    保存实体
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // 核心内存数据库模拟 (对应后端存储实体状态)
+        let usersData = [
+            { id: 1, username: "admin", email: "admin@webshelf.dev", role: "管理员", created_at: "2026-06-01 10:24" },
+            { id: 2, username: "rust_coder", email: "coder@axum.rs", role: "普通用户", created_at: "2026-06-05 14:12" },
+            { id: 3, username: "web_designer", email: "design@ui.com", role: "普通用户", created_at: "2026-06-08 09:45" }
+        ];
+
+        let currentMode = 'create';
+
+        // 视图路由微引擎
+        function switchView(viewId) {
+            ['dashboard', 'users', 'auth'].forEach(v => {
+                document.getElementById(`view-${v}`).classList.add('hidden');
+                document.getElementById(`nav-${v}`).classList.remove('bg-indigo-50/60', 'text-indigo-600');
+                document.getElementById(`nav-${v}`).classList.add('text-slate-600', 'hover:bg-slate-50', 'hover:text-slate-900');
+            });
+
+            document.getElementById(`view-${viewId}`).classList.remove('hidden');
+            document.getElementById(`nav-${viewId}`).classList.add('bg-indigo-50/60', 'text-indigo-600');
+            document.getElementById(`nav-${viewId}`).classList.remove('text-slate-600', 'hover:bg-slate-50', 'hover:text-slate-900');
+            
+            // 移动端切换时顺便自动锁屏侧边栏
+            if(!document.getElementById('main-sidebar').classList.contains('-translate-x-full')) {
+                toggleSidebar();
+            }
+
+            if(viewId === 'users') {
+                pushLog('GET', '/api/users', '200 OK', 'success');
+            }
+        }
+
+        // 侧边栏 H5 控制
+        function toggleSidebar() {
+            const sidebar = document.getElementById('main-sidebar');
+            const overlay = document.getElementById('sidebar-overlay');
+            sidebar.classList.toggle('-translate-x-full');
+            overlay.classList.toggle('hidden');
+        }
+
+        // 拟真异步通知系统
+        function pushLog(method, path, statusText, type = 'success') {
+            const container = document.getElementById('toast-container');
+            const stream = document.getElementById('api-log-stream');
+            
+            // 构造右侧浮动通知
+            const toast = document.createElement('div');
+            toast.className = "p-3.5 rounded-xl bg-white/90 backdrop-blur-md shadow-lg border border-slate-100 flex items-start gap-3 pointer-events-auto transition-all duration-300 transform translate-y-2 opacity-0";
+            
+            const badgeColor = method === 'GET' ? 'bg-indigo-500' : method === 'POST' ? 'bg-emerald-500' : method === 'PUT' ? 'bg-amber-500' : 'bg-rose-500';
+            const statusColor = type === 'success' ? 'text-emerald-600' : 'text-rose-600';
+
+            toast.innerHTML = `
+                <div class="w-6 h-6 rounded-lg ${badgeColor} text-white text-[9px] font-bold flex items-center justify-center shrink-0 mt-0.5">${method}</div>
+                <div class="flex-1 min-w-0">
+                    <p class="text-xs font-bold text-slate-700 truncate">${path}</p>
+                    <p class="text-[10px] text-slate-400 mt-0.5">响应状态: <span class="${statusColor} font-semibold">${statusText}</span></p>
+                </div>
+            `;
+            container.appendChild(toast);
+            
+            // 触发入场动效
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 50);
+
+            // 自动销毁逻辑
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'scale-95');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+
+            // 同时将日志刷向控制台卡片
+            const timestamp = new Date().toLocaleTimeString();
+            const logColorClass = method === 'GET' ? 'text-indigo-400' : method === 'POST' ? 'text-emerald-400' : method === 'PUT' ? 'text-amber-400' : 'text-rose-400';
+            
+            const logItem = document.createElement('div');
+            logItem.className = `${logColorClass} flex items-center gap-2 transition-all duration-300 opacity-0 transform -translate-x-2`;
+            logItem.innerHTML = `<span class="w-1.5 h-1.5 rounded-full bg-current"></span> [${method}] ${timestamp} ${path} -> ${statusText} (模拟内核响应成功)`;
+            stream.appendChild(logItem);
+            
+            setTimeout(() => logItem.classList.remove('opacity-0', '-translate-x-2'), 50);
+            stream.scrollTop = stream.scrollHeight;
+        }
+
+        // 调用健康检查模拟 (/health)
+        function simulateHealthCheck() {
+            const btn = document.querySelector('.btn-gradient');
+            const txt = document.getElementById('health-status-text');
+            btn.disabled = true;
+            btn.style.opacity = 0.7;
+            txt.innerText = "Checking...";
+            txt.className = "text-xl font-bold text-indigo-500 mt-1";
+
+            setTimeout(() => {
+                btn.disabled = false;
+                btn.style.opacity = 1;
+                txt.innerText = "UP (200 OK)";
+                txt.className = "text-xl font-bold text-emerald-600 mt-1";
+                pushLog('GET', '/api/health', '200 OK Status: {"status": "healthy"}', 'success');
+            }, 600);
+        }
+
+        // 渲染管理核心表格
+        function renderTable() {
+            const tbody = document.getElementById('users-table-body');
+            document.getElementById('dash-user-count').innerText = `${usersData.length} 名`;
+            tbody.innerHTML = '';
+
+            usersData.forEach(user => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50/40 transition-colors duration-150 group";
+                tr.innerHTML = `
+                    <td class="py-3.5 px-6 font-mono text-slate-400">${user.id}</td>
+                    <td class="py-3.5 px-6 font-semibold text-slate-700">${user.username}</td>
+                    <td class="py-3.5 px-6 text-slate-500">${user.email}</td>
+                    <td class="py-3.5 px-6">
+                        <span class="px-2 py-0.5 rounded-md text-[10px] font-semibold ${user.role === '管理员' ? 'bg-purple-50 text-purple-600 border border-purple-100' : 'bg-slate-100 text-slate-600 border border-slate-200/60'}">
+                            ${user.role}
+                        </span>
+                    </td>
+                    <td class="py-3.5 px-6 text-slate-400 font-mono">${user.created_at}</td>
+                    <td class="py-3.5 px-6 text-center">
+                        <div class="flex items-center justify-center gap-2 opacity-80 group-hover:opacity-100 transition-opacity">
+                            <button onclick="openModal('edit', ${user.id})" class="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-indigo-600 hover:border-indigo-200 transition-all shadow-sm" title="PUT修改实体">
+                                <i class="fa-solid fa-pen text-[11px]"></i>
+                            </button>
+                            <button onclick="deleteUser(${user.id})" class="w-7 h-7 rounded-lg bg-white border border-slate-200 text-slate-500 hover:text-rose-600 hover:border-rose-200 transition-all shadow-sm" title="DELETE擦除实体">
+                                <i class="fa-solid fa-trash-can text-[11px]"></i>
+                            </button>
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        // 触发开窗
+        function openModal(mode, id = null) {
+            currentMode = mode;
+            const modal = document.getElementById('user-modal');
+            document.getElementById('modal-form').reset();
+            
+            if(mode === 'create') {
+                document.getElementById('modal-title').innerText = "孵化新用户实体 (POST /api/users)";
+                document.getElementById('modal-submit-btn').innerText = "发起创建事务";
+            } else {
+                document.getElementById('modal-title').innerText = `改写实体凭证 (PUT /api/users/${id})`;
+                document.getElementById('modal-submit-btn').innerText = "提交数据改写";
+                const user = usersData.find(u => u.id === id);
+                if(user) {
+                    document.getElementById('modal-user-id').value = user.id;
+                    document.getElementById('modal-username').value = user.username;
+                    document.getElementById('modal-email').value = user.email;
+                    document.getElementById('modal-role').value = user.role;
+                    pushLog('GET', `/api/users/${id}`, `200 OK Fetch entity: ${user.username}`, 'success');
+                }
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function closeModal() {
+            document.getElementById('user-modal').classList.add('hidden');
+        }
+
+        // 用户 CRUD 事务底层拦截
+        function handleModalSubmit(e) {
+            e.preventDefault();
+            const idInput = document.getElementById('modal-user-id').value;
+            const username = document.getElementById('modal-username').value;
+            const email = document.getElementById('modal-email').value;
+            const role = document.getElementById('modal-role').value;
+            const now = new Date().toISOString().slice(0, 16).replace('T', ' ');
+
+            if(currentMode === 'create') {
+                const newId = usersData.length > 0 ? Math.max(...usersData.map(u => u.id)) + 1 : 1;
+                usersData.push({ id: newId, username, email, role, created_at: now });
+                pushLog('POST', '/api/users', `201 Created successfully (ID: ${newId})`, 'success');
+            } else {
+                const id = parseInt(idInput);
+                const index = usersData.findIndex(u => u.id === id);
+                if(index !== -1) {
+                    usersData[index] = { ...usersData[index], username, email, role };
+                    pushLog('PUT', `/api/users/${id}`, `200 OK Entity updated`, 'success');
+                }
+            }
+            closeModal();
+            renderTable();
+        }
+
+        function deleteUser(id) {
+            if(confirm(`是否确定向下游服务集群发送 DELETE 命令清除 ID: ${id} 节点？`)) {
+                usersData = usersData.filter(u => u.id !== id);
+                pushLog('DELETE', `/api/users/${id}`, `200 OK Entity deleted`, 'important');
+                renderTable();
+            }
+        }
+
+        // 认证模拟面板 Tab 状态机切换
+        function toggleAuthForm(mode) {
+            const tabLogin = document.getElementById('auth-tab-login');
+            const tabRegister = document.getElementById('auth-tab-register');
+            const formLogin = document.getElementById('form-login');
+            const formRegister = document.getElementById('form-register');
+
+            if (mode === 'login') {
+                tabLogin.className = "flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-300 bg-white shadow-sm text-indigo-600";
+                tabRegister.className = "flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-300 text-slate-500 hover:text-slate-800";
+                formLogin.classList.remove('hidden');
+                formRegister.classList.add('hidden');
+            } else {
+                tabRegister.className = "flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-300 bg-white shadow-sm text-indigo-600";
+                tabLogin.className = "flex-1 py-2 text-xs font-bold rounded-xl transition-all duration-300 text-slate-500 hover:text-slate-800";
+                formRegister.classList.remove('hidden');
+                formLogin.classList.add('hidden');
+            }
+        }
+
+        function handleAuthSubmit(e, mode) {
+            e.preventDefault();
+            if(mode === 'login') {
+                pushLog('POST', '/api/auth/login', '200 OK - Token Generated', 'success');
+            } else {
+                pushLog('POST', '/api/auth/register', '201 Created - Registration Closed', 'success');
+            }
+        }
+
+        // 生命周期初始化挂载
+        window.onload = function() {
+            renderTable();
+        };
+    </script>
+</body>
+</html>
