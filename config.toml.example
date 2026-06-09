@@ -2,7 +2,7 @@
 # WebShelf Shared Configuration File
 # ==============================================
 # Copy this file to config.toml and update values for your environment
-# This configuration is shared between server and web (frontend)
+# This configuration is shared between server and frontend (app)
 
 # Database connection URL (PostgreSQL)
 # Replace CHANGE_ME_POSTGRES_PASSWORD with a strong password

@@ -94,12 +94,24 @@ curl -X POST http://localhost:3000/api/public/auth/login \
 ### 运行前端（可选）
 
 ```bash
-# 在 web/ 目录下启动 Dioxus 开发服务器
-cd web
+# 在 app/web 目录下启动 Dioxus 开发服务器
+cd app/web
 dx serve --hot-reload true
 ```
 
 前端开发服务器默认运行在 `http://localhost:8080`，通过 Nginx 反向代理调用后端 API。
+
+**其他前端模式：**
+
+```bash
+# 桌面应用
+cd app/desktop
+dx serve --hot-reload true
+
+# 移动应用（需要相应平台环境）
+cd app/mobile
+dx serve --hot-reload true
+```
 
 ### 清理本地开发环境
 
@@ -398,7 +410,7 @@ docker compose exec webshelf-server /bin/bash
 
 ```
 ┌─────────────────────────────────────────────┐
-│         nginx:80 (webshelf-web)             │  反向代理
+│         nginx:80 (webshelf-web)             │  反向代理 (Dioxus WASM from app/web)
 ├─────────────────────────────────────────────┤
 │  ↓ proxy to                                 │
 │  Backend: 3000 (webshelf-server)            │  API 服务

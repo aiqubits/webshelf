@@ -9,6 +9,8 @@ use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::utils::error::ErrorResponse;
+
 /// Authenticated user information extracted from JWT
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
@@ -120,36 +122,18 @@ fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::err
 
 /// Create an unauthorized response (401)
 fn unauthorized_response(message: &str) -> Response {
-    #[derive(Serialize)]
-    struct ErrorBody {
-        error: String,
-        message: String,
-    }
-
     (
         StatusCode::UNAUTHORIZED,
-        Json(ErrorBody {
-            error: "unauthorized".to_string(),
-            message: message.to_string(),
-        }),
+        Json(ErrorResponse::new("unauthorized", message)),
     )
         .into_response()
 }
 
 /// Create a forbidden response (403)
 fn forbidden_response(message: &str) -> Response {
-    #[derive(Serialize)]
-    struct ErrorBody {
-        error: String,
-        message: String,
-    }
-
     (
         StatusCode::FORBIDDEN,
-        Json(ErrorBody {
-            error: "forbidden".to_string(),
-            message: message.to_string(),
-        }),
+        Json(ErrorResponse::new("forbidden", message)),
     )
         .into_response()
 }

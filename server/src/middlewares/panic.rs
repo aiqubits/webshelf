@@ -5,22 +5,14 @@ use axum::{
     middleware::Next,
     response::{IntoResponse, Response},
 };
-use serde::Serialize;
+
+use crate::utils::error::ErrorResponse;
 
 /// Create an internal error response
 fn internal_error_response(message: &str) -> Response {
-    #[derive(Serialize)]
-    struct ErrorBody {
-        error: String,
-        message: String,
-    }
-
     (
         StatusCode::INTERNAL_SERVER_ERROR,
-        Json(ErrorBody {
-            error: "internal_error".to_string(),
-            message: message.to_string(),
-        }),
+        Json(ErrorResponse::new("internal_error", message)),
     )
         .into_response()
 }

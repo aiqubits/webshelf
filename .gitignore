@@ -22,7 +22,7 @@ config.toml
 k8s/secret.yaml
 
 # Dioxus build output
-web/dist/
+app/*/dist/
 
 # Node (if used by frontend tooling)
 node_modules/

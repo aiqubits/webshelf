@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "web"]
+members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile"]
 # resolver = "3" is required for Rust edition 2024
 # Minimum Rust version: 1.92+
 resolver = "3"
@@ -31,3 +31,17 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 # Utilities
 chrono = { version = "0.4", features = ["serde"] }
 uuid = { version = "1", features = ["v4", "serde"] }
+
+# Frontend
+dioxus = { version = "0.7.1" }
+
+# Frontend workspace
+ui = { path = "app/ui" }
+
+# ── WASM 体积优化 ──────────────────────────────────────
+[profile.release]
+opt-level = "z"       # 最小体积优化
+lto = true             # 跨 crate 链接时优化，消除死代码
+codegen-units = 1      # 最大优化机会（牺牲编译速度）
+strip = true           # 移除调试符号
+panic = "abort"        # 减少 panic 展开代码

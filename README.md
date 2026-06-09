@@ -22,7 +22,7 @@ WebShelf 是一个生产就绪的 Rust 全栈框架，建立在 Axum 和 Dioxus 
 - 🧪 **测试框架** - 单元测试和集成测试支持
 - 🚀 **RESTful API** - 完整的用户管理 CRUD 操作
 - 📦 **生产就绪** - 完善的错误处理、压缩、优雅关闭
-- 🌐 **全栈框架** - 后端 (Axum) + 前端 (Dioxus/WASM) + 反向代理 (Nginx)
+- 🌐 **全栈框架** - 后端 (Axum) + 前端 (Dioxus/WASM 多端: Web/Desktop/Mobile) + 反向代理 (Nginx)
 - 🐳 **容器化** - Docker Compose 和 Kubernetes 支持
 - 🔄 **灰度部署** - 支持滚动升级和金丝雀发布
 
@@ -438,12 +438,33 @@ webshelf/
 │   │   └── integration_tests.rs # 集成测试
 │   └── Cargo.toml               # 服务器依赖
 │
-├── web/                         # 前端应用 (Dioxus/WASM)
-│   ├── src/
-│   │   ├── main.rs              # 前端入口
-│   │   └── assets/              # 静态资源
-│   ├── Cargo.toml               # 前端依赖
-│   └── Dioxus.toml              # Dioxus 配置
+├── app/                          # 前端应用 (Dioxus 多端)
+│   ├── ui/                      # UI 组件库
+│   │   ├── src/
+│   │   │   ├── hero.rs          # Hero 组件
+│   │   │   ├── navbar.rs        # 导航栏组件
+│   │   │   └── lib.rs
+│   │   ├── assets/
+│   │   │   └── styling/         # 样式文件
+│   │   └── Cargo.toml
+│   ├── web/                     # Web 前端应用 (Dioxus/WASM)
+│   │   ├── src/
+│   │   │   ├── main.rs          # 前端入口
+│   │   │   └── views/           # 页面视图
+│   │   ├── assets/              # 静态资源
+│   │   └── Cargo.toml
+│   ├── desktop/                 # 桌面应用 (Dioxus Desktop)
+│   │   ├── src/
+│   │   │   ├── main.rs
+│   │   │   └── views/
+│   │   ├── assets/
+│   │   └── Cargo.toml
+│   └── mobile/                  # 移动应用 (Dioxus Mobile)
+│       ├── src/
+│       │   ├── main.rs
+│       │   └── views/
+│       ├── assets/
+│       └── Cargo.toml
 │
 ├── nginx/
 │   └── default.conf             # Nginx 反向代理配置
@@ -478,7 +499,7 @@ webshelf/
 
 ```
 ┌─────────────────────────────────────────┐
-│     Frontend (Dioxus/WASM)              │  SPA 应用
+│     Frontend (app/)                        │  多端应用 (Web/Desktop/Mobile)
 ├─────────────────────────────────────────┤
 │     Nginx (反向代理)                     │  路由/速率限制/安全头
 ├─────────────────────────────────────────┤

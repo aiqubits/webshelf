@@ -92,8 +92,8 @@ jobs:
           cargo install dioxus-cli --version 0.7.9
         fi
     - name: Run Web Tests
-      run: cargo test --package webshelf-web --verbose
+      run: cargo test --package web --verbose
     - name: Build Web
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cd web && dx build --release
+        cd app/web && dx build --release

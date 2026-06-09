@@ -175,18 +175,10 @@ impl UserService {
         &self,
         params: PaginationParams,
     ) -> Result<PaginatedResponse<UserResponse>, UserError> {
-        // Sanitize pagination inputs: reject 0 and cap to reasonable bounds
-        // to prevent overflow in page - 1 (debug panic) or excessive offsets.
-        let page = if params.page == 0 {
-            1
-        } else {
-            params.page.min(1_000_000)
-        };
-        let per_page = if params.per_page == 0 {
-            10
-        } else {
-            params.per_page.min(100)
-        };
+        // Sanitize pagination inputs: clamp zero to 1 and cap large values
+        // to reasonable bounds to prevent overflow or excessive offsets.
+        let page = params.page.clamp(1, 1_000_000);
+        let per_page = params.per_page.clamp(1, 100);
 
         let paginator = UserEntity::find()
             .order_by_desc(Column::CreatedAt)

@@ -35,9 +35,18 @@ pub enum ApiError {
 }
 
 #[derive(Serialize)]
-struct ErrorResponse {
+pub(crate) struct ErrorResponse {
     error: String,
     message: String,
+}
+
+impl ErrorResponse {
+    pub(crate) fn new(error: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            error: error.into(),
+            message: message.into(),
+        }
+    }
 }
 
 impl IntoResponse for ApiError {
@@ -55,10 +64,7 @@ impl IntoResponse for ApiError {
             }
         };
 
-        let body = Json(ErrorResponse {
-            error: error_type.to_string(),
-            message: self.to_string(),
-        });
+        let body = Json(ErrorResponse::new(error_type, self.to_string()));
 
         (status, body).into_response()
     }
