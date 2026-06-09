@@ -1,0 +1,8 @@
+[package]
+name = "ui"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true }
+

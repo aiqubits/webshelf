@@ -1,0 +1,17 @@
+[application]
+name = "web"
+default_platform = "web"
+
+[web.app]
+title = "WebShelf"
+
+[web.watcher]
+reload_html = true
+watch_path = ["src"]
+
+[web.resource]
+style = []
+script = []
+
+[web.resource.dev]
+script = []

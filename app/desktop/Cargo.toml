@@ -1,0 +1,13 @@
+[package]
+name = "desktop"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+dioxus = { workspace = true, features = ["router"] }
+ui = { workspace = true }
+
+[features]
+default = ["desktop"]
+desktop = ["dioxus/desktop"]
+
