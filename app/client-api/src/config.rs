@@ -104,11 +104,10 @@ impl ClientConfig {
             // 相对路径模式：Nginx 反向代理 / WASM 同源请求
             #[cfg(target_arch = "wasm32")]
             {
-                // WASM 下 reqwest 需要绝对 URL，从浏览器 location 推导
-                if let Some(window) = web_sys::window() {
-                    if let Ok(origin) = window.location().origin() {
-                        return format!("{}/{}", origin.trim_end_matches('/'), path);
-                    }
+                // WASM 下 reqwest 需要绝对 URL,从浏览器 location 推导
+                if let Some(window) = web_sys::window()
+                    && let Ok(origin) = window.location().origin() {
+                    return format!("{}/{}", origin.trim_end_matches('/'), path);
                 }
             }
             // 回退：理论上不可达——validate() 在 WASM 上已确保 window 存在，
