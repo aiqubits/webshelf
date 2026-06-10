@@ -106,7 +106,8 @@ impl ClientConfig {
             {
                 // WASM 下 reqwest 需要绝对 URL,从浏览器 location 推导
                 if let Some(window) = web_sys::window()
-                    && let Ok(origin) = window.location().origin() {
+                    && let Ok(origin) = window.location().origin()
+                {
                     return format!("{}/{}", origin.trim_end_matches('/'), path);
                 }
             }
