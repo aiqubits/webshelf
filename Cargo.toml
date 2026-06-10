@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile"]
+members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api"]
 # resolver = "3" is required for Rust edition 2024
 # Minimum Rust version: 1.92+
 resolver = "3"

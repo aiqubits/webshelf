@@ -97,3 +97,28 @@ jobs:
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
         cd app/web && dx build --release
+
+  # ========================================
+  # Client API Library CI
+  # ========================================
+  client-api:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: "client-api"
+    - name: Format Check
+      run: cargo fmt --check --package client-api
+    - name: Lint (Clippy)
+      run: cargo clippy --package client-api --all-targets -- -D warnings
+    - name: Install wasm32 target
+      run: rustup target add wasm32-unknown-unknown
+    - name: Check WASM (Clippy)
+      run: cargo clippy --package client-api --target wasm32-unknown-unknown -- -D warnings
+    - name: Check WASM compilation
+      run: cargo check --package client-api --target wasm32-unknown-unknown
+    - name: Build Client API
+      run: cargo build --package client-api --verbose
+    - name: Run Client API Tests
+      run: cargo test --package client-api --verbose
