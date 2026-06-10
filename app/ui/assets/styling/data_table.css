@@ -1,0 +1,128 @@
+/* DataTable —— 玻璃面板容器 + 表头 + 行 hover */
+
+.ws-table {
+  background: var(--glass-panel-bg);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: var(--radius-3xl);
+  box-shadow: var(--shadow-sm);
+  overflow: hidden;
+}
+
+.ws-table__table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--font-family);
+}
+
+.ws-table__head {
+  background: rgba(248, 250, 252, 0.7);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+
+.ws-table__th {
+  padding: 16px 24px;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  color: var(--color-text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ws-table__align--left { text-align: left; }
+.ws-table__align--center { text-align: center; }
+.ws-table__align--right { text-align: right; }
+
+/* Tailwind 风格的固定宽度工具类，供 Column::width 使用 */
+.ws-table__table .w-16 { width: 4rem; }
+.ws-table__table .w-24 { width: 6rem; }
+.ws-table__table .w-32 { width: 8rem; }
+.ws-table__table .w-40 { width: 10rem; }
+
+.ws-table__body {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--color-text-secondary);
+}
+
+.ws-table__body tr {
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  transition: background 120ms ease;
+}
+
+.ws-table__body tr:last-child {
+  border-bottom: none;
+}
+
+.ws-table__body tr:hover {
+  background: rgba(248, 250, 252, 0.4);
+}
+
+.ws-table__body td {
+  padding: 14px 24px;
+  vertical-align: middle;
+}
+
+.ws-table__empty {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--color-text-muted);
+  font-style: italic;
+}
+
+/* 行内工具元素 */
+.ws-table__action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--color-text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  transition: all 150ms ease;
+  margin: 0 2px;
+}
+
+.ws-table__action:hover {
+  background: var(--color-surface-hover, rgba(99, 102, 241, 0.08));
+  color: var(--color-text-primary);
+}
+
+.ws-table__action--danger:hover {
+  background: rgba(244, 63, 94, 0.1);
+  color: #e11d48;
+}
+
+.ws-table__row-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+}
+
+.ws-table__pill {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--color-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-table__mono {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-text-muted);
+  font-variant-numeric: tabular-nums;
+}

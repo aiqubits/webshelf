@@ -1,0 +1,48 @@
+/* Button — 唯一 CTA 变体 */
+.ws-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  color: #ffffff;
+  background: var(--color-brand-gradient);
+  border: none;
+  border-radius: var(--radius-xl);
+  padding: 10px 16px;
+  box-shadow: var(--shadow-md);
+  cursor: pointer;
+  transition: var(--ease-button);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.ws-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-brand-hover);
+  filter: brightness(1.05);
+}
+
+.ws-btn:active:not(:disabled) {
+  transform: translateY(0);
+  filter: brightness(0.98);
+}
+
+.ws-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+  box-shadow: var(--shadow-sm);
+}
+
+.ws-btn--block {
+  width: 100%;
+}
+
+.ws-btn__spinner {
+  font-size: 14px;
+}

@@ -1,0 +1,72 @@
+/* RouteCard —— 路由架构图条目 */
+.ws-route {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid transparent;
+}
+
+.ws-route--indigo {
+  background: rgba(238, 242, 255, 0.5);
+  border-color: var(--color-accent-indigo-soft-border);
+}
+
+.ws-route--purple {
+  background: rgba(250, 245, 255, 0.5);
+  border-color: var(--color-accent-purple-soft-border);
+}
+
+.ws-route--pink {
+  background: rgba(253, 242, 248, 0.5);
+  border-color: var(--color-accent-pink-soft-border);
+}
+
+.ws-route__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  flex-shrink: 0;
+  font-family: var(--font-family);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 4px 0;
+  border-radius: var(--radius-md);
+  color: #ffffff;
+}
+
+.ws-route__badge--indigo {
+  background: var(--color-brand-indigo);
+}
+
+.ws-route__badge--purple {
+  background: var(--color-brand-purple);
+}
+
+.ws-route__badge--rose {
+  background: #f43f5e;
+}
+
+.ws-route__body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.ws-route__path {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.ws-route__desc {
+  font-family: var(--font-family);
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}

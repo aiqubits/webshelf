@@ -1,0 +1,83 @@
+/* TextInput —— 标准变体 + Modal 紧凑变体 */
+.ws-input {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+}
+
+.ws-input__label {
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  margin-bottom: 6px;
+}
+
+.ws-input__field {
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--color-text-primary);
+  background: var(--color-input-bg);
+  border: 1px solid rgba(226, 232, 240, 0.6);
+  border-radius: var(--radius-xl);
+  padding: 12px 16px;
+  outline: none;
+  transition: border-color 0.15s ease, background-color 0.15s ease;
+  width: 100%;
+}
+
+.ws-input__field::placeholder {
+  color: var(--color-text-muted);
+}
+
+.ws-input__field:hover:not(:disabled) {
+  border-color: var(--color-text-muted-soft);
+}
+
+.ws-input__field:focus,
+.ws-input__field:focus-visible {
+  border-color: var(--color-brand-indigo-light);
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.ws-input__field:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+/* Modal 紧凑变体：白底 + 实色边框 + 紧凑内边距 */
+.ws-input__field--dense {
+  background: #ffffff;
+  border: 1px solid var(--color-border-default);
+  padding: 8px 12px;
+}
+
+.ws-input__field--dense:focus {
+  background: #ffffff;
+  border-color: var(--color-brand-indigo-light);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.12);
+}
+
+.ws-input__hint {
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--color-text-tertiary);
+  margin: 6px 0 0 0;
+}
+
+.ws-input__error {
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 16px;
+  color: var(--color-error-text);
+  margin: 6px 0 0 0;
+}

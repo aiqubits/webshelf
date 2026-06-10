@@ -1,0 +1,131 @@
+/* CodeConsole —— Dashboard 终端面板 */
+.ws-console {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  height: 100%;
+  min-height: 0;
+}
+
+.ws-console__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ws-console__title-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ws-console__title {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+}
+
+.ws-console__subtitle {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+}
+
+.ws-console__live-tag {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--color-text-muted);
+  background: #f1f5f9;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  white-space: nowrap;
+}
+
+.ws-console__scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  background: var(--color-code-bg);
+  color: var(--color-code-text);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-inner);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ws-console__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.ws-console__dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  flex-shrink: 0;
+}
+
+.ws-console__dot--success {
+  background: var(--color-code-success);
+}
+
+.ws-console__dot--info {
+  background: var(--color-code-info);
+}
+
+.ws-console__dot--amber {
+  background: var(--color-code-amber);
+}
+
+.ws-console__dot--rose {
+  background: var(--color-code-error);
+}
+
+.ws-console__ts {
+  color: #64748b;
+  font-size: 11px;
+}
+
+.ws-console__method {
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.ws-console__method--success {
+  color: var(--color-code-success);
+}
+
+.ws-console__method--info {
+  color: var(--color-code-info);
+}
+
+.ws-console__method--amber {
+  color: var(--color-code-amber);
+}
+
+.ws-console__method--rose {
+  color: var(--color-code-error);
+}
+
+.ws-console__path {
+  color: var(--color-code-text);
+}
+
+.ws-console__status {
+  color: #94a3b8;
+  font-size: 11px;
+}

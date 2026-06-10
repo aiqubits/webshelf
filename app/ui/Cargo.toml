@@ -6,3 +6,8 @@ edition.workspace = true
 [dependencies]
 dioxus = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", features = ["futures"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tokio = { version = "1", features = ["time"] }

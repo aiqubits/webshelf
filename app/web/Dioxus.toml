@@ -8,10 +8,3 @@ title = "WebShelf"
 [web.watcher]
 reload_html = true
 watch_path = ["src"]
-
-[web.resource]
-style = []
-script = []
-
-[web.resource.dev]
-script = []

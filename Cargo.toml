@@ -37,6 +37,7 @@ dioxus = { version = "0.7.1" }
 
 # Frontend workspace
 ui = { path = "app/ui" }
+client-api = { path = "app/client-api" }
 
 # ── WASM 体积优化 ──────────────────────────────────────
 [profile.release]

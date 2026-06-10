@@ -1,0 +1,44 @@
+/* Badge —— 5 种变体 */
+.ws-badge {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--font-family);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 16px;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+
+.ws-badge--success {
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border-color: var(--color-success-border);
+}
+
+.ws-badge--warning {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-color: var(--color-warning-border);
+}
+
+.ws-badge--admin {
+  background: var(--color-accent-purple-soft-bg);
+  color: #9333ea;
+  border-color: var(--color-accent-purple-soft-border);
+}
+
+.ws-badge--user {
+  background: #f1f5f9;
+  color: var(--color-text-secondary);
+  border-color: rgba(226, 232, 240, 0.6);
+}
+
+.ws-badge--amber-compact {
+  background: var(--color-warning-bg);
+  color: var(--color-warning-text);
+  border-color: rgba(253, 230, 138, 0.6);
+  font-size: 9px;
+}

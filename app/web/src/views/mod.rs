@@ -1,5 +1,9 @@
-mod home;
-pub use home::Home;
+mod auth;
+mod dashboard;
+mod not_found;
+mod users;
 
-mod blog;
-pub use blog::Blog;
+pub use auth::Auth;
+pub use dashboard::Dashboard;
+pub use not_found::NotFound;
+pub use users::Users;
