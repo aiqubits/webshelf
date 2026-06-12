@@ -4,7 +4,7 @@
 //! 通过 `LogBus` 写入 toast + console。
 
 use chrono::{DateTime, Utc};
-use client_api::{ClientError, UserResponse};
+use client_api::UserResponse;
 use dioxus::prelude::dioxus_router::Navigator;
 use dioxus::prelude::*;
 
@@ -12,8 +12,9 @@ use ui::{
     Align, Badge, BadgeVariant, Button, ButtonType, Column, DataTable, InputType, Modal, TextInput,
 };
 
+use crate::api::{ErrorContext, humanize_error};
 use crate::auth::AuthState;
-use crate::components::{HttpMethod, LogBus, LogKind};
+use crate::components::{HttpMethod, LogBus, push_log_err, push_log_ok};
 
 #[derive(Debug, Clone)]
 enum ListState {
@@ -76,20 +77,29 @@ pub fn Users() -> Element {
             let mut list = list;
             let bus = bus;
             let auth_inner = auth_for_effect.clone();
+            let version_check = list_version;
             spawn(async move {
+                let version = version_check();
                 list.set(ListState::Loading);
                 let res = client.list_users(1, 20).await;
+                // 丢弃过期响应：若 list_version 已递增，说明另一次获取已启动
+                if version_check() != version {
+                    return;
+                }
                 match res {
                     Ok(page) => {
                         push_log_ok(bus, HttpMethod::Get, "/api/users");
                         list.set(ListState::Loaded(page.items));
                     }
                     Err(err) => {
-                        push_log_err(bus, HttpMethod::Get, "/api/users", &err);
-                        if crate::api::handle_unauth(&err, auth_inner, nav) {
+                        if crate::api::handle_unauth(&err, auth_inner, nav, bus) {
                             return;
                         }
-                        list.set(ListState::Error(humanize_error(&err)));
+                        push_log_err(bus, HttpMethod::Get, "/api/users", &err);
+                        list.set(ListState::Error(humanize_error(
+                            &err,
+                            ErrorContext::UserManagement,
+                        )));
                     }
                 }
             });
@@ -184,6 +194,13 @@ fn render_table(list_snapshot: ListState, signals: UsersSignals) -> Element {
 }
 
 fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
+    // 直接从原结构上提取展示字段，避免先 clone 再逐字段 clone 的冗余。
+    let id_for_key = u.id;
+    let name = u.name.clone();
+    let email = u.email.clone();
+    let role = u.role.clone();
+    let created = u.created_at;
+
     let u_for_edit = u.clone();
     let u_for_delete = u;
     let mut s_edit = signals;
@@ -197,11 +214,6 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
         s_edit.editing_user.set(Some(u_for_edit.clone()));
         s_edit.modal_kind.set(ModalKind::Edit);
     };
-    let id_for_key = u_for_delete.id;
-    let name = u_for_delete.name.clone();
-    let email = u_for_delete.email.clone();
-    let role = u_for_delete.role.clone();
-    let created = u_for_delete.created_at;
     let delete_handler = move |_: MouseEvent| {
         s_delete.form_error.set(None);
         s_delete.deleting_user.set(Some(u_for_delete.clone()));
@@ -215,6 +227,8 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
             td {
                 if role == "admin" {
                     Badge { variant: BadgeVariant::Admin, "管理员" }
+                } else if role == "system" {
+                    Badge { variant: BadgeVariant::Admin, "系统管理员" }
                 } else {
                     Badge { variant: BadgeVariant::User, "普通用户" }
                 }
@@ -295,6 +309,10 @@ fn render_delete_modal(
     let on_cancel = move |_: MouseEvent| close_all(signals);
     let mut signals_for_submit = signals;
     let on_confirm = move |_: MouseEvent| {
+        // 防止快速双击触发两次 spawn
+        if *signals_for_submit.submitting.read() {
+            return;
+        }
         let Some(u) = signals_for_submit.deleting_user.cloned() else {
             signals_for_submit
                 .form_error
@@ -316,13 +334,6 @@ fn render_delete_modal(
                     HttpMethod::Delete,
                     &format!("/api/users/{target_id}"),
                 );
-            } else if let Err(ref err) = res {
-                push_log_err(
-                    bus_async,
-                    HttpMethod::Delete,
-                    &format!("/api/users/{target_id}"),
-                    err,
-                );
             }
             s_async.submitting.set(false);
             match res {
@@ -333,16 +344,28 @@ fn render_delete_modal(
                     s_async.list_version.with_mut(|v| *v += 1);
                 }
                 Err(err) => {
-                    if crate::api::handle_unauth(&err, auth_async, nav) {
+                    if crate::api::handle_unauth(&err, auth_async, nav, bus_async) {
                         return;
                     }
-                    s_async.form_error.set(Some(humanize_error(&err)));
+                    push_log_err(
+                        bus_async,
+                        HttpMethod::Delete,
+                        &format!("/api/users/{target_id}"),
+                        &err,
+                    );
+                    s_async
+                        .form_error
+                        .set(Some(humanize_error(&err, ErrorContext::UserManagement)));
                 }
             }
         });
     };
     rsx! {
-        Modal { title: "确认删除", on_close, open: true,
+        Modal {
+            title: "确认删除",
+            on_close,
+            open: true,
+            disable_backdrop: submitting,
             div { class: "ws-form-stack",
                 if let Some(err) = form_error.as_ref() {
                     p { class: "ws-form-error", "{err}" }
@@ -415,12 +438,23 @@ fn render_form_modal(
     let editing_for_submit = editing.clone();
     let mut signals_for_submit = signals;
     let on_submit = move |_: MouseEvent| {
+        // 防止快速双击触发两次 spawn
+        if *signals_for_submit.submitting.read() {
+            return;
+        }
         let name = signals_for_submit.form_name.cloned();
         let email = signals_for_submit.form_email.cloned();
         let password = signals_for_submit.form_password.cloned();
         let role = signals_for_submit.form_role.cloned();
         let editing_id = editing_for_submit.as_ref().map(|u| u.id);
         let kind_now = kind;
+        // 同步校验：密码为空时在 spawn 前提前返回，避免 loading 闪烁
+        if kind_now == ModalKind::Create && password.is_empty() {
+            signals_for_submit
+                .form_error
+                .set(Some("密码不能为空".into()));
+            return;
+        }
         let client_async = client.clone();
         let bus_async = log_bus;
         let mut s_async = signals_for_submit;
@@ -430,16 +464,9 @@ fn render_form_modal(
         spawn(async move {
             let res = match kind_now {
                 ModalKind::Create => {
-                    if password.is_empty() {
-                        s_async.form_error.set(Some("密码不能为空".into()));
-                        s_async.submitting.set(false);
-                        return;
-                    }
                     let r = client_async.create_user(&email, &password, &name).await;
                     if r.is_ok() {
                         push_log_ok(bus_async, HttpMethod::Post, "/api/users");
-                    } else if let Err(ref err) = r {
-                        push_log_err(bus_async, HttpMethod::Post, "/api/users", err);
                     }
                     r.map(|_| ())
                 }
@@ -459,8 +486,6 @@ fn render_form_modal(
                         .await;
                     if r.is_ok() {
                         push_log_ok(bus_async, HttpMethod::Put, &format!("/api/users/{id}"));
-                    } else if let Err(ref err) = r {
-                        push_log_err(bus_async, HttpMethod::Put, &format!("/api/users/{id}"), err);
                     }
                     r.map(|_| ())
                 }
@@ -479,10 +504,24 @@ fn render_form_modal(
                     s_async.list_version.with_mut(|v| *v += 1);
                 }
                 Err(err) => {
-                    if crate::api::handle_unauth(&err, auth_async, nav) {
+                    if crate::api::handle_unauth(&err, auth_async, nav, bus_async) {
                         return;
                     }
-                    s_async.form_error.set(Some(humanize_error(&err)));
+                    // 根据操作类型重建日志路径，避免在 inner match 中提前写日志导致双 toast
+                    let log_method = if kind_now == ModalKind::Create {
+                        HttpMethod::Post
+                    } else {
+                        HttpMethod::Put
+                    };
+                    let log_path = if kind_now == ModalKind::Create {
+                        "/api/users".to_string()
+                    } else {
+                        format!("/api/users/{}", editing_id.unwrap_or_default())
+                    };
+                    push_log_err(bus_async, log_method, &log_path, &err);
+                    s_async
+                        .form_error
+                        .set(Some(humanize_error(&err, ErrorContext::UserManagement)));
                 }
             }
         });
@@ -491,7 +530,11 @@ fn render_form_modal(
     let role_now = signals.form_role.cloned();
 
     rsx! {
-        Modal { title: title.to_string(), on_close, open: true,
+        Modal {
+            title: title.to_string(),
+            on_close,
+            open: true,
+            disable_backdrop: submitting,
             div { class: "ws-form-stack",
                 if let Some(err) = form_error.as_ref() {
                     p { class: "ws-form-error", "{err}" }
@@ -567,58 +610,10 @@ fn build_columns() -> Vec<Column> {
         Column::new("安全邮箱").align(Align::Left),
         Column::new("授权标签").align(Align::Left),
         Column::new("实例孵化时间").width("w-40").align(Align::Left),
-        Column::new("操作")
-            .width("w-32")
-            .align(Align::Center),
+        Column::new("操作").width("w-32").align(Align::Center),
     ]
 }
 
 fn format_dt(dt: &DateTime<Utc>) -> String {
     dt.format("%Y-%m-%d %H:%M").to_string()
-}
-
-fn humanize_error(err: &ClientError) -> String {
-    match err {
-        ClientError::Network(msg) => format!("网络异常: {msg}"),
-        ClientError::ServerError(status, body) => format!("服务器错误 (HTTP {status}): {body}"),
-        ClientError::Other(status, body) => {
-            let code = serde_json::from_str::<serde_json::Value>(body)
-                .ok()
-                .and_then(|v| v.get("error").and_then(|c| c.as_str().map(String::from)))
-                .unwrap_or_default();
-            let msg = serde_json::from_str::<serde_json::Value>(body)
-                .ok()
-                .and_then(|v| v.get("message").and_then(|m| m.as_str().map(String::from)))
-                .unwrap_or_else(|| body.clone());
-            match (status, code.as_str()) {
-                (401, _) => "未登录或会话已过期".to_string(),
-                (403, _) => "权限不足 (需 admin)".to_string(),
-                (404, _) => "用户不存在".to_string(),
-                (_, "validation_error") => format!("参数错误: {msg}"),
-                (_, "conflict") => "操作冲突（邮箱已存在或违反约束）".to_string(),
-                _ => format!("请求失败 (HTTP {status}): {msg}"),
-            }
-        }
-        ClientError::RateLimited(_) => "请求过于频繁，请稍后再试".to_string(),
-        ClientError::Deserialization(msg) => format!("响应解析失败: {msg}"),
-        ClientError::Config(msg) => format!("客户端配置错误: {msg}"),
-        _ => format!("未知错误: {err}"),
-    }
-}
-
-fn push_log_ok(mut bus: LogBus, method: HttpMethod, path: &str) {
-    bus.push(
-        method,
-        path.to_string(),
-        "200 OK".to_string(),
-        LogKind::Success,
-    );
-}
-
-fn push_log_err(mut bus: LogBus, method: HttpMethod, path: &str, err: &ClientError) {
-    let status = match err {
-        ClientError::Other(s, _) | ClientError::ServerError(s, _) => s.to_string(),
-        _ => "ERR".to_string(),
-    };
-    bus.push(method, path.to_string(), status, LogKind::Error);
 }

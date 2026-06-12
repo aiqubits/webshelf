@@ -29,7 +29,7 @@ pub fn Sidebar(
                 }
                 div { class: "ws-sidebar__logo-text",
                     span { class: "ws-sidebar__logo-title", "WebShelf Admin" }
-                    span { class: "ws-sidebar__logo-subtitle", "Rust Fullstack Framework" }
+                    span { class: "ws-sidebar__logo-subtitle", "Rust Fullstack Scaffold Framework" }
                 }
                 // 移动端关闭按钮
                 button {
@@ -81,8 +81,8 @@ pub fn Sidebar(
                     i { class: "fa-solid fa-arrow-up-right-from-square ws-sidebar__github-arrow" }
                 }
                 div { class: "ws-sidebar__copyright",
-                    div { "© 2026 WebShelf Scaffold." }
-                    div { "Powered by Rust & Axum" }
+                    div { "© 2026 WebShelf Scaffold Framework." }
+                    div { "Powered by WebShelf" }
                 }
             }
         }

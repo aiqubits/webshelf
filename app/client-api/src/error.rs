@@ -39,6 +39,16 @@ impl ClientError {
             _ => Self::Other(status, body),
         }
     }
+
+    /// 提取 HTTP 状态码字符串，非 HTTP 错误返回 `"ERR"`。
+    ///
+    /// 用于日志记录与 UI 错误摘要的统一入口。
+    pub fn status_or_label(&self) -> String {
+        match self {
+            Self::Other(s, _) | Self::ServerError(s, _) => s.to_string(),
+            _ => "ERR".to_string(),
+        }
+    }
 }
 
 impl From<reqwest::Error> for ClientError {

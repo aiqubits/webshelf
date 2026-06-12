@@ -25,10 +25,10 @@
   pointer-events: auto;
   width: 100%;
   max-width: 28rem;
-  background: rgba(255, 255, 255, 0.85);
-  backdrop-filter: blur(20px) saturate(180%);
-  -webkit-backdrop-filter: blur(20px) saturate(180%);
-  border: 1px solid rgba(226, 232, 240, 0.8);
+  background: var(--glass-panel-bg);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+  border: var(--glass-panel-border);
   border-radius: 16px;
   box-shadow:
     0 20px 25px -5px rgba(15, 23, 42, 0.12),

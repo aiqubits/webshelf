@@ -26,8 +26,6 @@
   --color-border-light: #f1f5f9;
   --color-border-subtle: rgba(226, 232, 240, 0.6);
 
-  /* 玻璃面板（供 stats_card / hero / dashboard panel 等使用） */
-  --color-glass-bg: rgba(255, 255, 255, 0.7);
   --color-surface-hover: rgba(99, 102, 241, 0.08);
 
   /* 玻璃面板 */
@@ -74,6 +72,7 @@
 
   /* 圆角 */
   --radius-md: 4px;
+  --radius-base: 6px;
   --radius-lg: 8px;
   --radius-xl: 12px;
   --radius-2xl: 16px;

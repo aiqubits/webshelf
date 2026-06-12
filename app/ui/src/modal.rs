@@ -13,6 +13,7 @@ pub fn Modal(
     title: String,
     on_close: EventHandler<MouseEvent>,
     #[props(default = true)] open: bool,
+    #[props(default = false)] disable_backdrop: bool,
     children: Element,
 ) -> Element {
     if !open {
@@ -20,13 +21,14 @@ pub fn Modal(
     }
 
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/modal.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/modal.css") }
         div {
             class: "ws-modal__backdrop",
-            onclick: move |e| on_close.call(e),
+            onclick: move |e| {
+                if !disable_backdrop {
+                    on_close.call(e);
+                }
+            },
         }
         div { class: "ws-modal__wrap", role: "dialog", aria_modal: "true",
             div { class: "ws-modal__card",

@@ -1,15 +1,18 @@
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
 };
+use sea_orm::{ActiveModelTrait, Set};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use validator::Validate;
 
 use crate::AppState;
+use crate::middlewares::auth::AuthUser;
 use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
 use crate::utils::error::ApiError;
+use crate::utils::password::verify_password;
 use crate::utils::validator::check_password_strength;
 
 /// Health check response
@@ -123,6 +126,93 @@ pub async fn create_user(
     Ok(Json(result))
 }
 
+/// Get current user profile — `GET /api/users/me`（任意已认证用户）
+pub async fn get_me(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+) -> Result<Json<UserResponse>, ApiError> {
+    let user_id = uuid::Uuid::parse_str(&auth_user.user_id)
+        .map_err(|_| ApiError::Internal("Invalid user ID in token".to_string()))?;
+
+    let service = UserService::new(state.db.clone());
+    let result = service
+        .get_user(user_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+    Ok(Json(result))
+}
+
+/// Change password request body
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordRequest {
+    /// 当前密码（用于验证身份）
+    pub current_password: String,
+    /// 新密码
+    pub new_password: String,
+}
+
+/// Change password response
+#[derive(Debug, Serialize)]
+pub struct ChangePasswordResponse {
+    pub message: String,
+}
+
+/// Change current user's password — `POST /api/users/me/password`（任意已认证用户）
+///
+/// 流程：验证当前密码 → 校验新密码强度 → 哈希新密码 → 更新数据库。
+pub async fn change_my_password(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Json(payload): Json<ChangePasswordRequest>,
+) -> Result<Json<ChangePasswordResponse>, ApiError> {
+    let user_id = Uuid::parse_str(&auth_user.user_id)
+        .map_err(|_| ApiError::Internal("Invalid user ID in token".to_string()))?;
+
+    if payload.current_password.is_empty() {
+        return Err(ApiError::BadRequest("当前密码不能为空".to_string()));
+    }
+    if payload.new_password.is_empty() {
+        return Err(ApiError::BadRequest("新密码不能为空".to_string()));
+    }
+    if payload.current_password == payload.new_password {
+        return Err(ApiError::BadRequest("新密码不能与当前密码相同".to_string()));
+    }
+
+    // 1. 查询用户实体（需要 password_hash 来验证当前密码）
+    let service = UserService::new(state.db.clone());
+    let user = service
+        .get_user_with_hash(user_id)
+        .await?
+        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+
+    // 2. 验证当前密码
+    let is_valid = verify_password(&payload.current_password, &user.password_hash)
+        .map_err(|e| ApiError::Internal(format!("Password verification failed: {}", e)))?;
+    if !is_valid {
+        return Err(ApiError::Unauthorized("当前密码错误".to_string()));
+    }
+
+    // 3. 校验新密码强度
+    check_password_strength(&payload.new_password)?;
+
+    // 4. 哈希并更新
+    let new_hash = crate::utils::password::hash_password(&payload.new_password)
+        .map_err(|e| ApiError::Internal(format!("Failed to hash password: {}", e)))?;
+
+    let now = chrono::Utc::now();
+    let mut active_model: crate::repositories::user::ActiveModel = user.into();
+    active_model.password_hash = Set(new_hash);
+    active_model.updated_at = Set(now);
+    active_model.update(&state.db).await?;
+
+    tracing::info!("User {} changed password", auth_user.user_id);
+
+    Ok(Json(ChangePasswordResponse {
+        message: "密码修改成功".to_string(),
+    }))
+}
+
 /// Get a user by ID
 pub async fn get_user(
     State(state): State<AppState>,
@@ -157,10 +247,10 @@ pub struct UpdateUserRequest {
 /// Validate role value against allowed roles
 fn validate_role(role: &str) -> Result<(), validator::ValidationError> {
     match role {
-        "user" | "admin" => Ok(()),
+        "user" | "admin" | "system" => Ok(()),
         _ => {
             let mut err = validator::ValidationError::new("invalid_role");
-            err.message = Some("role must be 'user' or 'admin'".into());
+            err.message = Some("role must be 'user', 'admin', or 'system'".into());
             Err(err)
         }
     }

@@ -9,9 +9,7 @@ use dioxus::prelude::*;
 pub struct ToastEntry {
     /// 唯一 id，用于动画与 dismiss。
     pub id: u128,
-    /// HTTP 方法字面值（"GET" / "POST" / "PUT" / "DELETE"）。
-    pub method: String,
-    /// 决定 badge 颜色。
+    /// 决定 badge 颜色与显示文字；显示文字通过 `ToastMethod::as_str()` 获取。
     pub method_variant: ToastMethod,
     /// API 路径，如 `/api/users`。
     pub path: String,
@@ -32,6 +30,16 @@ pub enum ToastMethod {
 }
 
 impl ToastMethod {
+    /// HTTP 方法显示文字，如 `"GET"`、`"POST"`。
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Post => "POST",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
+        }
+    }
+
     pub fn class(&self) -> &'static str {
         match self {
             Self::Get => "ws-toast__method--get",
@@ -46,7 +54,6 @@ impl ToastMethod {
 pub enum ToastKind {
     Success,
     Error,
-    Info,
     Important,
 }
 
@@ -55,7 +62,6 @@ impl ToastKind {
         match self {
             Self::Success => "ws-toast--success",
             Self::Error => "ws-toast--error",
-            Self::Info => "ws-toast--info",
             Self::Important => "ws-toast--important",
         }
     }
@@ -64,7 +70,6 @@ impl ToastKind {
         match self {
             Self::Success => "ws-toast__status--success",
             Self::Error | Self::Important => "ws-toast__status--error",
-            Self::Info => "ws-toast__status--info",
         }
     }
 }
@@ -80,10 +85,7 @@ pub fn ToastStack(
     on_dismiss: EventHandler<u128>,
 ) -> Element {
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/toast.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/toast.css") }
         div { class: "ws-toast-container",
             for entry in entries.cloned() {
                 Toast {
@@ -102,70 +104,67 @@ fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u128>
     let id = entry.id;
     let mut exiting = use_signal(|| false);
 
-    use_effect(move || {
-        // 自动 dismiss —— 先切 exiting 让 CSS 退出动画播完，再回调 on_dismiss
-        let entry_id = id;
-        let dismiss_delay_ms = auto_dismiss_ms;
-        let exit_anim_ms: u64 = 300;
-        spawn(async move {
-            #[cfg(target_arch = "wasm32")]
-            {
-                gloo_timers::future::TimeoutFuture::new(dismiss_delay_ms as u32).await;
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(dismiss_delay_ms)).await;
-            }
-            exiting.set(true);
-            #[cfg(target_arch = "wasm32")]
-            {
-                gloo_timers::future::TimeoutFuture::new(exit_anim_ms as u32).await;
-            }
-            #[cfg(not(target_arch = "wasm32"))]
-            {
-                tokio::time::sleep(std::time::Duration::from_millis(exit_anim_ms)).await;
-            }
-            on_dismiss.call(entry_id);
-        });
+    // 使用 use_resource 替代 use_effect + spawn：
+    // use_resource 的 Future 在组件卸载时自动取消，避免旧 timer 在已销毁
+    // 组件上调用 exiting.set() / on_dismiss.call() 导致未定义行为。
+    //
+    // 必须与 app/ui/assets/styling/toast.css 中 .ws-toast--exiting 的
+    // transition-duration 保持同步（默认 300ms ease-in-out）。
+    const EXIT_ANIM_MS: u64 = 300;
+    use_resource(move || async move {
+        // 自动 dismiss 延迟
+        #[cfg(target_arch = "wasm32")]
+        {
+            gloo_timers::future::TimeoutFuture::new(auto_dismiss_ms.min(u32::MAX as u64) as u32)
+                .await;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(auto_dismiss_ms)).await;
+        }
+        exiting.set(true);
+
+        // 退出动画持续时间
+        #[cfg(target_arch = "wasm32")]
+        {
+            gloo_timers::future::TimeoutFuture::new(EXIT_ANIM_MS as u32).await;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(EXIT_ANIM_MS)).await;
+        }
+        on_dismiss.call(id);
     });
 
-    let class = format!(
-        "ws-toast {} {}",
-        entry.kind.class(),
-        entry.method_variant.class()
-    );
-    if exiting() {
-        rsx! {
-            div { class: "ws-toast ws-toast--exiting {entry.kind.class()} {entry.method_variant.class()}",
-                span { class: "ws-toast__method",
-                    span { class: "ws-toast__method-text", "{entry.method}" }
-                }
-                div { class: "ws-toast__body",
-                    div { class: "ws-toast__path", "{entry.path}" }
-                    div { class: "ws-toast__status {entry.kind.status_class()}", "响应状态: {entry.status}" }
-                }
-                button {
-                    class: "ws-toast__close",
-                    onclick: move |_| on_dismiss.call(id),
-                    i { class: "fa-solid fa-xmark" }
+    let class = if exiting() {
+        format!(
+            "ws-toast ws-toast--exiting {} {}",
+            entry.kind.class(),
+            entry.method_variant.class()
+        )
+    } else {
+        format!(
+            "ws-toast {} {}",
+            entry.kind.class(),
+            entry.method_variant.class()
+        )
+    };
+
+    rsx! {
+        div { class: "{class}",
+            span { class: "ws-toast__method",
+                span { class: "ws-toast__method-text", "{entry.method_variant.as_str()}" }
+            }
+            div { class: "ws-toast__body",
+                div { class: "ws-toast__path", "{entry.path}" }
+                div { class: "ws-toast__status {entry.kind.status_class()}",
+                    "响应状态: {entry.status}"
                 }
             }
-        }
-    } else {
-        rsx! {
-            div { class: "{class}",
-                span { class: "ws-toast__method",
-                    span { class: "ws-toast__method-text", "{entry.method}" }
-                }
-                div { class: "ws-toast__body",
-                    div { class: "ws-toast__path", "{entry.path}" }
-                    div { class: "ws-toast__status {entry.kind.status_class()}", "响应状态: {entry.status}" }
-                }
-                button {
-                    class: "ws-toast__close",
-                    onclick: move |_| on_dismiss.call(id),
-                    i { class: "fa-solid fa-xmark" }
-                }
+            button {
+                class: "ws-toast__close",
+                onclick: move |_| on_dismiss.call(id),
+                i { class: "fa-solid fa-xmark" }
             }
         }
     }

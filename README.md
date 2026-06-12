@@ -57,6 +57,7 @@ docker run --name webshelf-postgres \
   -e POSTGRES_PASSWORD=password \
   -e POSTGRES_DB=webshelf \
   -p 5432:5432 \
+  --restart unless-stopped \
   -d postgres:16-alpine
 ```
 
@@ -65,6 +66,7 @@ docker run --name webshelf-postgres \
 docker run --name webshelf-redis \
   --network webshelf-net \
   -p 6379:6379 \
+  --restart unless-stopped \  
   -d redis:7-alpine
 ```
 
@@ -105,11 +107,11 @@ docker compose logs -f
 ```toml
 # 数据库连接 (PostgreSQL)
 # 将 CHANGE_ME_POSTGRES_PASSWORD 替换为强密码
-database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@localhost:5432/webshelf"
+database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@127.0.0.1:5432/webshelf"
 
 # Redis 连接 (分布式锁)
 # 将 CHANGE_ME_REDIS_PASSWORD 替换为强密码
-redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@localhost:6379"
+redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@127.0.0.1:6379"
 
 # JWT 设置
 # ⚠️ 生产环境必须修改！使用以下命令生成强密钥：
@@ -195,14 +197,14 @@ cargo run --package webshelf-server -- [OPTIONS]
 
 示例：
 ```bash
-cargo run --package webshelf-server -- --host 127.0.0.1 --port 8080 --log-level debug
+cargo run --package webshelf-server -- --host 127.0.0.1 --port 3000 --log-level debug
 ```
 
 ## 📚 API 文档
 
 ### 基础 URL
 ```
-http://localhost:3000/api
+http://127.0.0.1:3000/api
 ```
 
 ### 健康检查
@@ -550,8 +552,8 @@ Nginx 在反向代理层实现速率限制：
 **本地开发环境:**
 ```bash
 # 直接连接本地运行的 PostgreSQL 和 Redis
-database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@localhost:5432/webshelf"
-redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@localhost:6379"
+database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@127.0.0.1:5432/webshelf"
+redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@127.0.0.1:6379"
 ```
 
 **Docker Compose 环境:**

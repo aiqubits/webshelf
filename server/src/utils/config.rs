@@ -21,6 +21,14 @@ pub struct AppConfig {
     #[serde(default = "default_jwt_expiry")]
     pub jwt_expiry_seconds: u64,
 
+    /// System admin account email (auto-seeded on first boot)
+    #[serde(default = "default_system_admin_email")]
+    pub system_admin_email: String,
+
+    /// System admin account password (auto-seeded on first boot)
+    #[serde(default = "default_system_admin_password")]
+    pub system_admin_password: String,
+
     /// Server configuration
     #[serde(default)]
     pub server: ServerConfig,
@@ -86,6 +94,14 @@ fn default_redis_url() -> String {
 // Default JWT secret key — must be replaced before deployment
 fn default_jwt_secret() -> String {
     "REPLACE_ME_WITH_A_STRONG_SECRET".to_string()
+}
+
+fn default_system_admin_email() -> String {
+    "admin@webshelf.local".to_string()
+}
+
+fn default_system_admin_password() -> String {
+    "change-me-admin-password".to_string()
 }
 
 // Default value functions
@@ -196,6 +212,8 @@ mod tests {
             redis_url: "redis://localhost".to_string(),
             jwt_secret: "secret".to_string(),
             jwt_expiry_seconds: 7200,
+            system_admin_email: "admin@webshelf.local".to_string(),
+            system_admin_password: "change-me-admin-password".to_string(),
             server: ServerConfig::default(),
             database: DatabaseConfig::default(),
         };

@@ -103,6 +103,16 @@ impl UserService {
         Ok(user.map(UserResponse::from))
     }
 
+    /// Get user by ID including the password hash (for internal auth flows).
+    pub async fn get_user_with_hash(&self, id: Uuid) -> Result<Option<UserModel>, UserError> {
+        let user = UserEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .context("Failed to query user")?;
+
+        Ok(user)
+    }
+
     /// Get user by email
     pub async fn get_user_by_email(&self, email: &str) -> Result<Option<UserModel>, UserError> {
         let user = UserEntity::find()

@@ -8,7 +8,7 @@
 # Replace CHANGE_ME_POSTGRES_PASSWORD with a strong password
 # Format: postgres://user:password@host:port/database
 # Can be overridden by environment variable: WEBSHELF_DATABASE_URL
-database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@localhost:5432/webshelf"
+database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@127.0.0.1:5432/webshelf"
 
 # Redis connection URL (for distributed locking only)
 # NOTE: When using Docker Compose, this is overridden by WEBSHELF_REDIS_URL
@@ -19,7 +19,7 @@ database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@localhost:5432/w
 #     To avoid this, generate passwords with: openssl rand -hex 32
 # Format: redis://[:password]@host:port
 # Can be overridden by environment variable: WEBSHELF_REDIS_URL
-redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@localhost:6379"
+redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@127.0.0.1:6379"
 
 # ⚠️  SECURITY WARNING: MUST change this in production!
 # Generate a strong secret with: openssl rand -base64 64
@@ -30,6 +30,14 @@ jwt_secret = "REPLACE_ME_WITH_A_STRONG_SECRET"
 # JWT token expiration time in seconds (default: 1 hour)
 # Can be overridden by environment variable: WEBSHELF_JWT_EXPIRY_SECONDS
 jwt_expiry_seconds = 3600
+
+# System admin account (auto-seeded on first boot, only one can exist)
+# The system admin has super-admin privileges (bypasses all admin-only restrictions)
+# ⚠️  SECURITY: MUST override these in staging/production environments!
+#     The server will refuse to start with default values in non-development mode.
+# Can be overridden by environment variables: WEBSHELF_SYSTEM_ADMIN_EMAIL / WEBSHELF_SYSTEM_ADMIN_PASSWORD
+system_admin_email = "admin@webshelf.local"
+system_admin_password = "change-me-admin-password"
 
 # Server configuration
 [server]

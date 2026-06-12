@@ -47,12 +47,14 @@ docker run --name webshelf-postgres-dev \
   -e POSTGRES_PASSWORD=devpassword \
   -e POSTGRES_DB=webshelf \
   -p 5432:5432 \
+  --restart unless-stopped \
   -d postgres:16-alpine
 
 # 4. 启动 Redis
 docker run --name webshelf-redis-dev \
   --network webshelf-net \
   -p 6379:6379 \
+  --restart unless-stopped \
   -d redis:7-alpine
 
 # 5. 复制配置文件（-n 避免覆盖已有的 config.toml）
@@ -71,6 +73,7 @@ fi
 # 6. 运行后端服务
 cargo run --package webshelf-server -- \
   --env development \
+  --host 0.0.0.0 --port 3000 \
   --log-level debug
 ```
 
@@ -78,15 +81,15 @@ cargo run --package webshelf-server -- \
 
 ```bash
 # 新开一个终端，检查健康状态
-curl http://localhost:3000/api/health
+curl http://127.0.0.1:3000/api/health
 
 # 注册用户
-curl -X POST http://localhost:3000/api/public/auth/register \
+curl -X POST http://127.0.0.1:3000/api/public/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"dev@test.com","password":"DevPass123","name":"Dev User"}'
 
 # 登录获取 Token
-curl -X POST http://localhost:3000/api/public/auth/login \
+curl -X POST http://127.0.0.1:3000/api/public/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"dev@test.com","password":"DevPass123"}'
 ```
@@ -96,21 +99,21 @@ curl -X POST http://localhost:3000/api/public/auth/login \
 ```bash
 # 在 app/web 目录下启动 Dioxus 开发服务器
 cd app/web
-dx serve --hot-reload true
+dx serve --package web --platform web --hot-reload true --addr 0.0.0.0
 ```
 
-前端开发服务器默认运行在 `http://localhost:8080`，通过 Nginx 反向代理调用后端 API。
+前端开发服务器默认运行在 `http://127.0.0.1:8080`，默认不通过 Nginx 反向代理调用后端 API。
 
 **其他前端模式：**
 
 ```bash
 # 桌面应用
 cd app/desktop
-dx serve --hot-reload true
+dx serve --package desktop --platform desktop --hot-reload true --addr 0.0.0.0
 
 # 移动应用（需要相应平台环境）
 cd app/mobile
-dx serve --hot-reload true
+dx serve --package mobile --platform mobile --hot-reload true --addr 0.0.0.0
 ```
 
 ### 清理本地开发环境
@@ -242,17 +245,17 @@ docker compose logs -f
 docker compose ps
 
 # 验证后端健康
-curl http://localhost:3000/api/health
+curl http://127.0.0.1:3000/api/health
 
 # 验证前端健康（通过 Nginx）
-curl http://localhost/nginx-health
+curl http://127.0.0.1/nginx-health
 
 # 注册并登录测试
-curl -X POST http://localhost:3000/api/public/auth/register \
+curl -X POST http://127.0.0.1:3000/api/public/auth/register \
   -H "Content-Type: application/json" \
   -d '{"email":"demo@example.com","password":"DemoPass123","name":"Demo User"}'
 
-curl -X POST http://localhost:3000/api/public/auth/login \
+curl -X POST http://127.0.0.1:3000/api/public/auth/login \
   -H "Content-Type: application/json" \
   -d '{"email":"demo@example.com","password":"DemoPass123"}'
 ```
@@ -337,10 +340,10 @@ docker compose up
 docker compose ps
 
 # 检查后端健康
-curl http://localhost:3000/api/health
+curl http://127.0.0.1:3000/api/health
 
 # 检查前端健康
-curl http://localhost:80/nginx-health
+curl http://127.0.0.1:80/nginx-health
 
 # 查看特定服务日志
 docker compose logs webshelf-server
@@ -352,7 +355,7 @@ docker compose logs redis
 
 ```bash
 # 注册新用户
-curl -X POST http://localhost:3000/api/public/auth/register \
+curl -X POST http://127.0.0.1:3000/api/public/auth/register \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
@@ -361,7 +364,7 @@ curl -X POST http://localhost:3000/api/public/auth/register \
   }'
 
 # 登录
-curl -X POST http://localhost:3000/api/public/auth/login \
+curl -X POST http://127.0.0.1:3000/api/public/auth/login \
   -H "Content-Type: application/json" \
   -d '{
     "email": "test@example.com",
@@ -369,7 +372,7 @@ curl -X POST http://localhost:3000/api/public/auth/login \
   }'
 
 # 获取 token 后，列表用户（替换 YOUR_TOKEN）
-curl http://localhost:3000/api/users \
+curl http://127.0.0.1:3000/api/users \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
@@ -1093,7 +1096,7 @@ WEBSHELF_ENV=development|staging|production
 
 | 环境 | DATABASE_URL | REDIS_URL | 设置方法 |
 |------|---------|----------|--------|
-| 本地开发 | localhost:5432 | localhost:6379 (无密码) | config.toml 中直接配置 |
+| 本地开发 | 127.0.0.1:5432 | 127.0.0.1:6379 (无密码) | config.toml 中直接配置 |
 | Docker Compose | postgres:5432 | redis:6379 (带密码) | .env 文件中配置 (WEBSHELF_POSTGRES_PASSWORD, WEBSHELF_REDIS_PASSWORD) |
 | Kubernetes | postgres-service:5432 | redis-service:6379 (带密码) | k8s/secret.yaml 中配置 |
 

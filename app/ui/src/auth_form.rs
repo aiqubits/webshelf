@@ -21,6 +21,7 @@ pub struct AuthPayload {
     pub name: String,
     pub email: String,
     pub password: String,
+    pub password_confirm: String,
     pub remember: bool,
 }
 
@@ -30,16 +31,14 @@ pub fn AuthForm(
     name: Signal<String>,
     email: Signal<String>,
     password: Signal<String>,
-    #[props(default)] remember: Signal<bool>,
+    password_confirm: Signal<String>,
+    #[props(default)] remember: Option<Signal<bool>>,
     #[props(default = false)] loading: bool,
     #[props(default)] error: Option<String>,
     on_submit: EventHandler<AuthPayload>,
 ) -> Element {
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/auth_form.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/auth_form.css") }
         div { class: "ws-auth",
             div { class: "ws-auth__orb ws-auth__orb--purple" }
             div { class: "ws-auth__orb ws-auth__orb--indigo" }
@@ -61,15 +60,18 @@ pub fn AuthForm(
 
             form {
                 class: "ws-auth__form",
+                novalidate: true,
                 onsubmit: move |e| {
                     e.prevent_default();
-                    on_submit.call(AuthPayload {
-                        mode: *mode.read(),
-                        name: name.read().clone(),
-                        email: email.read().clone(),
-                        password: password.read().clone(),
-                        remember: *remember.read(),
-                    });
+                    on_submit
+                        .call(AuthPayload {
+                            mode: *mode.read(),
+                            name: name.read().clone(),
+                            email: email.read().clone(),
+                            password: password.read().clone(),
+                            password_confirm: password_confirm.read().clone(),
+                            remember: remember.as_ref().map(|s| *s.read()).unwrap_or(false),
+                        });
                 },
                 if *mode.read() == AuthMode::Register {
                     TextInput {
@@ -85,7 +87,13 @@ pub fn AuthForm(
 
                 TextInput {
                     label: if *mode.read() == AuthMode::Login { "注册绑定的邮箱".to_string() } else { "电子邮箱载体".to_string() },
-                    placeholder: Some(if *mode.read() == AuthMode::Login { "name@domain.com".to_string() } else { "master@rust.org".to_string() }),
+                    placeholder: Some(
+                        if *mode.read() == AuthMode::Login {
+                            "name@domain.com".to_string()
+                        } else {
+                            "master@rust.org".to_string()
+                        },
+                    ),
                     value: email,
                     input_type: InputType::Email,
                     required: true,
@@ -102,12 +110,30 @@ pub fn AuthForm(
                     required: true,
                     disabled: loading,
                     name: Some("password".to_string()),
-                    autocomplete: Some(if *mode.read() == AuthMode::Login { "current-password".to_string() } else { "new-password".to_string() }),
-                    hint: if *mode.read() == AuthMode::Register {
-                        Some("密码需 ≥8 字符，包含大小写字母、数字和 ASCII 标点".to_string())
-                    } else {
-                        None
-                    },
+                    autocomplete: Some(
+                        if *mode.read() == AuthMode::Login {
+                            "current-password".to_string()
+                        } else {
+                            "new-password".to_string()
+                        },
+                    ),
+                    hint: if *mode.read() == AuthMode::Register { Some(
+                        "密码需 ≥8 字符，包含大小写字母、数字和 ASCII 标点"
+                            .to_string(),
+                    ) } else { None },
+                }
+
+                if *mode.read() == AuthMode::Register {
+                    TextInput {
+                        label: "确认密码".to_string(),
+                        placeholder: Some("••••••••".to_string()),
+                        value: password_confirm,
+                        input_type: InputType::Password,
+                        required: true,
+                        disabled: loading,
+                        name: Some("password_confirm".to_string()),
+                        autocomplete: Some("new-password".to_string()),
+                    }
                 }
 
                 if let Some(err) = error.as_ref() {
@@ -119,9 +145,13 @@ pub fn AuthForm(
                         label { class: "ws-auth__remember",
                             input {
                                 r#type: "checkbox",
-                                checked: *remember.read(),
+                                checked: remember.as_ref().map(|s| *s.read()).unwrap_or(false),
                                 disabled: loading,
-                                onchange: move |e| remember.set(e.checked()),
+                                onchange: move |e| {
+                                    if let Some(ref mut r) = remember {
+                                        r.set(e.checked());
+                                    }
+                                },
                             }
                             "维持持久化登录"
                         }

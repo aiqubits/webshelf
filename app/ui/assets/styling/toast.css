@@ -98,7 +98,6 @@
 
 .ws-toast__status--success { color: var(--color-success-text); }
 .ws-toast__status--error { color: var(--color-error-text); }
-.ws-toast__status--info { color: var(--color-brand-indigo-deep); }
 
 .ws-toast__close {
   display: inline-flex;

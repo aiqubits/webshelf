@@ -54,3 +54,6 @@ pub use route_card::{RouteCard, RouteMethod};
 
 mod code_console;
 pub use code_console::{CodeConsole, ConsoleKind, ConsoleLine};
+
+mod global_styles;
+pub use global_styles::GlobalStyles;

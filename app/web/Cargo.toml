@@ -16,7 +16,7 @@ serde_json = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys = { version = "0.3", features = ["Window", "Storage"] }
 js-sys = "0.3"
-uuid = { version = "1", features = ["v4", "serde", "js"] }
+uuid = { workspace = true, features = ["js"] }
 gloo-timers = { version = "0.3", features = ["futures"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

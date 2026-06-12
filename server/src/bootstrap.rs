@@ -19,6 +19,7 @@ use crate::{
         panic::{self, panic_middleware},
     },
     migrations,
+    repositories::user::{Column, Entity as UserEntity},
     routes::{api_routes, auth_routes},
     utils::{init_logger, load_config},
 };
@@ -286,6 +287,19 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
                 app_config.jwt_secret.len()
             );
         }
+
+        // 仅警告而非拒绝：system admin 默认凭据仍可在任意环境使用。
+        // 默认账号仅在本地开发友好；生产环境管理员应在首次登录后通过
+        // 个人设置页面修改密码（POST /api/users/me/password）。
+        if app_config.system_admin_email == "admin@webshelf.local"
+            || app_config.system_admin_password == "change-me-admin-password"
+        {
+            tracing::warn!(
+                "System admin credentials are using default values in {} environment. \
+                 Please change the password via the profile settings page after first login.",
+                cli_args.env
+            );
+        }
     }
 
     let host = cli_args
@@ -295,6 +309,7 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
 
     let db = init_database(&app_config).await?;
     run_database_migrations(&db).await?;
+    seed_system_admin(&db, &app_config).await?;
 
     let redis_client = init_redis(&app_config).await?;
 
@@ -305,6 +320,53 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
     let bind_addr = format!("{}:{}", host, port);
 
     Ok(BootstrapResult { app, bind_addr })
+}
+
+/// Seed system admin account on first boot.
+///
+/// Checks if a user with the configured `system_admin_email` already exists.
+/// If not, creates a new user with role "system". The system account is the
+/// super-admin: only one can exist, and it bypasses all admin-only restrictions.
+async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig) -> Result<()> {
+    use crate::repositories::user::ActiveModel;
+    use crate::utils::password::hash_password;
+    use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
+
+    let email = &config.system_admin_email;
+
+    // Check if system admin already exists
+    let existing = UserEntity::find()
+        .filter(Column::Email.eq(email))
+        .one(db)
+        .await
+        .context("Failed to query system admin user")?;
+
+    if existing.is_some() {
+        tracing::info!("System admin account already exists: {}", email);
+        return Ok(());
+    }
+
+    // Create system admin user
+    let password_hash = hash_password(&config.system_admin_password)
+        .context("Failed to hash system admin password")?;
+
+    let now = chrono::Utc::now();
+    let user = ActiveModel {
+        id: Set(uuid::Uuid::new_v4()),
+        email: Set(email.clone()),
+        password_hash: Set(password_hash),
+        name: Set("System Administrator".to_string()),
+        role: Set("system".to_string()),
+        created_at: Set(now),
+        updated_at: Set(now),
+    };
+
+    user.insert(db)
+        .await
+        .context("Failed to create system admin user")?;
+
+    tracing::info!("System admin account created: {}", email);
+    Ok(())
 }
 
 /// Start HTTP server with graceful shutdown

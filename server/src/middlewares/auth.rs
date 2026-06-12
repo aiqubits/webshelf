@@ -140,6 +140,7 @@ fn forbidden_response(message: &str) -> Response {
 
 /// Require admin role middleware — returns 403 if the authenticated user is not an admin.
 ///
+/// The `system` role (super-admin) also passes this check.
 /// Apply this middleware to routes that require admin privileges.
 pub async fn require_admin(request: Request, next: Next) -> Response {
     let auth_user = match request.extensions().get::<AuthUser>() {
@@ -147,7 +148,7 @@ pub async fn require_admin(request: Request, next: Next) -> Response {
         None => return unauthorized_response("Authentication required"),
     };
 
-    if auth_user.role != "admin" {
+    if auth_user.role != "admin" && auth_user.role != "system" {
         return forbidden_response("Admin privileges required");
     }
 

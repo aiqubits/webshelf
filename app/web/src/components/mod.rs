@@ -11,6 +11,9 @@ mod require_admin;
 mod token_expiry_guard;
 
 pub use app_shell_layout::AppShellLayout;
-pub use log_bus::{HttpMethod, LogBus, LogEntry, LogKind};
+pub use log_bus::{
+    HttpMethod, LogBus, LogEntry, LogKind, now_unix_ms, now_unix_secs, push_log_err, push_log_ok,
+    push_log_result,
+};
 pub use require_admin::RequireAdmin;
 pub use token_expiry_guard::TokenExpiryGuard;

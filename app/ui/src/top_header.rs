@@ -10,12 +10,15 @@ pub fn TopHeader(
     user_name: String,
     user_email: String,
     #[props(default)] on_logout: Option<EventHandler<MouseEvent>>,
+    #[props(default)] on_user_click: Option<EventHandler<MouseEvent>>,
 ) -> Element {
+    let user_class = if on_user_click.is_some() {
+        "ws-top-header__user ws-top-header__user--clickable"
+    } else {
+        "ws-top-header__user"
+    };
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/top_header.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/top_header.css") }
         header { class: "ws-top-header",
             // 左侧：汉堡菜单 + 搜索框
             div { class: "ws-top-header__left",
@@ -43,7 +46,14 @@ pub fn TopHeader(
                     span { class: "ws-top-header__status-text", "Axum Node Online" }
                 }
                 span { class: "ws-top-header__divider" }
-                div { class: "ws-top-header__user",
+                div {
+                    class: user_class,
+                    title: if on_user_click.is_some() { "点击进入个人设置" } else { "" },
+                    onclick: move |e| {
+                        if let Some(ref h) = on_user_click {
+                            h.call(e);
+                        }
+                    },
                     div { class: "ws-top-header__avatar", "WS" }
                     div { class: "ws-top-header__identity",
                         span { class: "ws-top-header__name", "{user_name}" }

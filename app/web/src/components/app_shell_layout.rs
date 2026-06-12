@@ -21,7 +21,9 @@ pub fn AppShellLayout() -> Element {
     let active_nav = match route {
         Route::Dashboard {} => NavKey::Dashboard,
         Route::Users {} => NavKey::Users,
-        // 本布局只包裹 Dashboard 和 Users，其他路由不会进到这里。
+        // 本布局包裹 Dashboard / Settings / Users（见 main.rs 路由定义），
+        // Auth / NotFound 等路由在 AppShellLayout 外部，不会到达此分支。
+        // 通配臂作为防御性兜底：新路由若被错误放入本布局时高亮 Dashboard。
         _ => NavKey::Dashboard,
     };
 
@@ -51,12 +53,15 @@ pub fn AppShellLayout() -> Element {
             top_header: rsx! {
                 TopHeader {
                     on_sidebar_toggle: move |_| sidebar_open.toggle(),
-                    search_value: search_value,
-                    user_name: user_name,
-                    user_email: user_email,
+                    search_value,
+                    user_name,
+                    user_email,
+                    on_user_click: move |_| {
+                        nav.push(Route::Settings {});
+                    },
                     on_logout: move |_| {
                         auth.logout();
-                        nav.push(Route::Auth {});
+                        nav.replace(Route::Auth {});
                     },
                 }
             },

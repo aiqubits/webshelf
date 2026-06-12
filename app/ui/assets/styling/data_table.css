@@ -46,12 +46,12 @@
 .ws-table__body {
   font-size: 12px;
   font-weight: 500;
-  line-height: 18px;
+  line-height: 16px;
   color: var(--color-text-secondary);
 }
 
 .ws-table__body tr {
-  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+  border-bottom: 1px solid rgba(241, 245, 249, 0.6);
   transition: background 120ms ease;
 }
 

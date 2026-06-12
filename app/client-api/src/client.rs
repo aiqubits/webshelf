@@ -183,6 +183,24 @@ impl Client {
         self.get_json(&format!("/api/users/{}", id), None).await
     }
 
+    /// 获取当前登录用户资料 — `GET /api/users/me`（任意已认证用户）
+    pub async fn get_me(&self) -> Result<UserResponse, ClientError> {
+        self.get_json("/api/users/me", None).await
+    }
+
+    /// 修改当前用户密码 — `POST /api/users/me/password`（任意已认证用户）
+    pub async fn change_password(
+        &self,
+        current_password: impl Into<String>,
+        new_password: impl Into<String>,
+    ) -> Result<ChangePasswordResponse, ClientError> {
+        let body = ChangePasswordRequest {
+            current_password: current_password.into(),
+            new_password: new_password.into(),
+        };
+        self.post_json("/api/users/me/password", &body, None).await
+    }
+
     /// 创建用户 — `POST /api/users`（需要 admin 角色）
     pub async fn create_user(
         &self,
@@ -339,7 +357,7 @@ impl Client {
             // 为服务器留出最大恢复窗口）
             if attempt > 0 {
                 let delay_ms = 500u64 * (1u64 << (attempt - 1).min(MAX_BACKOFF_SHIFT));
-                Self::sleep_ms(delay_ms as u32).await;
+                Self::sleep_ms(delay_ms.min(u32::MAX as u64) as u32).await;
             }
 
             // 入口守卫（第 329 行）已确保 builder 可克隆才进入循环；

@@ -5,7 +5,6 @@
 use base64::Engine;
 use serde::Deserialize;
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Deserialize)]
 pub struct JwtPayload {
     /// 用户 UUID（字符串）
@@ -14,6 +13,7 @@ pub struct JwtPayload {
     pub exp: u64,
     /// Unix 秒签发时间
     #[serde(default)]
+    #[allow(dead_code)]
     pub iat: u64,
     /// "user" | "admin"
     pub role: String,
@@ -29,9 +29,4 @@ pub fn decode_payload(token: &str) -> Option<JwtPayload> {
         .decode(payload_b64)
         .ok()?;
     serde_json::from_slice::<JwtPayload>(&bytes).ok()
-}
-
-/// 检查 token 是否已过期（基于 JWT 的 `exp` 字段）。
-pub fn is_expired(token: &str, now_unix_secs: u64) -> bool {
-    decode_payload(token).is_none_or(|p| now_unix_secs >= p.exp)
 }

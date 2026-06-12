@@ -1,0 +1,112 @@
+/* Settings —— 个人设置页面 */
+.ws-settings {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 32px 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+.ws-settings__header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ws-settings__title {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 28px;
+  font-weight: 700;
+  line-height: 36px;
+  color: var(--color-text-primary);
+}
+
+.ws-settings__subtitle {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--color-text-muted);
+}
+
+.ws-settings__section {
+  background: var(--glass-panel-bg);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+  border: 1px solid rgba(226, 232, 240, 0.4);
+  border-radius: 16px;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.04);
+}
+
+.ws-settings__section-title {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 16px;
+  font-weight: 700;
+  line-height: 24px;
+  color: var(--color-text-primary);
+}
+
+.ws-settings__identity {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ws-settings__identity-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.3);
+}
+
+.ws-settings__identity-row:last-child {
+  border-bottom: none;
+}
+
+.ws-settings__identity-label {
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 16px;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  min-width: 80px;
+}
+
+.ws-settings__identity-value {
+  font-family: var(--font-family);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  color: var(--color-text-primary);
+  word-break: break-all;
+}
+
+.ws-settings__form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.ws-form-success {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 10px;
+  background: var(--color-success-bg);
+  color: var(--color-success-text);
+  border: 1px solid rgba(167, 243, 208, 0.6);
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 18px;
+}

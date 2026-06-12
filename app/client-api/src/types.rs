@@ -98,3 +98,20 @@ pub struct HealthResponse {
 pub struct DeleteResponse {
     pub message: String,
 }
+
+// ──────────────────────────────────────────────
+//  Self-service types
+// ──────────────────────────────────────────────
+
+/// Change password request body
+#[derive(Debug, Serialize)]
+pub struct ChangePasswordRequest {
+    pub current_password: String,
+    pub new_password: String,
+}
+
+/// Change password response
+#[derive(Debug, Deserialize)]
+pub struct ChangePasswordResponse {
+    pub message: String,
+}

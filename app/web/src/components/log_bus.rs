@@ -25,18 +25,17 @@ impl HttpMethod {
     }
 
     #[allow(dead_code)]
-    pub fn from_str(s: &str) -> Self {
+    pub fn from_str(s: &str) -> Option<Self> {
         match s.to_uppercase().as_str() {
-            "GET" => Self::Get,
-            "POST" => Self::Post,
-            "PUT" => Self::Put,
-            "DELETE" => Self::Delete,
-            _ => Self::Get,
+            "GET" => Some(Self::Get),
+            "POST" => Some(Self::Post),
+            "PUT" => Some(Self::Put),
+            "DELETE" => Some(Self::Delete),
+            _ => None,
         }
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LogKind {
     Success,
@@ -117,10 +116,66 @@ impl LogBus {
     }
 }
 
+/// 向 LogBus 写入一条结果日志——成功记为 Success，失败记为 Error。
+///
+/// 这是 auth.rs / dashboard.rs / users.rs 中原有多份 push_log 实现的统一入口。
+pub fn push_log_result<T>(
+    mut bus: LogBus,
+    method: HttpMethod,
+    path: &str,
+    res: &Result<T, client_api::ClientError>,
+) {
+    match res {
+        Ok(_) => bus.push(method, path, "200 OK", LogKind::Success),
+        Err(err) => {
+            let status = err.status_or_label();
+            bus.push(method, path, status, LogKind::Error);
+        }
+    }
+}
+
+/// 向 LogBus 写入一条成功日志。
+pub fn push_log_ok(mut bus: LogBus, method: HttpMethod, path: &str) {
+    bus.push(method, path, "200 OK", LogKind::Success);
+}
+
+/// 向 LogBus 写入一条错误日志（从 ClientError 提取状态码）。
+pub fn push_log_err(
+    mut bus: LogBus,
+    method: HttpMethod,
+    path: &str,
+    err: &client_api::ClientError,
+) {
+    let status = err.status_or_label();
+    bus.push(method, path, status, LogKind::Error);
+}
+
 pub fn now_unix_ms() -> u64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as u64)
-        .unwrap_or(0)
+    #[cfg(target_arch = "wasm32")]
+    {
+        js_sys::Date::now() as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis() as u64)
+            .unwrap_or(0)
+    }
+}
+
+pub fn now_unix_secs() -> u64 {
+    #[cfg(target_arch = "wasm32")]
+    {
+        (js_sys::Date::now() / 1000.0) as u64
+    }
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use std::time::{SystemTime, UNIX_EPOCH};
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0)
+    }
 }
