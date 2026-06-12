@@ -472,3 +472,323 @@ async fn test_unauthenticated_request_rejected() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+// ---------------------------------------------------------------------------
+// GET /api/users/me — get current user profile
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_get_me_success() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "get_me_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let token = register_and_login(&app, &email).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    assert_eq!(body["email"], email);
+    assert_eq!(body["name"], "Test User");
+    assert!(body["id"].is_string());
+}
+
+#[tokio::test]
+async fn test_get_me_unauthenticated() {
+    let app = create_test_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+// ---------------------------------------------------------------------------
+// POST /api/users/me/password — change current user's password
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_change_password_success() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "chpwd_ok_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let token = register_and_login(&app, &email).await;
+
+    let payload = json!({
+        "current_password": "Password123!",
+        "new_password": "NewSecure456!"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    assert_eq!(body["message"], "Password changed successfully");
+
+    // Verify old password no longer works
+    let login_payload = json!({ "email": &email, "password": "Password123!" });
+    let login_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&login_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login_resp.status(), StatusCode::UNAUTHORIZED);
+
+    // Verify new password works
+    let login_payload = json!({ "email": &email, "password": "NewSecure456!" });
+    let login_resp = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&login_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login_resp.status(), StatusCode::OK);
+}
+
+#[tokio::test]
+async fn test_change_password_wrong_current() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "chpwd_wrong_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let token = register_and_login(&app, &email).await;
+
+    let payload = json!({
+        "current_password": "WrongPassword1!",
+        "new_password": "NewSecure456!"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    let body = body_to_json(response.into_body()).await;
+    assert!(body["message"].as_str().unwrap().contains("Current password is incorrect"));
+}
+
+#[tokio::test]
+async fn test_change_password_empty_current() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "chpwd_ecur_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let token = register_and_login(&app, &email).await;
+
+    let payload = json!({
+        "current_password": "",
+        "new_password": "NewSecure456!"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_change_password_empty_new() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "chpwd_enew_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let token = register_and_login(&app, &email).await;
+
+    let payload = json!({
+        "current_password": "Password123!",
+        "new_password": ""
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_change_password_same_as_current() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "chpwd_same_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let token = register_and_login(&app, &email).await;
+
+    let payload = json!({
+        "current_password": "Password123!",
+        "new_password": "Password123!"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_change_password_weak_new_password() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "chpwd_weak_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let token = register_and_login(&app, &email).await;
+
+    let payload = json!({
+        "current_password": "Password123!",
+        "new_password": "weak"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_change_password_unauthenticated() {
+    let app = create_test_app().await;
+
+    let payload = json!({
+        "current_password": "Password123!",
+        "new_password": "NewSecure456!"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}

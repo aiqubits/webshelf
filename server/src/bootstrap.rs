@@ -288,15 +288,18 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
             );
         }
 
-        // 仅警告而非拒绝：system admin 默认凭据仍可在任意环境使用。
-        // 默认账号仅在本地开发友好；生产环境管理员应在首次登录后通过
-        // 个人设置页面修改密码（POST /api/users/me/password）。
+        // 仅警告而非拒绝：system admin 默认凭据可在任意环境使用。
+        // 设计考量：前端默认管理员界面（个人设置页面，POST /api/users/me/password）
+        // 支持首次登录后修改密码，因此生产环境不直接拒绝启动，而是通过日志警告提醒。
+        // 若在生产环境看到此警告，请立即登录并修改默认凭据密码。
         if app_config.system_admin_email == "admin@webshelf.local"
             || app_config.system_admin_password == "change-me-admin-password"
         {
             tracing::warn!(
-                "System admin credentials are using default values in {} environment. \
-                 Please change the password via the profile settings page after first login.",
+                "System admin credentials are using default values in {} environment! \
+                 The default admin interface supports password change after first login; \
+                 DO NOT forget to change the default admin password via the profile settings page \
+                 (POST /api/users/me/password) immediately after logging in.",
                 cli_args.env
             );
         }

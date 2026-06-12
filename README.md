@@ -403,7 +403,7 @@ Authorization: Bearer <token>
 webshelf/
 ├── server/                      # 后端服务 (Rust + Axum)
 │   ├── migrations/              # 数据库迁移脚本
-│   │   └── 001_create_users_table.sql
+│   │   └── 001_init.sql
 │   ├── src/
 │   │   ├── handlers/            # HTTP 请求处理程序
 │   │   │   ├── api.rs           # API 端点处理 (CRUD)

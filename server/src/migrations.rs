@@ -49,8 +49,8 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
 
     // Read migration files
     let migrations = vec![(
-        "001_create_users_table",
-        include_str!("../migrations/001_create_users_table.sql"),
+        "001_init",
+        include_str!("../migrations/001_init.sql"),
     )];
 
     for (name, sql) in migrations {
@@ -111,8 +111,8 @@ mod tests {
     #[test]
     fn test_migrations_list() {
         let migrations = [(
-            "001_create_users_table",
-            include_str!("../migrations/001_create_users_table.sql"),
+            "001_init",
+            include_str!("../migrations/001_init.sql"),
         )];
 
         assert_eq!(migrations.len(), 1);

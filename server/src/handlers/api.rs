@@ -170,13 +170,13 @@ pub async fn change_my_password(
         .map_err(|_| ApiError::Internal("Invalid user ID in token".to_string()))?;
 
     if payload.current_password.is_empty() {
-        return Err(ApiError::BadRequest("当前密码不能为空".to_string()));
+        return Err(ApiError::BadRequest("Current password is required".to_string()));
     }
     if payload.new_password.is_empty() {
-        return Err(ApiError::BadRequest("新密码不能为空".to_string()));
+        return Err(ApiError::BadRequest("New password is required".to_string()));
     }
     if payload.current_password == payload.new_password {
-        return Err(ApiError::BadRequest("新密码不能与当前密码相同".to_string()));
+        return Err(ApiError::BadRequest("New password must be different from current password".to_string()));
     }
 
     // 1. 查询用户实体（需要 password_hash 来验证当前密码）
@@ -190,7 +190,7 @@ pub async fn change_my_password(
     let is_valid = verify_password(&payload.current_password, &user.password_hash)
         .map_err(|e| ApiError::Internal(format!("Password verification failed: {}", e)))?;
     if !is_valid {
-        return Err(ApiError::Unauthorized("当前密码错误".to_string()));
+        return Err(ApiError::Unauthorized("Current password is incorrect".to_string()));
     }
 
     // 3. 校验新密码强度
@@ -209,7 +209,7 @@ pub async fn change_my_password(
     tracing::info!("User {} changed password", auth_user.user_id);
 
     Ok(Json(ChangePasswordResponse {
-        message: "密码修改成功".to_string(),
+        message: "Password changed successfully".to_string(),
     }))
 }
 

@@ -97,12 +97,22 @@ pub async fn auth_middleware(mut request: Request, next: Next) -> Response {
 #[derive(Clone)]
 pub struct JwtSecret(pub String);
 
-/// Extract bearer token from Authorization header
+/// Extract bearer token from Authorization header.
+///
+/// The "Bearer" scheme prefix is matched case-insensitively per RFC 6750,
+/// so "Bearer", "bearer", "BEARER", etc. are all accepted.
 fn extract_bearer_token(request: &Request) -> Option<String> {
     let auth_header = request.headers().get(AUTHORIZATION)?;
     let auth_str = auth_header.to_str().ok()?;
 
-    auth_str.strip_prefix("Bearer ").map(|s| s.to_string())
+    const BEARER_PREFIX: &str = "bearer ";
+    if auth_str.len() > BEARER_PREFIX.len()
+        && auth_str[..BEARER_PREFIX.len()].eq_ignore_ascii_case(BEARER_PREFIX)
+    {
+        Some(auth_str[BEARER_PREFIX.len()..].to_string())
+    } else {
+        None
+    }
 }
 
 /// Validate JWT token with strict signature, algorithm, and expiration validation
@@ -259,6 +269,38 @@ mod tests {
 
         let token = extract_bearer_token(&request).unwrap();
         assert_eq!(token, "test-token-123");
+    }
+
+    #[test]
+    fn test_extract_bearer_token_lowercase() {
+        use axum::body::Body;
+        use axum::http::{HeaderValue, Request};
+
+        let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+        request.headers_mut().insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("bearer test-token-lower"),
+        );
+
+        let token = extract_bearer_token(&request).unwrap();
+        assert_eq!(token, "test-token-lower");
+    }
+
+    #[test]
+    fn test_extract_bearer_token_mixed_case() {
+        use axum::body::Body;
+        use axum::http::{HeaderValue, Request};
+
+        let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+
+        request.headers_mut().insert(
+            AUTHORIZATION,
+            HeaderValue::from_static("BeArEr test-token-mixed"),
+        );
+
+        let token = extract_bearer_token(&request).unwrap();
+        assert_eq!(token, "test-token-mixed");
     }
 
     #[test]
