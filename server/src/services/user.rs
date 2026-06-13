@@ -76,7 +76,7 @@ impl UserService {
         let now = Utc::now();
         let user = ActiveModel {
             id: Set(Uuid::new_v4()),
-            email: Set(input.email),
+            email: Set(input.email.to_lowercase()),
             password_hash: Set(password_hash),
             name: Set(input.name),
             role: Set("user".to_string()),
@@ -124,8 +124,9 @@ impl UserService {
 
     /// Get user by email
     pub async fn get_user_by_email(&self, email: &str) -> Result<Option<UserModel>, UserError> {
+        let email_normalized = email.to_lowercase();
         let user = UserEntity::find()
-            .filter(Column::Email.eq(email))
+            .filter(Column::Email.eq(&email_normalized))
             .one(&self.db)
             .await
             .context("Failed to query user")?;
@@ -156,19 +157,18 @@ impl UserService {
         let mut active_model: ActiveModel = user.into();
 
         if let Some(email) = input.email {
-            active_model.email = Set(email);
+            active_model.email = Set(email.to_lowercase());
         }
         if let Some(name) = input.name {
             active_model.name = Set(name);
         }
 
-        // Handle role change — only bump token_version when the role actually differs.
-        // Uses a DB-level atomic increment (UPDATE … SET token_version = token_version + 1)
-        // wrapped in the same transaction as the field update to prevent partial failures
-        // (e.g. email conflict after token_version already incremented).
-        // The raw SQL avoids the read-modify-write race condition of
-        // "read token_version → compute new_version → write back".
-        let role_changed;
+        // Always exclude token_version from the ActiveModel update to avoid
+        // overwriting a concurrent atomic increment (password change or role change).
+        // When role actually changes, it will be atomically incremented inside
+        // the transaction below via raw SQL.
+        active_model.token_version = sea_orm::ActiveValue::NotSet;
+
         let mut token_version_stmt: Option<Statement> = None;
 
         if let Some(ref new_role) = input.role {
@@ -186,24 +186,7 @@ impl UserService {
                     "UPDATE users SET token_version = token_version + 1 WHERE id = $1",
                     [id.into()],
                 ));
-                // Exclude token_version from the ActiveModel update — it will be
-                // atomically incremented inside the transaction below.
-                // Writing it again would undo the increment.
-                active_model.token_version = sea_orm::ActiveValue::NotSet;
-                role_changed = true;
-            } else {
-                role_changed = false;
             }
-        } else {
-            role_changed = false;
-        }
-
-        // Always skip token_version in the ActiveModel update to avoid overwriting
-        // a concurrent atomic increment performed by another request (role change or
-        // password change).  The role_changed=true path already sets NotSet above;
-        // this covers the role_changed=false paths (no role in input, or role unchanged).
-        if !role_changed {
-            active_model.token_version = sea_orm::ActiveValue::NotSet;
         }
 
         active_model.updated_at = Set(Utc::now());

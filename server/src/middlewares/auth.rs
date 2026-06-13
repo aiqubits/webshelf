@@ -39,6 +39,10 @@ pub struct Claims {
     pub exp: u64,
     /// Issued at
     pub iat: u64,
+    /// Issuer identifier
+    pub iss: String,
+    /// Audience identifier
+    pub aud: String,
     /// User role for RBAC
     pub role: String,
     /// Token version for invalidation (matches user.token_version in DB)
@@ -114,7 +118,7 @@ pub async fn auth_middleware(
             }
         }
         Err(e) => {
-            tracing::warn!("Token validation failed: {}", e);
+            tracing::warn!("Token validation failed: kind={:?}", e.kind());
             unauthorized_response("Invalid or expired token")
         }
     }
@@ -167,11 +171,13 @@ fn extract_bearer_token(request: &Request) -> Option<String> {
     }
 }
 
-/// Validate JWT token with strict signature, algorithm, and expiration validation
+/// Validate JWT token with strict signature, algorithm, expiration, issuer, and audience validation
 fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
     validation.leeway = 5;
+    validation.set_issuer(&["webshelf-server"]);
+    validation.set_audience(&["webshelf"]);
 
     let token_data = decode::<Claims>(
         token,
@@ -217,7 +223,7 @@ pub async fn require_admin(request: Request, next: Next) -> Response {
     next.run(request).await
 }
 
-/// Generate a new JWT token
+/// Generate a new JWT token with issuer and audience claims
 pub fn generate_token(
     user_id: &str,
     role: &str,
@@ -236,6 +242,8 @@ pub fn generate_token(
         sub: user_id.to_string(),
         exp: now.as_secs() + expiry_seconds,
         iat: now.as_secs(),
+        iss: "webshelf-server".to_string(),
+        aud: "webshelf".to_string(),
         role: role.to_string(),
         token_version,
     };
@@ -299,6 +307,8 @@ mod tests {
             sub: TEST_USER_ID.to_string(),
             exp: now + 3600,
             iat: now,
+            iss: "webshelf-server".to_string(),
+            aud: "webshelf".to_string(),
             role: TEST_ROLE.to_string(),
             token_version: 2,
         };
@@ -400,6 +410,8 @@ mod tests {
             sub: TEST_USER_ID.to_string(),
             exp: now - 10,
             iat: now - 70,
+            iss: "webshelf-server".to_string(),
+            aud: "webshelf".to_string(),
             role: TEST_ROLE.to_string(),
             token_version: 1,
         };
@@ -417,6 +429,84 @@ mod tests {
         assert_eq!(
             err.kind(),
             &jsonwebtoken::errors::ErrorKind::ExpiredSignature
+        );
+    }
+
+    #[test]
+    fn test_token_rejected_with_wrong_issuer() {
+        // Create a token with a wrong issuer — should be rejected
+        // because validate_token enforces set_issuer(["webshelf-server"]).
+        use jsonwebtoken::{EncodingKey, Header, encode};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut claims = Claims {
+            sub: TEST_USER_ID.to_string(),
+            exp: now + 3600,
+            iat: now,
+            iss: "webshelf-server".to_string(),
+            aud: "webshelf".to_string(),
+            role: TEST_ROLE.to_string(),
+            token_version: 1,
+        };
+        claims.iss = "evil-server".to_string(); // wrong issuer
+
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        let result = validate_token(&token, TEST_SECRET);
+        assert!(
+            result.is_err(),
+            "Token with wrong issuer should be rejected"
+        );
+        assert_eq!(
+            result.unwrap_err().kind(),
+            &jsonwebtoken::errors::ErrorKind::InvalidIssuer
+        );
+    }
+
+    #[test]
+    fn test_token_rejected_with_wrong_audience() {
+        use jsonwebtoken::{EncodingKey, Header, encode};
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut claims = Claims {
+            sub: TEST_USER_ID.to_string(),
+            exp: now + 3600,
+            iat: now,
+            iss: "webshelf-server".to_string(),
+            aud: "webshelf".to_string(),
+            role: TEST_ROLE.to_string(),
+            token_version: 1,
+        };
+        claims.aud = "other-service".to_string(); // wrong audience
+
+        let token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(TEST_SECRET.as_bytes()),
+        )
+        .unwrap();
+
+        let result = validate_token(&token, TEST_SECRET);
+        assert!(
+            result.is_err(),
+            "Token with wrong audience should be rejected"
+        );
+        assert_eq!(
+            result.unwrap_err().kind(),
+            &jsonwebtoken::errors::ErrorKind::InvalidAudience
         );
     }
 }

@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api"]
+members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver"]
 # resolver = "3" is required for Rust edition 2024
 # Minimum Rust version: 1.92+
 resolver = "3"
@@ -38,6 +38,9 @@ dioxus = { version = "0.7.1" }
 # Frontend workspace
 ui = { path = "app/ui" }
 client-api = { path = "app/client-api" }
+
+# Shared crates
+emailserver = { path = "crates/emailserver" }
 
 # ── WASM 体积优化 ──────────────────────────────────────
 [profile.release]

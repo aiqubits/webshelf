@@ -289,19 +289,16 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
             );
         }
 
-        // Warn only (don't reject): system admin default credentials are usable
-        // in any environment. The frontend admin UI supports password change after
-        // first login (POST /api/users/me/password), so production startups are not
-        // blocked — only warned via logs. If you see this warning in production,
-        // change the default credentials immediately after logging in.
-        if app_config.system_admin_email == "admin@webshelf.local"
+        // Reject default system admin credentials in non-development environments.
+        // Default credentials are a critical security risk — they must be changed
+        // before the application can start in production or staging.
+        if app_config.system_admin_email.to_lowercase() == "admin@webshelf.local"
             || app_config.system_admin_password == "change-me-admin-password"
         {
-            tracing::warn!(
-                "System admin credentials are using default values in {} environment! \
-                 The default admin interface supports password change after first login; \
-                 DO NOT forget to change the default admin password via the profile settings page \
-                 (POST /api/users/me/password) immediately after logging in.",
+            anyhow::bail!(
+                "System admin credentials must not use default values in {} environment! \
+                 Set WEBSHELF_SYSTEM_ADMIN_EMAIL and WEBSHELF_SYSTEM_ADMIN_PASSWORD environment variables \
+                 or update config.toml. Default credentials will be rejected on every startup.",
                 cli_args.env
             );
         }
@@ -336,11 +333,11 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
     use crate::utils::password::hash_password;
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
-    let email = &config.system_admin_email;
+    let email = config.system_admin_email.to_lowercase();
 
     // Check if system admin already exists
     let existing = UserEntity::find()
-        .filter(Column::Email.eq(email))
+        .filter(Column::Email.eq(&email))
         .one(db)
         .await
         .context("Failed to query system admin user")?;

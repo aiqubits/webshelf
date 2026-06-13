@@ -54,8 +54,9 @@ impl AuthService {
     /// regardless of whether the user exists, to prevent timing-based email
     /// enumeration attacks.
     pub async fn login(&self, request: LoginRequest) -> Result<LoginResponse, AuthError> {
+        let email_normalized = request.email.to_lowercase();
         let user_result = UserEntity::find()
-            .filter(crate::repositories::user::Column::Email.eq(&request.email))
+            .filter(crate::repositories::user::Column::Email.eq(&email_normalized))
             .one(&self.db)
             .await
             .context("Failed to query user")?;

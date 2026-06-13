@@ -2,12 +2,12 @@ use crate::utils::error::ApiError;
 
 /// Validate password:
 /// - At least one lowercase letter
-/// - At least one uppercase letter  
+/// - At least one uppercase letter
 /// - At least one digit
 /// - At least one special character (ASCII punctuation)
-/// - Minimum 8 characters
+/// - Between 8 and 128 characters
 pub fn validate_password(password: &str) -> bool {
-    if password.len() < 8 {
+    if password.len() < 8 || password.len() > 128 {
         return false;
     }
 
@@ -54,6 +54,8 @@ mod tests {
         assert!(!validate_password("Password")); // No digit, no special
         assert!(!validate_password("Password1")); // No special character
         assert!(!validate_password("Pass1!")); // Too short
+        assert!(!validate_password(&format!("{}a1!", "A".repeat(129)))); // Too long (132 chars)
+        assert!(validate_password(&format!("{}a1!", "A".repeat(125)))); // Exactly 128 chars
     }
 
     #[test]

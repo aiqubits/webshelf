@@ -1,0 +1,22 @@
+[package]
+name = "emailserver"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "SMTP email service for webshelf — registration codes, password reset, and custom HTML emails."
+
+[dependencies]
+lettre = { version = "0.11", features = ["tokio1", "tokio1-native-tls", "builder", "pool", "hostname"] }
+tokio = { version = "1", features = ["sync"] }
+tracing.workspace = true
+thiserror.workspace = true
+serde = { workspace = true, features = ["derive"] }
+url = "2"
+percent-encoding = "2"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros", "rt"] }
+serde_json = "1"
