@@ -63,3 +63,25 @@ max_connections = 10
 # Minimum number of idle connections to maintain
 # Can be overridden by environment variable: WEBSHELF_DATABASE__MIN_CONNECTIONS
 min_connections = 1
+
+# Email (SMTP) configuration
+# When left empty / default, the email service is disabled and registration
+# auto-verifies users (useful for development). Configure all fields below to
+# enable sending verification and welcome emails.
+[email]
+# SMTP server hostname
+smtp_host = ""
+# SMTP port (587 for STARTTLS, 465 for implicit TLS, 25 for plain)
+smtp_port = 587
+# SMTP authentication username
+smtp_username = ""
+# SMTP authentication password
+smtp_password = ""
+# From address for outgoing emails
+from_address = ""
+# Optional display name for the from address
+from_name = "Webshelf"
+# Whether to use TLS (STARTTLS or implicit TLS depending on port)
+use_tls = true
+# Connection timeout in seconds (0 = no timeout)
+timeout_secs = 30

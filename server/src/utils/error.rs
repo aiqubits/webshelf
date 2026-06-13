@@ -134,6 +134,40 @@ impl From<crate::services::auth::AuthError> for ApiError {
     }
 }
 
+// Convert VerificationError to ApiError for type-safe error mapping
+impl From<crate::services::verification::VerificationError> for ApiError {
+    fn from(err: crate::services::verification::VerificationError) -> Self {
+        match err {
+            crate::services::verification::VerificationError::InvalidOrExpired => {
+                ApiError::BadRequest("Invalid or expired verification code".to_string())
+            }
+            crate::services::verification::VerificationError::TooManyAttempts => {
+                // Mapped to 400 (not 403) to prevent user enumeration:
+                // an attacker should not be able to distinguish "user does
+                // not exist" from "user exists but is locked out".
+                tracing::warn!("User exceeded max verification attempts");
+                ApiError::BadRequest("Invalid or expired verification code".to_string())
+            }
+            crate::services::verification::VerificationError::TooSoon => {
+                ApiError::BadRequest("Please wait before requesting a new code".to_string())
+            }
+            crate::services::verification::VerificationError::AlreadyVerified => {
+                ApiError::BadRequest("Email is already verified".to_string())
+            }
+            crate::services::verification::VerificationError::EmailNotConfigured => {
+                tracing::warn!("Email service not configured for verification");
+                ApiError::ServiceUnavailable(
+                    "Email verification is currently unavailable".to_string(),
+                )
+            }
+            crate::services::verification::VerificationError::Internal(e) => {
+                tracing::error!("Verification internal error: {:?}", e);
+                ApiError::Internal("An unexpected error occurred".to_string())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

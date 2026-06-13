@@ -140,10 +140,12 @@ pub fn create_app_state(
     redis: Option<RedisClient>,
     config: AppConfig,
 ) -> AppState {
+    let email_service = emailserver::EmailService::new(config.email.clone());
     AppState {
         db,
         redis,
         config: Arc::new(config),
+        email: email_service,
     }
 }
 
@@ -361,6 +363,11 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
         created_at: Set(now),
         updated_at: Set(now),
         token_version: Set(1),
+        email_verified: Set(true),
+        verification_code_hash: Set(None),
+        verification_code_expires_at: Set(None),
+        verification_code_sent_at: Set(None),
+        verification_failed_attempts: Set(0),
     };
 
     match user.insert(db).await {

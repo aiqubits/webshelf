@@ -36,6 +36,10 @@ pub struct AppConfig {
     /// Database connection pool configuration
     #[serde(default)]
     pub database: DatabaseConfig,
+
+    /// Email (SMTP) configuration
+    #[serde(default)]
+    pub email: emailserver::EmailConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -216,6 +220,7 @@ mod tests {
             system_admin_password: "change-me-admin-password".to_string(),
             server: ServerConfig::default(),
             database: DatabaseConfig::default(),
+            email: emailserver::EmailConfig::default(),
         };
         let cloned = config.clone();
         assert_eq!(config.database_url, cloned.database_url);

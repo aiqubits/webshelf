@@ -32,6 +32,23 @@ pub struct Model {
     /// Token version counter, incremented when password changes to invalidate old JWTs
     #[sea_orm(default_value = 1)]
     pub token_version: i32,
+
+    /// Whether the user's email has been verified
+    #[sea_orm(default_value = false)]
+    pub email_verified: bool,
+
+    /// Hash of the email verification code (argon2)
+    pub verification_code_hash: Option<String>,
+
+    /// When the verification code expires
+    pub verification_code_expires_at: Option<DateTimeUtc>,
+
+    /// When the verification code was last sent (for rate limiting)
+    pub verification_code_sent_at: Option<DateTimeUtc>,
+
+    /// Failed verification attempt counter (for brute-force protection)
+    #[sea_orm(default_value = 0)]
+    pub verification_failed_attempts: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -62,6 +79,7 @@ pub struct UserResponse {
     pub email: String,
     pub name: String,
     pub role: String,
+    pub email_verified: bool,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
     /// Internal token version counter — skipped in external API responses.
@@ -76,6 +94,7 @@ impl From<Model> for UserResponse {
             email: model.email,
             name: model.name,
             role: model.role,
+            email_verified: model.email_verified,
             created_at: model.created_at,
             updated_at: model.updated_at,
             token_version: model.token_version,
@@ -102,6 +121,11 @@ mod tests {
             created_at: now,
             updated_at: now,
             token_version: 1,
+            email_verified: false,
+            verification_code_hash: None,
+            verification_code_expires_at: None,
+            verification_code_sent_at: None,
+            verification_failed_attempts: 0,
         };
 
         let response = UserResponse::from(model.clone());
@@ -163,6 +187,7 @@ mod tests {
             email: "test@example.com".to_string(),
             name: "Test User".to_string(),
             role: "user".to_string(),
+            email_verified: false,
             created_at: now,
             updated_at: now,
             token_version: 1,

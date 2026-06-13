@@ -9,6 +9,11 @@ CREATE TABLE IF NOT EXISTS users (
     role VARCHAR(50) NOT NULL DEFAULT 'user'
         CHECK (role IN ('user', 'admin', 'system')),
     token_version INTEGER NOT NULL DEFAULT 1,
+    email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+    verification_code_hash VARCHAR(255),
+    verification_code_expires_at TIMESTAMPTZ,
+    verification_code_sent_at TIMESTAMPTZ,
+    verification_failed_attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

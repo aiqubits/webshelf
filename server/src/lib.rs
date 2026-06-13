@@ -18,4 +18,5 @@ pub struct AppState {
     pub db: DatabaseConnection,
     pub redis: Option<RedisClient>,
     pub config: Arc<AppConfig>,
+    pub email: emailserver::EmailService,
 }

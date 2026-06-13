@@ -93,6 +93,14 @@ impl AuthService {
             return Err(AuthError::InvalidCredentials);
         }
 
+        if !user.email_verified {
+            // Return the same error as invalid credentials to prevent
+            // user enumeration — an attacker should not be able to
+            // distinguish "wrong password" from "email not verified".
+            tracing::info!("Login rejected for {}: email not verified", user.email);
+            return Err(AuthError::InvalidCredentials);
+        }
+
         let token = generate_token(
             &user.id.to_string(),
             &user.role,

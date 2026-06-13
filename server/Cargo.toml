@@ -33,6 +33,10 @@ clap = { version = "4", features = ["derive"] }
 # Authentication
 jsonwebtoken = "9"
 argon2 = "0.5"
+rand = "0.8"
+
+# Email
+emailserver.workspace = true
 
 # Validation
 validator = { version = "0.19", features = ["derive"] }

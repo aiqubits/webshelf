@@ -34,6 +34,10 @@ RUN mkdir -p app/mobile/src && echo 'fn main() {}' > app/mobile/src/main.rs
 COPY app/desktop/Cargo.toml ./app/desktop/Cargo.toml
 COPY app/mobile/Cargo.toml ./app/mobile/Cargo.toml
 
+# Copy emailserver crate manifest for cargo fetch to resolve workspace members.
+COPY crates/emailserver/Cargo.toml ./crates/emailserver/Cargo.toml
+RUN mkdir -p crates/emailserver/src && echo 'pub fn placeholder() {}' > crates/emailserver/src/lib.rs
+
 # Fetch all dependencies first (fails on network errors, not on compilation)
 RUN cargo fetch
 
@@ -46,6 +50,7 @@ RUN cargo build --release --package webshelf-server || true
 # Copy real source code and rebuild
 COPY server/src ./server/src
 COPY server/migrations ./server/migrations
+COPY crates/emailserver/src ./crates/emailserver/src
 
 # Touch files to ensure rebuild after caching layer
 RUN touch server/src/main.rs

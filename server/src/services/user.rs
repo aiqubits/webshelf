@@ -83,6 +83,11 @@ impl UserService {
             created_at: Set(now),
             updated_at: Set(now),
             token_version: Set(1),
+            email_verified: Set(false),
+            verification_code_hash: Set(None),
+            verification_code_expires_at: Set(None),
+            verification_code_sent_at: Set(None),
+            verification_failed_attempts: Set(0),
         };
 
         tracing::debug!("Inserting user into database");
@@ -478,6 +483,7 @@ mod tests {
             email: "test@example.com".to_string(),
             name: "Test User".to_string(),
             role: "user".to_string(),
+            email_verified: false,
             created_at: Utc::now(),
             updated_at: Utc::now(),
             token_version: 1,

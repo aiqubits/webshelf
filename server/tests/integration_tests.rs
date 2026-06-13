@@ -53,6 +53,7 @@ async fn create_test_app() -> Router {
         db,
         redis,
         config: Arc::new(config),
+        email: emailserver::EmailService::new(emailserver::EmailConfig::default()),
     };
 
     use http::Method;
@@ -1066,4 +1067,399 @@ async fn test_old_token_invalidated_after_role_change() {
 
     // The user now has admin role
     assert_eq!(response.status(), StatusCode::OK);
+}
+
+// ---------------------------------------------------------------------------
+// Email verification tests
+// ---------------------------------------------------------------------------
+
+// Verify that login is blocked when email is not verified.
+// In the test environment, email service is not configured so users cannot
+// actually verify their email. This test confirms the registration flow
+// handles the "email not configured" case gracefully.
+#[tokio::test]
+async fn test_registration_without_email_service_succeeds() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "noemail_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    let payload = json!({
+        "email": &email,
+        "password": "Password123!",
+        "name": "No Email Test"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Registration should succeed even without email service (graceful degradation)
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    // When email service is not configured, the message should indicate success
+    assert_eq!(body["message"], "User registered successfully");
+    assert!(body["user_id"].is_string());
+    // Email auto-verified because the email service is not configured
+    assert_eq!(body["email_verified"], true);
+}
+
+// Test that verify-email rejects already-verified users.
+// In the test environment, email service is not configured, so the user is
+// auto-verified during registration. Submitting a verification code for an
+// already-verified email should return an error.
+#[tokio::test]
+async fn test_verify_email_rejects_already_verified_user() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "verify_bad_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    // Register a user — auto-verified because email service is not configured.
+    let payload = json!({
+        "email": &email,
+        "password": "Password123!",
+        "name": "Verify Test"
+    });
+
+    app.clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Attempting to verify an already-verified email should fail.
+    let verify_payload = json!({
+        "email": &email,
+        "code": "123456"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/verify-email")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&verify_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// Test that verify-email rejects invalid request bodies
+#[tokio::test]
+async fn test_verify_email_validation_error() {
+    let app = create_test_app().await;
+
+    // Invalid email
+    let payload = json!({
+        "email": "not-an-email",
+        "code": "123456"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/verify-email")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    // Invalid code length
+    let payload = json!({
+        "email": "test@example.com",
+        "code": "12345"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/verify-email")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// Test that resend-code endpoint validation works
+#[tokio::test]
+async fn test_resend_code_validation_error() {
+    let app = create_test_app().await;
+
+    let payload = json!({
+        "email": "not-an-email"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/resend-code")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// Test that verify-email returns InvalidOrExpired (400) for a non-existent email.
+// This prevents user enumeration — an attacker cannot distinguish "email not found"
+// from "invalid code" or "expired code".
+#[tokio::test]
+async fn test_verify_email_with_nonexistent_email() {
+    let app = create_test_app().await;
+
+    let payload = json!({
+        "email": "nonexistent@example.com",
+        "code": "123456"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/verify-email")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Non-existent email should return 400 (BadRequest), not 404,
+    // to prevent attackers from enumerating registered emails.
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// Test that resend-code returns 503 when email service is not configured.
+#[tokio::test]
+async fn test_resend_code_with_unconfigured_email_service() {
+    let app = create_test_app().await;
+
+    // A syntactically valid email — but the email service is not configured.
+    let payload = json!({
+        "email": "user@example.com"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/resend-code")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+// ---------------------------------------------------------------------------
+// Additional security & integration tests added after Code Review
+// ---------------------------------------------------------------------------
+
+/// End-to-end test: register (auto-verified in dev/test) → login succeeds.
+/// This verifies the full registration → auto-verify → login chain works
+/// correctly when the email service is not configured.
+#[tokio::test]
+async fn test_auto_verified_user_can_login() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "autoverify_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let password = "Password123!";
+
+    // 1. Register — auto-verified because email service is not configured.
+    let register_payload = json!({
+        "email": &email,
+        "password": password,
+        "name": "AutoVerify Test"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&register_payload).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    assert_eq!(body["email_verified"], true);
+
+    // 2. Login with the same credentials — must succeed.
+    let login_payload = json!({
+        "email": &email,
+        "password": password
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&login_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    assert!(body["token"].is_string());
+    assert_eq!(body["token_type"], "Bearer");
+}
+
+/// Verify that login is blocked when email_verified = false.
+///
+/// In the default test environment, the email service is not configured,
+/// so registration auto-verifies users (`email_verified = true`).  This
+/// test registers a user, then directly flips `email_verified` to `false`
+/// in the database to simulate the state that would exist with SMTP.
+/// It then verifies that login returns 401 Unauthorized (same error as
+/// invalid credentials — anti-enumeration).
+#[tokio::test]
+async fn test_unverified_email_cannot_login() {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set};
+    use webshelf_server::repositories::user::{
+        ActiveModel, Column as UserColumn, Entity as UserEntity,
+    };
+    use webshelf_server::utils::load_config;
+
+    let app = create_test_app().await;
+
+    let email = format!(
+        "unverified_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let password = "Password123!";
+
+    // 1. Register via API — user is auto-verified (email service not configured)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": password,
+                        "name": "UnverifiedTest"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Registration should succeed (the user is auto-verified)
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    assert_eq!(body["email_verified"], true);
+
+    // 2. Directly set email_verified = false in the database to simulate
+    //    the state that would exist if email service was configured.
+    let config = load_config("config.toml", "development").expect("Failed to load config");
+    let db = Database::connect(&config.database_url)
+        .await
+        .expect("Failed to connect to database");
+
+    let user = UserEntity::find()
+        .filter(UserColumn::Email.eq(email.to_lowercase()))
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("User should exist after registration");
+
+    let mut active_model: ActiveModel = user.into();
+    active_model.email_verified = Set(false);
+    active_model.updated_at = Set(chrono::Utc::now());
+    active_model.update(&db).await.unwrap();
+
+    // 3. Login must fail because email is not verified.
+    // Returns 401 (same as wrong credentials) to prevent user enumeration.
+    let login_payload = json!({
+        "email": &email,
+        "password": password
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&login_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
