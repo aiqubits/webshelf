@@ -105,6 +105,12 @@ impl From<crate::services::user::UserError> for ApiError {
             crate::services::user::UserError::EmailConflict => {
                 ApiError::Conflict("Email already registered".to_string())
             }
+            crate::services::user::UserError::InvalidCredentials => {
+                ApiError::Unauthorized("Current password is incorrect".to_string())
+            }
+            crate::services::user::UserError::Forbidden(msg) => ApiError::Forbidden(msg),
+            crate::services::user::UserError::WeakPassword(msg) => ApiError::BadRequest(msg),
+            crate::services::user::UserError::SamePassword(msg) => ApiError::BadRequest(msg),
             crate::services::user::UserError::Internal(e) => {
                 tracing::error!("Internal error: {:?}", e);
                 ApiError::Internal("An unexpected error occurred".to_string())

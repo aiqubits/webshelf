@@ -1,3 +1,5 @@
+-- 系统尚未上线，无需兼容旧数据，所有字段直接定义在 CREATE TABLE 中。
+-- 如需增加新字段，直接在此文件修改即可，无需编写单独的 ALTER TABLE 迁移脚本。
 -- Create users table if not exists
 CREATE TABLE IF NOT EXISTS users (
     id UUID PRIMARY KEY,
@@ -5,6 +7,7 @@ CREATE TABLE IF NOT EXISTS users (
     password_hash TEXT NOT NULL,
     name VARCHAR(255) NOT NULL,
     role VARCHAR(50) NOT NULL DEFAULT 'user',
+    token_version INTEGER NOT NULL DEFAULT 1,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );

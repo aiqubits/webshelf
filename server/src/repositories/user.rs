@@ -28,6 +28,10 @@ pub struct Model {
 
     /// Last update timestamp
     pub updated_at: DateTimeUtc,
+
+    /// Token version counter, incremented when password changes to invalidate old JWTs
+    #[sea_orm(default_value = 1)]
+    pub token_version: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -60,6 +64,9 @@ pub struct UserResponse {
     pub role: String,
     pub created_at: DateTimeUtc,
     pub updated_at: DateTimeUtc,
+    /// Internal token version counter — skipped in external API responses.
+    #[serde(skip)]
+    pub token_version: i32,
 }
 
 impl From<Model> for UserResponse {
@@ -71,6 +78,7 @@ impl From<Model> for UserResponse {
             role: model.role,
             created_at: model.created_at,
             updated_at: model.updated_at,
+            token_version: model.token_version,
         }
     }
 }
@@ -93,6 +101,7 @@ mod tests {
             role: "user".to_string(),
             created_at: now,
             updated_at: now,
+            token_version: 1,
         };
 
         let response = UserResponse::from(model.clone());
@@ -103,6 +112,7 @@ mod tests {
         assert_eq!(response.role, "user");
         assert_eq!(response.created_at, now);
         assert_eq!(response.updated_at, now);
+        assert_eq!(response.token_version, 1);
     }
 
     #[test]
@@ -155,11 +165,14 @@ mod tests {
             role: "user".to_string(),
             created_at: now,
             updated_at: now,
+            token_version: 1,
         };
 
         let json = serde_json::to_string(&response).unwrap();
         assert!(json.contains("test@example.com"));
         assert!(json.contains("Test User"));
         assert!(json.contains("user"));
+        // token_version is intentionally skipped from external API responses
+        assert!(!json.contains("token_version"));
     }
 }

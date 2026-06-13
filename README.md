@@ -719,6 +719,40 @@ cargo build --release --package webshelf-server
 
 欢迎贡献！请遵循以下步骤：
 
+### 环境准备
+
+确保已安装 [pre-commit](https://pre-commit.com)：
+
+```bash
+# 使用 pip 安装（推荐）
+pip install pre-commit
+
+# 或使用 pipx
+pipx install pre-commit
+
+# macOS
+brew install pre-commit
+
+# Ubuntu/Debian
+sudo apt install pre-commit
+```
+
+### 安装 Git Hooks
+
+```bash
+# 在项目根目录执行
+pre-commit install
+```
+
+安装后，每次 `git commit` 会自动按顺序执行以下检查：
+1. **测试** — 运行 server/web/client-api 的测试
+2. **Clippy** — 对所有 crate 进行静态分析
+3. **Fmt** — 检查所有 crate 的代码格式
+
+任何步骤失败则 commit 被终止，请根据提示修复后重新提交。
+
+### 提交步骤
+
 1. Fork 仓库
 2. 创建特性分支 (`git checkout -b feature/amazing-feature`)
 3. 提交更改 (`git commit -m 'Add amazing feature'`)

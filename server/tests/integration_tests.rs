@@ -58,7 +58,7 @@ async fn create_test_app() -> Router {
     use http::Method;
     use tower_http::cors::CorsLayer;
     use tower_http::trace::TraceLayer;
-    use webshelf_server::middlewares::auth::{JwtSecret, auth_middleware};
+    use webshelf_server::middlewares::auth::auth_middleware;
 
     // Configure CORS
     let cors = CorsLayer::new()
@@ -74,18 +74,18 @@ async fn create_test_app() -> Router {
         .allow_headers(tower_http::cors::Any);
 
     // Build test router with same middleware stack as main app
-    // Extension(JwtSecret) must be outermost (added last) so it injects
-    // JwtSecret into extensions before auth_middleware reads it.
     Router::new()
         .nest("/api", api_routes())
         .nest("/api/public/auth", auth_routes())
-        .layer(axum::middleware::from_fn(auth_middleware))
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .layer(axum::middleware::from_fn(
             webshelf_server::middlewares::panic::panic_middleware,
         ))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
-        .layer(axum::Extension(JwtSecret(state.config.jwt_secret.clone())))
         .with_state(state)
 }
 
@@ -195,7 +195,12 @@ async fn create_admin_and_login(app: &Router, email: &str) -> String {
 
     let user_id = uuid::Uuid::parse_str(&token_data.claims.sub).expect("Invalid user ID");
 
-    // Get a DB connection to update the role
+    // Get a DB connection to update the role.
+    // NOTE: This test helper directly manipulates the database to promote a user
+    // to admin.  It intentionally bypasses the production API (PUT /api/users/{id})
+    // so that other tests (e.g. test_old_token_invalidated_after_role_change) can
+    // independently verify the API-level token_version behaviour.
+    //
     // We access the state through the router by making a request pattern —
     // instead, let's use a simpler approach: we create a direct DB connection
     let db = {
@@ -216,8 +221,13 @@ async fn create_admin_and_login(app: &Router, email: &str) -> String {
         .expect("Failed to find user")
         .expect("User not found");
 
+    let current_version = user.token_version;
     let mut active_model: ActiveModel = user.into();
     active_model.role = Set("admin".to_string());
+    // NOTE: read-modify-write is safe here (single-threaded test, no concurrency).
+    // In production code, always use the atomic `UPDATE … SET token_version =
+    // token_version + 1` pattern to avoid race conditions.
+    active_model.token_version = Set(current_version.saturating_add(1));
     active_model
         .update(&db)
         .await
@@ -565,6 +575,29 @@ async fn test_change_password_success() {
     let body = body_to_json(response.into_body()).await;
     assert_eq!(body["message"], "Password changed successfully");
 
+    // Verify the response includes a valid new_token that can be used immediately
+    let new_token = body["new_token"]
+        .as_str()
+        .expect("new_token should be returned after password change");
+    assert!(!new_token.is_empty(), "new_token should not be empty");
+
+    let me_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", new_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        me_response.status(),
+        StatusCode::OK,
+        "new_token from password change should grant access to protected endpoints"
+    );
+
     // Verify old password no longer works
     let login_payload = json!({ "email": &email, "password": "Password123!" });
     let login_resp = app
@@ -630,7 +663,12 @@ async fn test_change_password_wrong_current() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let body = body_to_json(response.into_body()).await;
-    assert!(body["message"].as_str().unwrap().contains("Current password is incorrect"));
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap()
+            .contains("Current password is incorrect")
+    );
 }
 
 #[tokio::test]
@@ -791,4 +829,239 @@ async fn test_change_password_unauthenticated() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+}
+
+// Verify that a JWT issued before a password change is rejected afterward.
+// This tests the token_version invalidation mechanism.
+#[tokio::test]
+async fn test_old_token_invalidated_after_password_change() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "oldtoken_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    // Step 1: Register and get an initial JWT token
+    let old_token = register_and_login(&app, &email).await;
+
+    // Step 2: Change the password (using the old token for auth)
+    let payload = json!({
+        "current_password": "Password123!",
+        "new_password": "NewSecure456!"
+    });
+
+    let change_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users/me/password")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", old_token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(change_resp.status(), StatusCode::OK);
+
+    // Step 3: Attempt to use the old token to access a protected endpoint
+    // It should be rejected because the token_version was incremented
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", old_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "Old token should be rejected after password change"
+    );
+
+    // Step 4: Login with new password to get a fresh token — should work
+    let login_payload = json!({ "email": &email, "password": "NewSecure456!" });
+    let login_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&login_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(login_resp.status(), StatusCode::OK);
+    let login_body = body_to_json(login_resp.into_body()).await;
+    let new_token = login_body["token"].as_str().unwrap().to_string();
+
+    // Step 5: New token should work for accessing protected endpoint
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", new_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+}
+
+// Verify that a user's JWT is invalidated when an admin changes their role.
+// The role change increments token_version in the DB, so the old token
+// (issued before the role change) must be rejected.
+#[tokio::test]
+async fn test_old_token_invalidated_after_role_change() {
+    let app = create_test_app().await;
+
+    let admin_email = format!(
+        "admin_roleinv_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let user_email = format!(
+        "user_roleinv_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    // Step 1: Create an admin user
+    let admin_token = create_admin_and_login(&app, &admin_email).await;
+
+    // Step 2: Register a regular user and get their token
+    let register_payload = json!({
+        "email": &user_email,
+        "password": "Password123!",
+        "name": "RoleChange Test"
+    });
+
+    let register_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&register_payload).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(register_response.status(), StatusCode::OK);
+    let register_body = body_to_json(register_response.into_body()).await;
+    let user_id = register_body["user_id"].as_str().unwrap().to_string();
+
+    // Register already done above; only login to get the user's token
+    let login_payload = json!({ "email": &user_email, "password": "Password123!" });
+    let login_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&login_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login_resp.status(), StatusCode::OK);
+    let login_body = body_to_json(login_resp.into_body()).await;
+    let user_token = login_body["token"].as_str().unwrap().to_string();
+
+    // Step 3: Admin changes the user's role
+    let update_payload = json!({ "role": "admin" });
+
+    let update_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/users/{}", user_id))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", admin_token))
+                .body(Body::from(serde_json::to_string(&update_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(update_response.status(), StatusCode::OK);
+
+    // Step 4: Old user token should be rejected (token_version was incremented)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", user_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::UNAUTHORIZED,
+        "Old user token should be rejected after role change"
+    );
+
+    // Step 5: Login again with new role to get a fresh token — should work
+    let login_payload = json!({ "email": &user_email, "password": "Password123!" });
+    let login_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&login_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(login_resp.status(), StatusCode::OK);
+    let login_body = body_to_json(login_resp.into_body()).await;
+    let new_token = login_body["token"].as_str().unwrap().to_string();
+
+    // Step 6: New token should work
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", new_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // The user now has admin role
+    assert_eq!(response.status(), StatusCode::OK);
 }

@@ -76,7 +76,12 @@ impl AuthService {
                 // make the non-existent-user path as slow as the existent-user
                 // path, preventing attackers from enumerating valid emails
                 // by measuring response time.
-                let _ = hash_password(&request.password);
+                if let Err(e) = hash_password(&request.password) {
+                    tracing::warn!(
+                        "Honeypot password hash failed for non-existent user: {:?}",
+                        e
+                    );
+                }
                 (None, false)
             }
         };
@@ -92,11 +97,11 @@ impl AuthService {
             &user.role,
             &self.jwt_secret,
             self.jwt_expiry_seconds,
+            user.token_version,
         )
         .context("Failed to generate token")?;
 
-        tracing::trace!("User {} logged in successfully", user.id);
-        tracing::info!("User logged in successfully");
+        tracing::info!("User {} logged in successfully", user.id);
 
         Ok(LoginResponse {
             token,

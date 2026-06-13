@@ -1,0 +1,71 @@
+repos:
+  - repo: local
+    hooks:
+      # ========================================
+      # Prerequisites:
+      #   - Rust toolchain (stable) with the `wasm32-unknown-unknown` target
+      #     for the web crate: `rustup target add wasm32-unknown-unknown`
+      #   - PostgreSQL & Redis for integration tests (not required for
+      #     pre-commit — `--lib` excludes integration tests)
+      #   - `cargo` in PATH
+      # ========================================
+      # 1. 测试：server / web / client-api
+      #    server: 只跑单元测试（排除需 PG/Redis 的集成测试）
+      #    web:    无外部依赖
+      #    client-api: 使用 wiremock 模拟 HTTP，无需外部服务
+      # ========================================
+      - id: test-server
+        name: "test (server)"
+        description: 运行 server 单元测试
+        entry: cargo test --package webshelf-server --lib --no-fail-fast
+        language: system
+        types: [rust]
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
+      - id: test-web
+        name: "test (web)"
+        description: 运行 web crate 测试
+        entry: cargo test --package web --no-fail-fast
+        language: system
+        types: [rust]
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
+      - id: test-client-api
+        name: "test (client-api)"
+        description: 运行 client-api 测试（含 wiremock 集成测试）
+        entry: cargo test --package client-api --no-fail-fast
+        language: system
+        types: [rust]
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
+      # ========================================
+      # 2. Clippy：所有 crate
+      # ========================================
+      - id: clippy-all
+        name: "clippy (all)"
+        description: 对所有 crate 运行 Clippy 静态分析
+        entry: cargo clippy --all-targets --all-features --future-incompat-report -- -D warnings
+        language: system
+        types: [rust]
+        pass_filenames: false
+        always_run: true
+        verbose: true
+
+      # ========================================
+      # 3. Fmt：所有 crate
+      # ========================================
+      - id: fmt-all
+        name: "fmt (all)"
+        description: 检查所有 crate 的 Rust 代码格式
+        entry: cargo fmt --check
+        language: system
+        types: [rust]
+        pass_filenames: false
+        always_run: true
+        verbose: true

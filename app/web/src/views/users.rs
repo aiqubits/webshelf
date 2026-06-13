@@ -338,9 +338,12 @@ fn render_delete_modal(
             s_async.submitting.set(false);
             match res {
                 Ok(_) => {
-                    s_async.modal_kind.set(ModalKind::None);
-                    s_async.deleting_user.set(None);
-                    s_async.form_error.set(None);
+                    // 仅当模态框仍为 DeleteConfirm 时才关闭，避免旧异步任务关闭新打开的模态框。
+                    if *s_async.modal_kind.read() == ModalKind::DeleteConfirm {
+                        s_async.modal_kind.set(ModalKind::None);
+                        s_async.deleting_user.set(None);
+                        s_async.form_error.set(None);
+                    }
                     s_async.list_version.with_mut(|v| *v += 1);
                 }
                 Err(err) => {
@@ -494,13 +497,16 @@ fn render_form_modal(
             s_async.submitting.set(false);
             match res {
                 Ok(_) => {
-                    s_async.modal_kind.set(ModalKind::None);
-                    s_async.editing_user.set(None);
-                    s_async.form_name.set(String::new());
-                    s_async.form_email.set(String::new());
-                    s_async.form_password.set(String::new());
-                    s_async.form_role.set("user".to_string());
-                    s_async.form_error.set(None);
+                    // 仅当模态框类型未变更时才关闭，避免旧异步任务关闭新打开的模态框。
+                    if *s_async.modal_kind.read() == kind_now {
+                        s_async.modal_kind.set(ModalKind::None);
+                        s_async.editing_user.set(None);
+                        s_async.form_name.set(String::new());
+                        s_async.form_email.set(String::new());
+                        s_async.form_password.set(String::new());
+                        s_async.form_role.set("user".to_string());
+                        s_async.form_error.set(None);
+                    }
                     s_async.list_version.with_mut(|v| *v += 1);
                 }
                 Err(err) => {

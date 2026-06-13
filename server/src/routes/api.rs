@@ -20,8 +20,8 @@ pub fn api_routes() -> Router<AppState> {
         .route("/users/{id}", delete(delete_user))
         .route_layer(axum_middleware::from_fn(require_admin));
 
-    // 任意已认证用户的自我管理路由（不需要 admin 角色）。
-    // 放在 admin_routes 之前注册，确保 /users/me 优先于 /users/{id} 匹配。
+    // Self-service routes for any authenticated user (no admin role required).
+    // Registered before admin_routes so /users/me matches before /users/{id}.
     let self_routes = Router::new()
         .route("/users/me", get(get_me))
         .route("/users/me/password", post(change_my_password));

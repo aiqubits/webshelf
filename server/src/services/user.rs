@@ -2,12 +2,13 @@ use crate::repositories::user::{
     ActiveModel, Column, CreateUserInput, Entity as UserEntity, Model as UserModel,
     UpdateUserInput, UserResponse,
 };
-use crate::utils::password::hash_password;
+use crate::utils::password::{hash_password, verify_password};
+use crate::utils::validator::require_password;
 use anyhow::Context;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, PaginatorTrait, QueryFilter,
-    QueryOrder, Set,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set, Statement, TransactionTrait,
 };
 use uuid::Uuid;
 
@@ -18,6 +19,14 @@ pub enum UserError {
     NotFound,
     #[error("Email already registered")]
     EmailConflict,
+    #[error("Invalid credentials")]
+    InvalidCredentials,
+    #[error("Operation forbidden: {0}")]
+    Forbidden(String),
+    #[error("Weak password: {0}")]
+    WeakPassword(String),
+    #[error("Password unchanged: {0}")]
+    SamePassword(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -73,6 +82,7 @@ impl UserService {
             role: Set("user".to_string()),
             created_at: Set(now),
             updated_at: Set(now),
+            token_version: Set(1),
         };
 
         tracing::debug!("Inserting user into database");
@@ -88,8 +98,7 @@ impl UserService {
         })?;
         tracing::debug!("User inserted successfully");
 
-        tracing::trace!("User created: {}", result.email);
-        tracing::info!("User created successfully");
+        tracing::info!("User created: {}", result.email);
         Ok(UserResponse::from(result))
     }
 
@@ -136,6 +145,14 @@ impl UserService {
             .context("Failed to query user")?
             .ok_or(UserError::NotFound)?;
 
+        // Prevent modification of the system admin account (security boundary)
+        if user.role == "system" {
+            return Err(UserError::Forbidden(
+                "Cannot modify the system admin account".to_string(),
+            ));
+        }
+
+        let old_role = user.role.clone();
         let mut active_model: ActiveModel = user.into();
 
         if let Some(email) = input.email {
@@ -144,29 +161,214 @@ impl UserService {
         if let Some(name) = input.name {
             active_model.name = Set(name);
         }
-        if let Some(role) = input.role {
-            active_model.role = Set(role);
+
+        // Handle role change — only bump token_version when the role actually differs.
+        // Uses a DB-level atomic increment (UPDATE … SET token_version = token_version + 1)
+        // wrapped in the same transaction as the field update to prevent partial failures
+        // (e.g. email conflict after token_version already incremented).
+        // The raw SQL avoids the read-modify-write race condition of
+        // "read token_version → compute new_version → write back".
+        let role_changed;
+        let mut token_version_stmt: Option<Statement> = None;
+
+        if let Some(ref new_role) = input.role {
+            tracing::info!(
+                target_user_id = %id,
+                old_role = %old_role,
+                new_role = %new_role,
+                "Role change requested"
+            );
+            active_model.role = Set(new_role.clone());
+
+            if *new_role != old_role {
+                token_version_stmt = Some(Statement::from_sql_and_values(
+                    DatabaseBackend::Postgres,
+                    "UPDATE users SET token_version = token_version + 1 WHERE id = $1",
+                    [id.into()],
+                ));
+                // Exclude token_version from the ActiveModel update — it will be
+                // atomically incremented inside the transaction below.
+                // Writing it again would undo the increment.
+                active_model.token_version = sea_orm::ActiveValue::NotSet;
+                role_changed = true;
+            } else {
+                role_changed = false;
+            }
+        } else {
+            role_changed = false;
         }
+
+        // Always skip token_version in the ActiveModel update to avoid overwriting
+        // a concurrent atomic increment performed by another request (role change or
+        // password change).  The role_changed=true path already sets NotSet above;
+        // this covers the role_changed=false paths (no role in input, or role unchanged).
+        if !role_changed {
+            active_model.token_version = sea_orm::ActiveValue::NotSet;
+        }
+
         active_model.updated_at = Set(Utc::now());
 
-        let result = active_model.update(&self.db).await.map_err(|e| {
-            if matches!(
-                e.sql_err(),
-                Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
-            ) {
-                UserError::EmailConflict
-            } else {
-                UserError::Internal(anyhow::Error::from(e).context("Failed to update user"))
-            }
+        // When the role changed, wrap the token_version increment and the field
+        // update in a single transaction so that a partial failure (e.g. email
+        // conflict) does not leave token_version incremented while the requested
+        // changes are rolled back.
+        let result = if let Some(stmt) = token_version_stmt {
+            let txn = self
+                .db
+                .begin()
+                .await
+                .context("Failed to begin transaction for role change")?;
+            txn.execute(stmt)
+                .await
+                .context("Failed to atomically increment token_version")?;
+            let _updated = active_model.update(&txn).await.map_err(|e| {
+                if matches!(
+                    e.sql_err(),
+                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+                ) {
+                    UserError::EmailConflict
+                } else {
+                    UserError::Internal(
+                        anyhow::Error::from(e).context("Failed to update user in transaction"),
+                    )
+                }
+            })?;
+            txn.commit()
+                .await
+                .context("Failed to commit role-change transaction")?;
+            // Re-query to obtain the atomically-incremented token_version
+            // (ActiveModel::update returns the model with the old token_version
+            //  because it was set to NotSet in the SET clause).
+            UserEntity::find_by_id(id)
+                .one(&self.db)
+                .await
+                .context("Failed to re-query user after role change")?
+                .ok_or(UserError::NotFound)?
+        } else {
+            active_model.update(&self.db).await.map_err(|e| {
+                if matches!(
+                    e.sql_err(),
+                    Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+                ) {
+                    UserError::EmailConflict
+                } else {
+                    UserError::Internal(anyhow::Error::from(e).context("Failed to update user"))
+                }
+            })?
+        };
+
+        tracing::info!("User updated: {}", result.email);
+        Ok(UserResponse::from(result))
+    }
+
+    /// Change user password.
+    ///
+    /// Verifies the current password, validates new password strength,
+    /// hashes the new password, updates the database, and increments
+    /// `token_version` to invalidate all existing JWTs.
+    ///
+    /// Returns the updated `UserResponse` together with the new `token_version`
+    /// so the caller can issue a fresh JWT.
+    pub async fn change_password(
+        &self,
+        id: Uuid,
+        current_password: &str,
+        new_password: &str,
+    ) -> Result<(UserResponse, i32), UserError> {
+        let user = UserEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .context("Failed to query user")?
+            .ok_or(UserError::NotFound)?;
+
+        // Verify current password
+        let is_valid = verify_password(current_password, &user.password_hash)
+            .context("Failed to verify password")?;
+        if !is_valid {
+            return Err(UserError::InvalidCredentials);
+        }
+
+        // Reject unchanged password — prevents wasted crypto work and
+        // unnecessary token_version increment (defense-in-depth; the handler
+        // also checks this, but the service owns the semantic boundary).
+        if current_password == new_password {
+            return Err(UserError::SamePassword(
+                "New password must be different from current password".to_string(),
+            ));
+        }
+
+        // Validate new password strength
+        require_password(new_password).map_err(UserError::WeakPassword)?;
+
+        // Hash new password
+        let new_hash = hash_password(new_password).context("Failed to hash password")?;
+
+        // Atomically increment token_version at the database level.
+        // The raw SQL "SET token_version = token_version + 1" evaluates the
+        // increment using the current DB value, avoiding the read-modify-write
+        // race condition that would occur with the application-level pattern
+        // "read → compute → write".
+        let stmt = Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "UPDATE users SET token_version = token_version + 1 WHERE id = $1",
+            [id.into()],
+        );
+
+        // Wrap the token_version increment and the password update in a single
+        // transaction so that a partial failure does not leave token_version
+        // incremented while the password remains unchanged.
+        let txn = self
+            .db
+            .begin()
+            .await
+            .context("Failed to begin transaction for password change")?;
+        txn.execute(stmt)
+            .await
+            .context("Failed to atomically increment token_version")?;
+
+        // Update password_hash and updated_at via ActiveModel.
+        // token_version is explicitly set to NotSet so the ActiveModel update
+        // does not overwrite the atomically-incremented value.
+        let mut active_model: ActiveModel = user.into();
+        active_model.token_version = sea_orm::ActiveValue::NotSet;
+        active_model.password_hash = Set(new_hash);
+        active_model.updated_at = Set(Utc::now());
+
+        active_model.update(&txn).await.map_err(|e| {
+            UserError::Internal(anyhow::Error::from(e).context("Failed to update password"))
         })?;
 
-        tracing::trace!("User updated: {}", result.email);
-        tracing::info!("User updated successfully");
-        Ok(UserResponse::from(result))
+        txn.commit()
+            .await
+            .context("Failed to commit password-change transaction")?;
+
+        tracing::info!("User {} changed password", id);
+
+        // Re-query to obtain the atomically-incremented token_version.
+        let updated = UserEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .context("Failed to re-query user after password change")?
+            .ok_or(UserError::NotFound)?;
+        let new_version = updated.token_version;
+        Ok((UserResponse::from(updated), new_version))
     }
 
     /// Delete user
     pub async fn delete_user(&self, id: Uuid) -> Result<(), UserError> {
+        // Prevent deletion of the system admin account
+        let target = UserEntity::find_by_id(id)
+            .one(&self.db)
+            .await
+            .context("Failed to query user")?
+            .ok_or(UserError::NotFound)?;
+
+        if target.role == "system" {
+            return Err(UserError::Forbidden(
+                "Cannot delete the system admin account".to_string(),
+            ));
+        }
+
         let result = UserEntity::delete_by_id(id)
             .exec(&self.db)
             .await
@@ -295,6 +497,7 @@ mod tests {
             role: "user".to_string(),
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            token_version: 1,
         };
 
         let response = PaginatedResponse {

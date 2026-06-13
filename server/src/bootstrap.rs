@@ -15,7 +15,7 @@ use tower_http::{
 use crate::{
     AppConfig, AppState,
     middlewares::{
-        auth::{JwtSecret, auth_middleware},
+        auth::auth_middleware,
         panic::{self, panic_middleware},
     },
     migrations,
@@ -243,23 +243,24 @@ pub fn configure_cors(allowed_origins: &[String], env: &str) -> CorsLayer {
 }
 
 /// Build application router with all middleware
-pub fn build_app_router(state: AppState, jwt_secret: String, env: &str) -> Router {
+pub fn build_app_router(state: AppState, env: &str) -> Router {
     let allowed_origins = state.config.server.allowed_origins.clone();
     let cors = configure_cors(&allowed_origins, env);
     let compression = CompressionLayer::new();
 
     // Middleware layers are applied in reverse order (last added = first to execute).
-    // Extension(JwtSecret) must be outermost so it injects the secret before auth_middleware reads it.
     Router::new()
         .nest("/api", api_routes())
         .nest("/api/public/auth", auth_routes())
-        .layer(axum_middleware::from_fn(auth_middleware))
+        .layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .layer(axum_middleware::from_fn(panic_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .layer(compression)
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // 10MB max request body
-        .layer(axum::Extension(JwtSecret(jwt_secret)))
         .with_state(state)
 }
 
@@ -288,10 +289,11 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
             );
         }
 
-        // 仅警告而非拒绝：system admin 默认凭据可在任意环境使用。
-        // 设计考量：前端默认管理员界面（个人设置页面，POST /api/users/me/password）
-        // 支持首次登录后修改密码，因此生产环境不直接拒绝启动，而是通过日志警告提醒。
-        // 若在生产环境看到此警告，请立即登录并修改默认凭据密码。
+        // Warn only (don't reject): system admin default credentials are usable
+        // in any environment. The frontend admin UI supports password change after
+        // first login (POST /api/users/me/password), so production startups are not
+        // blocked — only warned via logs. If you see this warning in production,
+        // change the default credentials immediately after logging in.
         if app_config.system_admin_email == "admin@webshelf.local"
             || app_config.system_admin_password == "change-me-admin-password"
         {
@@ -316,9 +318,8 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
 
     let redis_client = init_redis(&app_config).await?;
 
-    let jwt_secret = app_config.jwt_secret.clone();
     let state = create_app_state(db, redis_client, app_config);
-    let app = build_app_router(state, jwt_secret, &cli_args.env);
+    let app = build_app_router(state, &cli_args.env);
 
     let bind_addr = format!("{}:{}", host, port);
 
@@ -362,13 +363,29 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
         role: Set("system".to_string()),
         created_at: Set(now),
         updated_at: Set(now),
+        token_version: Set(1),
     };
 
-    user.insert(db)
-        .await
-        .context("Failed to create system admin user")?;
+    match user.insert(db).await {
+        Ok(_) => {
+            tracing::info!("System admin account created: {}", email);
+        }
+        Err(e)
+            if matches!(
+                e.sql_err(),
+                Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
+            ) =>
+        {
+            tracing::info!(
+                "System admin account already exists (race condition handled): {}",
+                email
+            );
+        }
+        Err(e) => {
+            return Err(e).context("Failed to create system admin user");
+        }
+    }
 
-    tracing::info!("System admin account created: {}", email);
     Ok(())
 }
 

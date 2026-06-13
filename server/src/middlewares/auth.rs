@@ -1,14 +1,18 @@
+use anyhow::Context;
 use axum::{
     Json,
-    extract::Request,
+    extract::{Request, State},
     http::{StatusCode, header::AUTHORIZATION},
     middleware::Next,
     response::{IntoResponse, Response},
 };
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
+use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use crate::AppState;
+use crate::repositories::user::Entity as UserEntity;
 use crate::utils::error::ErrorResponse;
 
 /// Authenticated user information extracted from JWT
@@ -22,6 +26,8 @@ pub struct AuthUser {
     pub exp: u64,
     /// Token issued at timestamp
     pub iat: u64,
+    /// Token version for invalidation (matches user.token_version in DB)
+    pub token_version: i32,
 }
 
 /// JWT Claims structure
@@ -35,6 +41,8 @@ pub struct Claims {
     pub iat: u64,
     /// User role for RBAC
     pub role: String,
+    /// Token version for invalidation (matches user.token_version in DB)
+    pub token_version: i32,
 }
 
 impl From<Claims> for AuthUser {
@@ -44,6 +52,7 @@ impl From<Claims> for AuthUser {
             role: claims.role,
             exp: claims.exp,
             iat: claims.iat,
+            token_version: claims.token_version,
         }
     }
 }
@@ -52,7 +61,14 @@ impl From<Claims> for AuthUser {
 ///
 /// Validates JWT token from Authorization header and injects AuthUser into request extensions.
 /// Skips authentication for paths starting with /api/public or /api/health.
-pub async fn auth_middleware(mut request: Request, next: Next) -> Response {
+///
+/// Also verifies the token's token_version against the user's current token_version in the
+/// database, enabling token invalidation when a user changes their password.
+pub async fn auth_middleware(
+    State(state): State<AppState>,
+    mut request: Request,
+    next: Next,
+) -> Response {
     let path = request.uri().path();
 
     // Skip authentication for public endpoints
@@ -61,14 +77,8 @@ pub async fn auth_middleware(mut request: Request, next: Next) -> Response {
         return next.run(request).await;
     }
 
-    // Extract JWT secret from request extensions (should be set by app state)
-    let jwt_secret = match request.extensions().get::<JwtSecret>() {
-        Some(secret) => secret.0.clone(),
-        None => {
-            tracing::error!("JWT secret not found in request extensions");
-            return unauthorized_response("Server configuration error");
-        }
-    };
+    // Use JWT secret from app state (injected via from_fn_with_state)
+    let jwt_secret = &state.config.jwt_secret;
 
     // Extract token from Authorization header
     let token = match extract_bearer_token(&request) {
@@ -79,12 +89,29 @@ pub async fn auth_middleware(mut request: Request, next: Next) -> Response {
     };
 
     // Validate token with strict checks
-    match validate_token(&token, &jwt_secret) {
+    match validate_token(&token, jwt_secret) {
         Ok(claims) => {
-            let auth_user = AuthUser::from(claims);
-            request.extensions_mut().insert(auth_user);
+            // Verify token_version against the database
+            let user_id = uuid::Uuid::parse_str(&claims.sub);
+            let user_id = match user_id {
+                Ok(id) => id,
+                Err(_) => {
+                    tracing::warn!("Invalid user ID format in token: {}", claims.sub);
+                    return unauthorized_response("Invalid or expired token");
+                }
+            };
 
-            next.run(request).await
+            match verify_token_version(&state.db, user_id, claims.token_version).await {
+                Ok(()) => {
+                    let auth_user = AuthUser::from(claims);
+                    request.extensions_mut().insert(auth_user);
+                    next.run(request).await
+                }
+                Err(e) => {
+                    tracing::warn!("Token version validation failed: {}", e);
+                    unauthorized_response("Invalid or expired token")
+                }
+            }
         }
         Err(e) => {
             tracing::warn!("Token validation failed: {}", e);
@@ -93,9 +120,34 @@ pub async fn auth_middleware(mut request: Request, next: Next) -> Response {
     }
 }
 
-/// JWT secret wrapper for request extensions
-#[derive(Clone)]
-pub struct JwtSecret(pub String);
+/// Verify that the token's token_version matches the user's current token_version.
+/// Queries the database directly — the PK lookup is O(1) and fast enough
+/// that caching provides negligible benefit while introducing cache-invalidation
+/// race conditions (token_version changes on password/role changes).
+///
+/// TODO: For high-throughput deployments (1k+ req/s), consider a Redis-based
+/// (user_id → token_version) cache with per-user TTL equal to JWT remaining
+/// lifetime, falling back to DB on cache miss.
+async fn verify_token_version(
+    db: &sea_orm::DatabaseConnection,
+    user_id: uuid::Uuid,
+    token_version: i32,
+) -> anyhow::Result<()> {
+    let user = UserEntity::find_by_id(user_id)
+        .one(db)
+        .await
+        .context("Failed to query user for token version check")?;
+
+    let user = user.ok_or_else(|| anyhow::anyhow!("User not found"))?;
+
+    if user.token_version != token_version {
+        return Err(anyhow::anyhow!(
+            "Token version mismatch (token was invalidated by password change)"
+        ));
+    }
+
+    Ok(())
+}
 
 /// Extract bearer token from Authorization header.
 ///
@@ -171,6 +223,7 @@ pub fn generate_token(
     role: &str,
     secret: &str,
     expiry_seconds: u64,
+    token_version: i32,
 ) -> anyhow::Result<String> {
     use anyhow::Context;
     use jsonwebtoken::{EncodingKey, Header, encode};
@@ -184,6 +237,7 @@ pub fn generate_token(
         exp: now.as_secs() + expiry_seconds,
         iat: now.as_secs(),
         role: role.to_string(),
+        token_version,
     };
 
     encode(
@@ -204,24 +258,25 @@ mod tests {
 
     #[test]
     fn test_generate_token_success() {
-        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600).unwrap();
+        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, 1).unwrap();
         assert!(!token.is_empty());
         assert!(token.split('.').count() == 3); // JWT has 3 parts
     }
 
     #[test]
     fn test_validate_token_success() {
-        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600).unwrap();
+        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, 1).unwrap();
         let claims = validate_token(&token, TEST_SECRET).unwrap();
 
         assert_eq!(claims.sub, TEST_USER_ID);
         assert_eq!(claims.role, TEST_ROLE);
+        assert_eq!(claims.token_version, 1);
         assert!(claims.exp > claims.iat);
     }
 
     #[test]
     fn test_validate_token_wrong_secret() {
-        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600).unwrap();
+        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, 1).unwrap();
         let result = validate_token(&token, "wrong-secret");
 
         assert!(result.is_err());
@@ -245,6 +300,7 @@ mod tests {
             exp: now + 3600,
             iat: now,
             role: TEST_ROLE.to_string(),
+            token_version: 2,
         };
 
         let auth_user = AuthUser::from(claims);
@@ -253,6 +309,7 @@ mod tests {
         assert_eq!(auth_user.role, TEST_ROLE);
         assert_eq!(auth_user.exp, now + 3600);
         assert_eq!(auth_user.iat, now);
+        assert_eq!(auth_user.token_version, 2);
     }
 
     #[test]
@@ -344,6 +401,7 @@ mod tests {
             exp: now - 10,
             iat: now - 70,
             role: TEST_ROLE.to_string(),
+            token_version: 1,
         };
 
         let token = encode(

@@ -23,10 +23,8 @@ fn main() {
 
 #[component]
 fn App() -> Element {
-    // Build cool things ✌️
-
     rsx! {
-        // Global app resources
+        ui::GlobalStyles {}
         document::Link { rel: "stylesheet", href: MAIN_CSS }
 
         Router::<Route> {}
@@ -39,14 +37,8 @@ fn App() -> Element {
 fn DesktopNavbar() -> Element {
     rsx! {
         Navbar {
-            Link {
-                to: Route::Home {},
-                "Home"
-            }
-            Link {
-                to: Route::Blog { id: 1 },
-                "Blog"
-            }
+            Link { to: Route::Home {}, "Home" }
+            Link { to: Route::Blog { id: 1 }, "Blog" }
         }
 
         Outlet::<Route> {}

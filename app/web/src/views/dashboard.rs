@@ -70,13 +70,11 @@ pub fn Dashboard() -> Element {
                 if is_admin {
                     run_user_count(client, total_users, bus, auth_inner, nav_inner).await;
                 }
-                // 版本校验：仅当本任务仍为最新版本时才修改信号状态。
-                // 旧任务不触碰任何信号，避免覆盖新任务的 loading / 数据。
-                // （旧任务曾给 checking 设 false → 新任务尚在运行时按钮被错误启用。）
-                if version_check() != version {
-                    return;
+                // 版本校验：仅当本任务仍为最新版本时才修改信号状态，
+                // 避免旧任务误覆盖新任务的 loading / 数据。
+                if version_check() == version {
+                    checking_inner.set(false);
                 }
-                checking_inner.set(false);
             });
         });
     }
@@ -107,11 +105,11 @@ pub fn Dashboard() -> Element {
         checking.set(true);
         spawn(async move {
             run_health_check(client, health, latency_ms, bus).await;
-            // 版本号校验：仅最新任务才能修改 checking，防止旧任务提前释放按钮状态
-            if health_version() != version {
-                return;
+            // 版本号校验：仅最新任务才能重置 checking，
+            // 旧任务不触碰信号，避免按钮提前释放。
+            if health_version() == version {
+                checking.set(false);
             }
-            checking.set(false);
         });
     };
 

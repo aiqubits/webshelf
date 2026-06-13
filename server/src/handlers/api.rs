@@ -2,17 +2,15 @@ use axum::{
     Json,
     extract::{Extension, Path, Query, State},
 };
-use sea_orm::{ActiveModelTrait, Set};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-use validator::Validate;
+use validator::{Validate, ValidationError};
 
 use crate::AppState;
 use crate::middlewares::auth::AuthUser;
 use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
 use crate::utils::error::ApiError;
-use crate::utils::password::verify_password;
 use crate::utils::validator::check_password_strength;
 
 /// Health check response
@@ -126,7 +124,7 @@ pub async fn create_user(
     Ok(Json(result))
 }
 
-/// Get current user profile — `GET /api/users/me`（任意已认证用户）
+/// Get current user profile — `GET /api/users/me` (any authenticated user)
 pub async fn get_me(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
@@ -144,11 +142,11 @@ pub async fn get_me(
 }
 
 /// Change password request body
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Validate)]
 pub struct ChangePasswordRequest {
-    /// 当前密码（用于验证身份）
+    #[validate(length(min = 1, message = "current password is required"))]
     pub current_password: String,
-    /// 新密码
+    #[validate(length(min = 1, message = "new password is required"))]
     pub new_password: String,
 }
 
@@ -156,60 +154,50 @@ pub struct ChangePasswordRequest {
 #[derive(Debug, Serialize)]
 pub struct ChangePasswordResponse {
     pub message: String,
+    pub new_token: String,
 }
 
-/// Change current user's password — `POST /api/users/me/password`（任意已认证用户）
+/// Change current user's password — `POST /api/users/me/password` (any authenticated user)
 ///
-/// 流程：验证当前密码 → 校验新密码强度 → 哈希新密码 → 更新数据库。
+/// Flow: validate input → delegate to UserService (verify, hash, update, bump token_version)
+/// → issue fresh JWT.
 pub async fn change_my_password(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
     Json(payload): Json<ChangePasswordRequest>,
 ) -> Result<Json<ChangePasswordResponse>, ApiError> {
+    payload.validate()?;
+
     let user_id = Uuid::parse_str(&auth_user.user_id)
         .map_err(|_| ApiError::Internal("Invalid user ID in token".to_string()))?;
 
-    if payload.current_password.is_empty() {
-        return Err(ApiError::BadRequest("Current password is required".to_string()));
-    }
-    if payload.new_password.is_empty() {
-        return Err(ApiError::BadRequest("New password is required".to_string()));
-    }
     if payload.current_password == payload.new_password {
-        return Err(ApiError::BadRequest("New password must be different from current password".to_string()));
+        return Err(ApiError::BadRequest(
+            "New password must be different from current password".to_string(),
+        ));
     }
 
-    // 1. 查询用户实体（需要 password_hash 来验证当前密码）
     let service = UserService::new(state.db.clone());
-    let user = service
-        .get_user_with_hash(user_id)
-        .await?
-        .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
+    let (user, token_version) = service
+        .change_password(user_id, &payload.current_password, &payload.new_password)
+        .await?;
 
-    // 2. 验证当前密码
-    let is_valid = verify_password(&payload.current_password, &user.password_hash)
-        .map_err(|e| ApiError::Internal(format!("Password verification failed: {}", e)))?;
-    if !is_valid {
-        return Err(ApiError::Unauthorized("Current password is incorrect".to_string()));
-    }
-
-    // 3. 校验新密码强度
-    check_password_strength(&payload.new_password)?;
-
-    // 4. 哈希并更新
-    let new_hash = crate::utils::password::hash_password(&payload.new_password)
-        .map_err(|e| ApiError::Internal(format!("Failed to hash password: {}", e)))?;
-
-    let now = chrono::Utc::now();
-    let mut active_model: crate::repositories::user::ActiveModel = user.into();
-    active_model.password_hash = Set(new_hash);
-    active_model.updated_at = Set(now);
-    active_model.update(&state.db).await?;
-
-    tracing::info!("User {} changed password", auth_user.user_id);
+    // Issue a fresh JWT (the old one is now invalid due to token_version increment).
+    // Use the user's role from the database (user.role) rather than from the old
+    // JWT (auth_user.role) — an admin may have changed the role since the token
+    // was issued, and the database is the authoritative source.
+    let new_token = crate::middlewares::auth::generate_token(
+        &auth_user.user_id,
+        &user.role,
+        &state.config.jwt_secret,
+        state.config.jwt_expiry_seconds,
+        token_version,
+    )
+    .map_err(|e| ApiError::Internal(format!("Failed to generate token: {}", e)))?;
 
     Ok(Json(ChangePasswordResponse {
         message: "Password changed successfully".to_string(),
+        new_token,
     }))
 }
 
@@ -244,13 +232,15 @@ pub struct UpdateUserRequest {
     role: Option<String>,
 }
 
-/// Validate role value against allowed roles
-fn validate_role(role: &str) -> Result<(), validator::ValidationError> {
+/// Validate role value against allowed roles.
+/// "system" is intentionally excluded — it can only be set during bootstrap seeding,
+/// never via the admin API, to prevent privilege escalation.
+fn validate_role(role: &str) -> Result<(), ValidationError> {
     match role {
-        "user" | "admin" | "system" => Ok(()),
+        "user" | "admin" => Ok(()),
         _ => {
             let mut err = validator::ValidationError::new("invalid_role");
-            err.message = Some("role must be 'user', 'admin', or 'system'".into());
+            err.message = Some("role must be 'user' or 'admin'".into());
             Err(err)
         }
     }
@@ -264,6 +254,13 @@ pub async fn update_user(
 ) -> Result<Json<UserResponse>, ApiError> {
     // Validate request payload
     payload.validate()?;
+
+    // Require at least one field to be provided
+    if payload.email.is_none() && payload.name.is_none() && payload.role.is_none() {
+        return Err(ApiError::BadRequest(
+            "At least one field (email, name, or role) must be provided".to_string(),
+        ));
+    }
 
     let service = UserService::new(state.db.clone());
     let result = service

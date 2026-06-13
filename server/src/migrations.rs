@@ -48,10 +48,9 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
     tracing::info!("Running database migrations...");
 
     // Read migration files
-    let migrations = vec![(
-        "001_init",
-        include_str!("../migrations/001_init.sql"),
-    )];
+    // NOTE: token_version column is defined directly in 001_init.sql's CREATE TABLE.
+    // The system hasn't launched yet, so there's no need for a separate ALTER TABLE migration.
+    let migrations = vec![("001_init", include_str!("../migrations/001_init.sql"))];
 
     for (name, sql) in migrations {
         tracing::info!("Running migration: {}", name);
@@ -110,12 +109,10 @@ pub async fn run_migrations(db: &DatabaseConnection) -> Result<()> {
 mod tests {
     #[test]
     fn test_migrations_list() {
-        let migrations = [(
-            "001_init",
-            include_str!("../migrations/001_init.sql"),
-        )];
+        let migrations = [("001_init", include_str!("../migrations/001_init.sql"))];
 
         assert_eq!(migrations.len(), 1);
         assert!(migrations[0].1.contains("CREATE TABLE IF NOT EXISTS users"));
+        assert!(migrations[0].1.contains("token_version"));
     }
 }
