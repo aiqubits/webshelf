@@ -186,6 +186,8 @@ async fn create_admin_and_login(app: &Router, email: &str) -> String {
 
     let mut validation = Validation::new(Algorithm::HS256);
     validation.validate_exp = true;
+    validation.set_issuer(&["webshelf-server"]);
+    validation.set_audience(&["webshelf"]);
     let token_data = decode::<Claims>(
         &token,
         &DecodingKey::from_secret(secret.as_bytes()),
