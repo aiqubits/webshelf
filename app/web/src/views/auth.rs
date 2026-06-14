@@ -8,14 +8,29 @@ use ui::{AuthForm, AuthMode, AuthPayload};
 
 use crate::Route;
 use crate::api::{ErrorContext, humanize_error};
-use crate::auth::AuthState;
+use crate::auth::{AuthState, RegisterOutcome};
 use crate::components::{HttpMethod, LogBus, push_log_result};
+
+/// 提交表单后的导航动作。Login 成功与 Register 且 `email_verified=true`
+/// 都走"无动作"路径（依赖 `auth.user` 变化的 use_effect 跳 `/`）。
+enum SubmitAction {
+    Nothing,
+    NavigateToVerify { email: String },
+}
 
 #[component]
 pub fn Auth() -> Element {
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
+
+    // 进入登录/注册页时清空 pending 残留：
+    // 1. 避免 /verify-email 与 /auth 双向跳转时密码错位
+    // 2. 用户主动放弃验证流程时立即清空
+    let mut auth_for_clear = auth.clone();
+    use_effect(move || {
+        auth_for_clear.clear_pending_registration();
+    });
 
     // 会话恢复已上移至 App 组件 (main.rs)，此处不再重复触发——
     // 避免“记住登录”后直接访问受保护路由 (e.g. /users) 表现未登录的 BUG。
@@ -109,6 +124,7 @@ pub fn Auth() -> Element {
                     // 复制 Context 句柄供 async 块使用（EventHandler 闭包必须是 FnMut）。
                     let mut auth_async = auth.clone();
                     let bus_async = log_bus;
+                    let nav_async = nav;
 
                     loading.set(true);
                     error_msg.set(None);
@@ -116,7 +132,7 @@ pub fn Auth() -> Element {
                     let mode_check = mode;
 
                     spawn(async move {
-                        let result = match payload_mode {
+                        let result: Result<SubmitAction, client_api::ClientError> = match payload_mode {
                             AuthMode::Login => {
                                 let path = "/api/public/auth/login".to_string();
                                 let res = auth_async
@@ -126,7 +142,7 @@ pub fn Auth() -> Element {
                                 if *mode_check.read() == AuthMode::Login {
                                     push_log_result(bus_async, HttpMethod::Post, &path, &res);
                                 }
-                                res.map(|_| "Login".to_string())
+                                res.map(|_| SubmitAction::Nothing)
                             }
                             AuthMode::Register => {
                                 let path = "/api/public/auth/register".to_string();
@@ -141,14 +157,26 @@ pub fn Auth() -> Element {
                                 if *mode_check.read() == AuthMode::Register {
                                     push_log_result(bus_async, HttpMethod::Post, &path, &res);
                                 }
-                                res.map(|_| "Register".to_string())
+                                // 将 RegisterOutcome 翻译为视图层的导航动作
+                                res.map(|outcome| match outcome {
+                                    RegisterOutcome::LoggedIn => SubmitAction::Nothing,
+                                    RegisterOutcome::NeedsVerification { email } => {
+                                        SubmitAction::NavigateToVerify { email }
+                                    }
+                                })
                             }
                         };
 
                         loading.set(false);
 
                         match result {
-                            Ok(_) => {} // 导航由 auth.user 变化触发的 use_effect 统一处理，避免双重导航
+                            Ok(SubmitAction::Nothing) => {
+                                // 导航由 auth.user 变化触发的 use_effect 统一处理，避免双重导航
+                            }
+                            Ok(SubmitAction::NavigateToVerify { email }) => {
+                                // 跳转到验证码页面；密码已在 AuthState::register 中暂存
+                                nav_async.push(Route::VerifyEmail { email });
+                            }
                             Err(err) => {
                                 // 仅当表单模式未切换时才展示错误信息，
                                 // 避免 Login 的报错污染已切换到 Register 的页面。

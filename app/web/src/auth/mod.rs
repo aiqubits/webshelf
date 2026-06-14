@@ -12,5 +12,8 @@ mod state;
 mod storage;
 
 pub use jwt::{JwtPayload, decode_payload};
-pub use state::{AuthState, CurrentUser};
+#[allow(unused_imports)] // PendingRegistration is part of the public API surface
+// (referenced by `AuthState::pending_registration` field type),
+// even if no view consumes it directly.
+pub use state::{AuthState, CurrentUser, PendingRegistration, RegisterOutcome};
 pub use storage::{clear_token, load_token, save_token};

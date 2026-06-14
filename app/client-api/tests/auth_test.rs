@@ -202,6 +202,188 @@ async fn test_register_validation_error() {
 }
 
 // ──────────────────────────────────────────────
+//  Verify email & resend code tests
+// ──────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_verify_email_success() {
+    let (client, mock_server) = create_test_client().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/verify-email"))
+        .and(body_json(serde_json::json!({
+            "email": "newuser@example.com",
+            "code": "123456",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message": "Email verified successfully",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client.verify_email("newuser@example.com", "123456").await;
+
+    assert!(result.is_ok());
+    assert_eq!(result.unwrap().message, "Email verified successfully");
+}
+
+#[tokio::test]
+async fn test_verify_email_invalid_code() {
+    let (client, mock_server) = create_test_client().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/verify-email"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": "bad_request",
+            "message": "Invalid or expired verification code",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client.verify_email("newuser@example.com", "000000").await;
+
+    match result.unwrap_err() {
+        ClientError::Other(400, msg) => {
+            assert!(msg.contains("Invalid") || msg.contains("expired"));
+        }
+        other => panic!("Expected Other(400, ...), got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_verify_email_validation_error() {
+    let (client, mock_server) = create_test_client().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/verify-email"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": "validation_error",
+            "message": "code must be 6 digits",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client.verify_email("user@example.com", "abc").await;
+
+    match result.unwrap_err() {
+        ClientError::Other(400, msg) => assert!(msg.contains("validation_error")),
+        other => panic!("Expected Other(400, ...), got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_resend_code_success() {
+    let (client, mock_server) = create_test_client().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/resend-code"))
+        .and(body_json(serde_json::json!({
+            "email": "newuser@example.com",
+        })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message": "A new verification code has been sent",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client.resend_code("newuser@example.com").await;
+    assert!(result.is_ok());
+    assert_eq!(
+        result.unwrap().message,
+        "A new verification code has been sent"
+    );
+}
+
+#[tokio::test]
+async fn test_resend_code_too_soon() {
+    let (client, mock_server) = create_test_client().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/resend-code"))
+        .respond_with(ResponseTemplate::new(400).set_body_json(serde_json::json!({
+            "error": "bad_request",
+            "message": "Please wait before requesting a new code",
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client.resend_code("newuser@example.com").await;
+
+    match result.unwrap_err() {
+        ClientError::Other(400, msg) => assert!(msg.contains("wait")),
+        other => panic!("Expected Other(400, ...), got {:?}", other),
+    }
+}
+
+#[tokio::test]
+async fn test_register_response_parses_email_verified_false() {
+    let (client, mock_server) = create_test_client().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message": "Verification code sent to your email",
+            "user_id": fixtures::TEST_USER_ID,
+            "email_verified": false,
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client
+        .register("newuser@example.com", "SecurePass123!", "New User")
+        .await;
+
+    assert!(result.is_ok());
+    let resp = result.unwrap();
+    assert!(!resp.email_verified);
+}
+
+#[tokio::test]
+async fn test_register_response_parses_email_verified_true() {
+    let (client, mock_server) = create_test_client().await;
+
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message": "User registered successfully",
+            "user_id": fixtures::TEST_USER_ID,
+            "email_verified": true,
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client
+        .register("newuser@example.com", "SecurePass123!", "New User")
+        .await;
+
+    assert!(result.is_ok());
+    let resp = result.unwrap();
+    assert!(resp.email_verified);
+}
+
+#[tokio::test]
+async fn test_register_response_missing_email_verified_defaults_to_false() {
+    let (client, mock_server) = create_test_client().await;
+
+    // 旧版服务端响应无 email_verified 字段 → 默认为 false（更安全的 UX 行为）
+    Mock::given(method("POST"))
+        .and(path("/api/public/auth/register"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "message": "User registered successfully",
+            "user_id": fixtures::TEST_USER_ID,
+        })))
+        .mount(&mock_server)
+        .await;
+
+    let result = client
+        .register("newuser@example.com", "SecurePass123!", "New User")
+        .await;
+
+    assert!(result.is_ok());
+    assert!(!result.unwrap().email_verified);
+}
+
+// ──────────────────────────────────────────────
 //  Token flow: login → set_token → authenticated request
 // ──────────────────────────────────────────────
 

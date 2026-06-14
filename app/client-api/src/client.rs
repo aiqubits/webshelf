@@ -147,6 +147,36 @@ impl Client {
             .await
     }
 
+    /// 提交 6 位验证码 — `POST /api/public/auth/verify-email`
+    ///
+    /// 失败时由服务端以 `400` 返回（统一文案以防 user enumeration）。
+    pub async fn verify_email(
+        &self,
+        email: impl Into<String>,
+        code: impl Into<String>,
+    ) -> Result<VerifyEmailResponse, ClientError> {
+        let body = VerifyEmailRequest {
+            email: email.into(),
+            code: code.into(),
+        };
+        self.post_json_no_auth("/api/public/auth/verify-email", &body)
+            .await
+    }
+
+    /// 重新发送验证码 — `POST /api/public/auth/resend-code`
+    ///
+    /// 服务端有 60 秒冷却，过早调用会以 `400` 拒绝。
+    pub async fn resend_code(
+        &self,
+        email: impl Into<String>,
+    ) -> Result<ResendCodeResponse, ClientError> {
+        let body = ResendCodeRequest {
+            email: email.into(),
+        };
+        self.post_json_no_auth("/api/public/auth/resend-code", &body)
+            .await
+    }
+
     // ──────────────────────────────────────────
     //  Public endpoints
     // ──────────────────────────────────────────
@@ -405,7 +435,10 @@ impl Client {
     ///
     /// - WASM：使用 `gloo_timers`
     /// - Native：使用 `tokio::time::sleep`
-    async fn sleep_ms(ms: u32) {
+    ///
+    /// 公开以便视图层在 WASM/native 双端复用同一份定时器代码
+    /// （如注册流程中 60 秒重发倒计时的循环 sleep）。
+    pub async fn sleep_ms(ms: u32) {
         #[cfg(target_arch = "wasm32")]
         {
             gloo_timers::future::TimeoutFuture::new(ms).await;

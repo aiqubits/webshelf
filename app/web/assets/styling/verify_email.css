@@ -1,0 +1,249 @@
+/* WebShelf UI — VerifyEmail 邮件验证码视图 */
+
+.ws-verify {
+  position: relative;
+  width: 100%;
+  max-width: 28rem;
+  margin: 0 auto;
+  padding: 32px;
+  background: var(--glass-panel-bg);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+  border: var(--glass-panel-border);
+  border-radius: 24px;
+  box-shadow:
+    0 20px 25px -5px rgba(59, 130, 246, 0.08),
+    0 8px 10px -6px rgba(6, 182, 212, 0.05),
+    0 0 0 1px rgba(255, 255, 255, 0.5) inset;
+  overflow: hidden;
+}
+
+/* 装饰光晕 —— 蓝/青色调与登录页的紫色调区分，传达"安全验证"语义 */
+.ws-verify__orb {
+  position: absolute;
+  width: 144px;
+  height: 144px;
+  border-radius: 9999px;
+  filter: blur(32px);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ws-verify__orb--blue {
+  top: -64px;
+  right: -64px;
+  background: rgba(96, 165, 250, 0.35);
+}
+
+.ws-verify__orb--cyan {
+  bottom: -64px;
+  left: -64px;
+  background: rgba(34, 211, 238, 0.3);
+}
+
+.ws-verify__card {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* 顶部邮件图标（占位元素，可后续替换为 SVG） */
+.ws-verify__icon {
+  width: 56px;
+  height: 56px;
+  margin-bottom: 16px;
+  background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+  border-radius: 16px;
+  box-shadow: 0 8px 16px -4px rgba(59, 130, 246, 0.3);
+}
+
+.ws-verify__title {
+  margin: 0 0 8px 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--color-text-primary);
+  letter-spacing: -0.01em;
+}
+
+.ws-verify__subtitle {
+  margin: 0 0 24px 0;
+  font-size: 13px;
+  color: var(--color-text-tertiary);
+  text-align: center;
+  line-height: 1.6;
+}
+
+.ws-verify__subtitle strong {
+  color: var(--color-text-primary);
+  font-weight: 600;
+  word-break: break-all;
+}
+
+.ws-verify__form {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ws-verify__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  margin-bottom: 4px;
+}
+
+.ws-verify__code-input {
+  width: 100%;
+  height: 56px;
+  padding: 0 16px;
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0.4em;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  background: rgba(255, 255, 255, 0.8);
+  border: 1.5px solid var(--color-border-default);
+  border-radius: 14px;
+  outline: none;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
+  box-sizing: border-box;
+}
+
+.ws-verify__code-input:focus {
+  border-color: var(--color-brand-indigo);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.ws-verify__code-input:disabled {
+  background: rgba(241, 245, 249, 0.5);
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.ws-verify__hint {
+  margin: 0;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.ws-verify__info {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(236, 253, 245, 0.7);
+  border: 1px solid rgba(167, 243, 208, 0.5);
+  border-radius: 12px;
+  color: #047857;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.ws-verify__error {
+  margin: 0;
+  padding: 10px 12px;
+  background: rgba(254, 226, 226, 0.6);
+  border: 1px solid rgba(252, 165, 165, 0.4);
+  border-radius: 12px;
+  color: #b91c1c;
+  font-size: 11px;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.ws-verify__locked {
+  padding: 10px 12px;
+  background: rgba(254, 243, 199, 0.6);
+  border: 1px solid rgba(252, 211, 77, 0.4);
+  border-radius: 12px;
+  color: #92400e;
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.ws-verify__locked strong {
+  color: #78350f;
+  font-weight: 700;
+}
+
+.ws-verify__submit {
+  width: 100%;
+  height: 44px;
+  margin-top: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #ffffff;
+  background: linear-gradient(135deg, #3b82f6 0%, #06b6d4 100%);
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: opacity 150ms ease, transform 100ms ease;
+  box-shadow: 0 4px 12px -2px rgba(59, 130, 246, 0.3);
+}
+
+.ws-verify__submit:hover:not(:disabled) {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+
+.ws-verify__submit:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.ws-verify__submit:disabled {
+  background: var(--color-text-muted-soft);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+.ws-verify__resend-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-light);
+  font-size: 12px;
+}
+
+.ws-verify__resend {
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-brand-indigo);
+  background: transparent;
+  border: 1px solid var(--color-border-default);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 150ms ease;
+}
+
+.ws-verify__resend:hover:not(:disabled) {
+  background: var(--color-surface-hover);
+  border-color: var(--color-brand-indigo);
+}
+
+.ws-verify__resend:disabled {
+  color: var(--color-text-muted);
+  background: transparent;
+  border-color: var(--color-border-light);
+  cursor: not-allowed;
+}
+
+.ws-verify__back {
+  color: var(--color-text-tertiary);
+  text-decoration: none;
+  font-size: 12px;
+  transition: color 150ms ease;
+}
+
+.ws-verify__back:hover {
+  color: var(--color-brand-indigo);
+  text-decoration: underline;
+}

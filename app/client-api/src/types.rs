@@ -36,6 +36,44 @@ pub struct RegisterRequest {
 pub struct RegisterResponse {
     pub message: String,
     pub user_id: String,
+    /// Whether the email is already verified.
+    ///
+    /// `false` means the server has issued a 6-digit verification code and
+    /// the user must complete email verification before being able to log in.
+    /// `true` means the server has either auto-verified the user (no SMTP
+    /// configured, or send failed) or the user was already verified.
+    ///
+    /// `#[serde(default)]` preserves compatibility with older server responses
+    /// or fixtures that do not include the field — it will deserialize as
+    /// `false`, which is the safer default (forces the frontend to show the
+    /// verification UI rather than silently auto-login).
+    #[serde(default)]
+    pub email_verified: bool,
+}
+
+/// Verify email request body
+#[derive(Debug, Serialize)]
+pub struct VerifyEmailRequest {
+    pub email: String,
+    pub code: String,
+}
+
+/// Verify email response
+#[derive(Debug, Deserialize)]
+pub struct VerifyEmailResponse {
+    pub message: String,
+}
+
+/// Resend verification code request body
+#[derive(Debug, Serialize)]
+pub struct ResendCodeRequest {
+    pub email: String,
+}
+
+/// Resend verification code response
+#[derive(Debug, Deserialize)]
+pub struct ResendCodeResponse {
+    pub message: String,
 }
 
 // ──────────────────────────────────────────────

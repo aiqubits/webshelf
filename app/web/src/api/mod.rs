@@ -23,6 +23,9 @@ pub enum ErrorContext {
     Auth,
     /// 用户管理页面：401 → "未登录或会话已过期"，额外支持 403 / 404
     UserManagement,
+    /// 邮件验证页面：统一 400 文案（与服务端 anti-enumeration 对齐——
+    /// 不区分"用户不存在"、"码错误"、"码过期"、"超过尝试上限"）
+    EmailVerification,
 }
 
 /// 将 `ClientError` 翻译为中文提示，根据 `ctx` 差异化状态码文案。
@@ -55,6 +58,17 @@ pub fn humanize_error(err: &ClientError, ctx: ErrorContext) -> String {
                     (404, _) => "用户不存在".to_string(),
                     (_, "validation_error") => format!("参数错误: {msg}"),
                     (_, "conflict") => "操作冲突（邮箱已存在或违反约束）".to_string(),
+                    _ => format!("请求失败 (HTTP {status}): {msg}"),
+                },
+                ErrorContext::EmailVerification => match (status, code.as_str()) {
+                    // 400 是验证/重发接口的主错误码。
+                    // 服务端 anti-enumeration 把 "用户不存在"、"码错误"、"码过期"、
+                    // "超过尝试上限" 全部映射到同一文案 ("Invalid or expired
+                    // verification code")。前端也保持一致：不对用户暴露区分。
+                    // 表单级 validation_error（如 code 长度不对）同样返回 400，
+                    // 统一归入此臂——客户端表单校验已在前置拦截，此处兜底即可。
+                    (400, _) => "验证码错误或已过期".to_string(),
+                    (503, _) => "邮件服务未配置".to_string(),
                     _ => format!("请求失败 (HTTP {status}): {msg}"),
                 },
             }

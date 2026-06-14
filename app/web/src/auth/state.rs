@@ -9,6 +9,42 @@ use crate::auth::JWT_EXPIRY_LEEWAY_SECS;
 use crate::auth::decode_payload;
 use crate::components::now_unix_secs;
 
+/// 注册流程的结果。
+///
+/// 服务端的 `POST /register` 会返回 `email_verified: bool`：
+/// - `true`（SMTP 未配置 / 发送失败兜底）→ 用户已具备登录条件，前端自动 login 即可。
+/// - `false`（SMTP 已配置）→ 用户必须先通过邮件验证才能登录，
+///   前端需跳转验证页并暂存密码以便验证后自动登录。
+///
+/// `LoggedIn` 是单元变体而非携带 `LoginResponse` 的元组变体：
+/// 实际的 `LoginResponse` 已被 `AuthState::login()` 内部消费（设置 token、
+/// 拉取用户资料），视图层只需知道"已登录"这一个信号即可触发 `use_effect` 跳 `/`。
+#[derive(Debug, Clone)]
+pub enum RegisterOutcome {
+    /// 服务端已自动验证，注册完毕即可登录。
+    LoggedIn,
+    /// 需要走邮件验证流程。`email` 用于构造 `/verify-email/{email}` 路由。
+    NeedsVerification { email: String },
+}
+
+/// 注册期间的临时会话状态 —— 仅内存，不写 localStorage。
+///
+/// 用于在 `/auth` → `/verify-email/{email}` → 自动登录之间安全地
+/// 暂存密码以完成"注册成功自动跳转到登录状态"的体验。
+/// 密码在内存中存活约 1-2 分钟（用户输入验证码的时间），随后
+/// verify-email 成功时立即被消费（调用 `login`），不会持久化到磁盘。
+///
+/// **安全警告**：明文密码驻留在 WASM 线性内存中，**同源 JS、DevTools、
+/// heap dump 均可读取**。这是不可跳过的 UX 桥接代价——切勿将本结构
+/// 复用于"记住我"等需要持久化的场景，也勿在任何 `console.log` /
+/// `serde_json::to_string` 中暴露实例。
+#[derive(Debug, Clone)]
+pub struct PendingRegistration {
+    pub email: String,
+    pub password: String,
+    pub remember: bool,
+}
+
 /// 判定一个 `ClientError` 是否为鉴权失败（401/403）。
 ///
 /// 用于会话恢复：`/api/users/me` 收到 401/403 时清空会话而不是接受 JWT payload
@@ -68,6 +104,9 @@ pub struct AuthState {
     pub token_expires_at: Signal<Option<u64>>,
     /// 初始化完成标志：restore_from_storage_async 结束后置 true。
     pub initialized: Signal<bool>,
+    /// 注册期间的临时状态：仅内存，用于在 verify-email 成功后自动登录。
+    /// 不写入 `localStorage` / `sessionStorage`。
+    pub pending_registration: Signal<Option<PendingRegistration>>,
 }
 
 impl AuthState {
@@ -85,7 +124,35 @@ impl AuthState {
             user: Signal::new(None),
             token_expires_at: Signal::new(None),
             initialized: Signal::new(false),
+            pending_registration: Signal::new(None),
         }
+    }
+
+    /// 设置注册临时状态（仅内存）。
+    pub fn set_pending_registration(&mut self, pending: PendingRegistration) {
+        self.pending_registration.set(Some(pending));
+    }
+
+    /// 取出并清空注册临时状态。
+    ///
+    /// 在 verify-email 成功后调用，取出密码用于自动登录。
+    /// `take` 语义保证密码被消费一次后从内存中消失。
+    pub fn take_pending_registration(&mut self) -> Option<PendingRegistration> {
+        self.pending_registration.write().take()
+    }
+
+    /// 仅查看当前 pending 状态（不清空）。
+    #[allow(dead_code)]
+    pub fn peek_pending_registration(&self) -> Option<PendingRegistration> {
+        self.pending_registration.read().clone()
+    }
+
+    /// 主动清空注册临时状态。
+    ///
+    /// 调用场景：用户刷新 `/verify-email/{email}` 但密码已不在内存中；
+    /// 用户从 `/auth` 进入新的注册流程以避免脏状态。
+    pub fn clear_pending_registration(&mut self) {
+        self.pending_registration.set(None);
     }
 
     /// 从 localStorage 恢复 token 并获取真实用户资料。
@@ -153,17 +220,39 @@ impl AuthState {
         Ok(resp)
     }
 
-    /// 注册。注册成功后立刻调用 login（服务器不会自动签发 token）。
+    /// 注册。
+    ///
+    /// 根据服务端的 `email_verified` 字段分两条路径：
+    /// - `true`（SMTP 未配置 / 发送失败兜底）：自动调用 `login` 写入会话。
+    /// - `false`（SMTP 已配置）：返回 `NeedsVerification`，由视图层跳转验证页。
+    ///
+    /// 与旧实现的本质差异：旧实现在两种情况下都强制 login，导致 SMTP 已配置时
+    /// 用户卡在"邮箱或密码错误"（`server/src/services/auth.rs:96-102` 拒绝未验证登录）。
     pub async fn register(
         &mut self,
         email: &str,
         password: &str,
         name: &str,
         remember: bool,
-    ) -> Result<LoginResponse, ClientError> {
-        let _register_resp: RegisterResponse = self.client.register(email, password, name).await?;
-        // 注册成功后自动登录，复用 login 的 token 持久化逻辑。
-        self.login(email, password, remember).await
+    ) -> Result<RegisterOutcome, ClientError> {
+        let resp: RegisterResponse = self.client.register(email, password, name).await?;
+
+        if resp.email_verified {
+            // 服务端已自动验证：直接登录复用 login 的 token 持久化逻辑。
+            // LoginResponse 已被 self.login() 内部消费，外部只关心"已登录"信号。
+            self.login(email, password, remember).await?;
+            Ok(RegisterOutcome::LoggedIn)
+        } else {
+            // 需要邮件验证：将密码暂存内存中，验证成功后再自动登录。
+            self.set_pending_registration(PendingRegistration {
+                email: email.to_string(),
+                password: password.to_string(),
+                remember,
+            });
+            Ok(RegisterOutcome::NeedsVerification {
+                email: email.to_string(),
+            })
+        }
     }
 
     /// 登出。清除 token、user、localStorage。
