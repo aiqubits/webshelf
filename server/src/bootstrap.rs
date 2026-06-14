@@ -335,7 +335,19 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
     use crate::utils::password::hash_password;
     use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set};
 
-    let email = config.system_admin_email.to_lowercase();
+    let email = config.system_admin_email.trim().to_lowercase();
+
+    // Fail fast on a misconfigured system admin email rather than silently
+    // creating a malformed account. Email is a critical identifier for the
+    // super-admin and must be valid for login and password recovery flows.
+    if email.is_empty() || !validator::ValidateEmail::validate_email(&email) {
+        anyhow::bail!(
+            "System admin email '{}' is not a valid email address. \
+             Set WEBSHELF_SYSTEM_ADMIN_EMAIL to a valid email address \
+             (e.g. 'admin@example.com').",
+            config.system_admin_email
+        );
+    }
 
     // Check if system admin already exists
     let existing = UserEntity::find()
@@ -344,9 +356,17 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
         .await
         .context("Failed to query system admin user")?;
 
-    if existing.is_some() {
-        tracing::info!("System admin account already exists: {}", email);
-        return Ok(());
+    if let Some(user) = existing {
+        if user.role == "system" {
+            tracing::info!("System admin account already exists: {}", email);
+            return Ok(());
+        }
+        anyhow::bail!(
+            "A non-system user already exists with the configured system admin email '{}'. \
+             This is a data integrity issue — a regular user must not occupy the system admin email. \
+             Please change WEBSHELF_SYSTEM_ADMIN_EMAIL or remove the conflicting user.",
+            email
+        );
     }
 
     // Create system admin user

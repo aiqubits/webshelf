@@ -157,18 +157,25 @@ async fn verify_token_version(
 ///
 /// The "Bearer" scheme prefix is matched case-insensitively per RFC 6750,
 /// so "Bearer", "bearer", "BEARER", etc. are all accepted.
+///
+/// The prefix is compared at the byte level to avoid panicking on inputs
+/// that contain multi-byte UTF-8 characters before the "bearer " prefix
+/// (e.g. `"🔥🔥bearer …"`), where `&str[..7]` would slice inside a
+/// multi-byte character. Once the first 7 bytes are verified to match the
+/// ASCII prefix, byte 7 is guaranteed to be a UTF-8 char boundary (ASCII
+/// bytes are always 1-byte UTF-8 characters), so the trailing slice is safe.
 fn extract_bearer_token(request: &Request) -> Option<String> {
     let auth_header = request.headers().get(AUTHORIZATION)?;
-    let auth_str = auth_header.to_str().ok()?;
+    let auth_value = auth_header.to_str().ok()?;
 
-    const BEARER_PREFIX: &str = "bearer ";
-    if auth_str.len() > BEARER_PREFIX.len()
-        && auth_str[..BEARER_PREFIX.len()].eq_ignore_ascii_case(BEARER_PREFIX)
-    {
-        Some(auth_str[BEARER_PREFIX.len()..].to_string())
-    } else {
-        None
+    const BEARER_PREFIX: &[u8] = b"bearer ";
+    if auth_value.len() <= BEARER_PREFIX.len() {
+        return None;
     }
+    if !auth_value.as_bytes()[..BEARER_PREFIX.len()].eq_ignore_ascii_case(BEARER_PREFIX) {
+        return None;
+    }
+    Some(auth_value[BEARER_PREFIX.len()..].to_string())
 }
 
 /// Validate JWT token with strict signature, algorithm, expiration, issuer, and audience validation
@@ -394,6 +401,57 @@ mod tests {
 
         let token = extract_bearer_token(&request);
         assert!(token.is_none());
+    }
+
+    /// Regression test: the previous implementation used `&str[..7]`, which
+    /// panics when byte 7 falls inside a multi-byte UTF-8 character.
+    /// Two fire emojis (8 bytes) push the "bearer " prefix to byte 8, so the
+    /// old code would panic on this input. The fixed implementation must
+    /// return `None` without panicking.
+    #[test]
+    fn test_extract_bearer_token_multibyte_utf8_does_not_panic() {
+        use axum::body::Body;
+        use axum::http::{HeaderValue, Request};
+
+        let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        // Two fire emojis (4 bytes each) followed by "bearer token".
+        // `from_static` panics on non-ASCII, so we use `from_bytes`.
+        let value = HeaderValue::from_bytes(b"\xF0\x9F\x94\xA5\xF0\x9F\x94\xA5 bearer token")
+            .expect("valid HeaderValue bytes");
+        request.headers_mut().insert(AUTHORIZATION, value);
+
+        // Must return None, must not panic.
+        assert!(extract_bearer_token(&request).is_none());
+    }
+
+    /// One fire emoji (4 bytes) places "bearer " at byte 4. The function
+    /// must still return None.
+    #[test]
+    fn test_extract_bearer_token_single_emoji_prefix_returns_none() {
+        use axum::body::Body;
+        use axum::http::{HeaderValue, Request};
+
+        let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        let value = HeaderValue::from_bytes(b"\xF0\x9F\x94\xA5 bearer token")
+            .expect("valid HeaderValue bytes");
+        request.headers_mut().insert(AUTHORIZATION, value);
+
+        assert!(extract_bearer_token(&request).is_none());
+    }
+
+    /// Bearer prefix with no trailing token must return None, not panic.
+    #[test]
+    fn test_extract_bearer_token_prefix_only() {
+        use axum::body::Body;
+        use axum::http::{HeaderValue, Request};
+
+        let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
+        request
+            .headers_mut()
+            .insert(AUTHORIZATION, HeaderValue::from_static("bearer "));
+
+        // Length equals prefix length, so the function returns None.
+        assert!(extract_bearer_token(&request).is_none());
     }
 
     #[test]

@@ -40,8 +40,6 @@ pub enum VerificationError {
     TooManyAttempts,
     #[error("Too soon to resend")]
     TooSoon,
-    #[error("Email already verified")]
-    AlreadyVerified,
     #[error("Email service not configured")]
     EmailNotConfigured,
     #[error(transparent)]
@@ -252,19 +250,22 @@ impl VerificationService {
 
     /// Verify email with code validation and brute-force protection.
     ///
-    /// This method performs read-validate-write steps:
-    /// 1. Fetch user and check brute-force threshold
-    /// 2. Verify code is not expired
-    /// 3. Verify code matches stored hash (argon2)
-    /// 4. Update user to mark email as verified
-    ///
-    /// NOTE: This is NOT a single atomic UPDATE. A TOCTOU race between step 1
-    /// and step 4 is theoretically possible but has negligible impact since the
-    /// attacker would need to simultaneously submit a valid code for the same email.
+    /// The flow is:
+    /// 1. Fetch user; for non-existent users, perform a dummy Argon2 verify
+    ///    so the timing profile matches the existent-user path.
+    /// 2. Atomically increment the failed-attempts counter (which also
+    ///    enforces the `MAX_FAILED_ATTEMPTS` threshold in the same
+    ///    `UPDATE … WHERE failed_attempts < MAX` statement). This eliminates
+    ///    the previous TOCTOU race where N concurrent requests could all
+    ///    pass the threshold check and all run Argon2 before any increment
+    ///    landed.
+    /// 3. Only if the increment succeeded (i.e. the user was below the
+    ///    threshold) do we run the expensive Argon2 verification.
+    /// 4. On a correct code, reset the counter to 0 and mark verified.
     pub async fn verify_email(&self, email: &str, code: &str) -> Result<(), VerificationError> {
         let email_normalized = email.to_lowercase();
 
-        // Fetch user to get stored hash and check brute-force threshold.
+        // Fetch user to get stored hash and expires_at.
         // When the user does not exist we perform a dummy Argon2
         // verification so that the non-existent-user path has the same
         // timing profile as the existent-user path.
@@ -276,13 +277,14 @@ impl VerificationService {
             }
         };
 
+        // Anti-enumeration: even if the user is already verified, perform a
+        // dummy Argon2 verification and return the same error as non-existent
+        // users. Returning a distinct "AlreadyVerified" error would allow an
+        // attacker to distinguish "user exists and verified" from "user does
+        // not exist" by comparing error responses.
         if user.email_verified {
-            return Err(VerificationError::AlreadyVerified);
-        }
-
-        // Check brute-force threshold
-        if user.verification_failed_attempts >= MAX_FAILED_ATTEMPTS {
-            return Err(VerificationError::TooManyAttempts);
+            let _ = Self::verify_code(code, dummy_code_hash());
+            return Err(VerificationError::InvalidOrExpired);
         }
 
         let code_hash = user
@@ -298,14 +300,20 @@ impl VerificationService {
             return Err(VerificationError::InvalidOrExpired);
         }
 
+        // Atomic claim: increment the counter only if the user is below
+        // the threshold.  This is the only place the counter is mutated
+        // by verify_email, and the threshold check is part of the same
+        // SQL statement, so concurrent requests cannot all run Argon2.
+        self.increment_failed_attempts(&user.id).await?;
+
         // Verify code against stored hash
         if !Self::verify_code(code, code_hash)? {
-            // Increment failed attempts atomically
-            self.increment_failed_attempts(&user.id).await?;
             return Err(VerificationError::InvalidOrExpired);
         }
 
-        // Atomic verification: clear code and mark verified in one statement
+        // Atomic verification: clear code, mark verified, and reset the
+        // counter (which was just incremented by the claim above) in a
+        // single ActiveModel update.
         let now = Utc::now();
         let mut active_model: ActiveModel = user.into();
         active_model.email_verified = Set(true);

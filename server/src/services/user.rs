@@ -71,6 +71,8 @@ impl UserService {
     pub async fn create_user(&self, input: CreateUserInput) -> Result<UserResponse, UserError> {
         tracing::trace!("Creating user with email: {}", input.email);
 
+        require_password(&input.password).map_err(UserError::WeakPassword)?;
+
         let password_hash = hash_password(&input.password).context("Failed to hash password")?;
 
         let now = Utc::now();
@@ -388,10 +390,7 @@ impl UserService {
             .num_items()
             .await
             .context("Failed to count users")?;
-        let total_pages = paginator
-            .num_pages()
-            .await
-            .context("Failed to count pages")?;
+        let total_pages = total.div_ceil(per_page);
 
         let users = paginator
             .fetch_page(page - 1)

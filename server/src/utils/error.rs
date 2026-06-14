@@ -151,9 +151,6 @@ impl From<crate::services::verification::VerificationError> for ApiError {
             crate::services::verification::VerificationError::TooSoon => {
                 ApiError::BadRequest("Please wait before requesting a new code".to_string())
             }
-            crate::services::verification::VerificationError::AlreadyVerified => {
-                ApiError::BadRequest("Email is already verified".to_string())
-            }
             crate::services::verification::VerificationError::EmailNotConfigured => {
                 tracing::warn!("Email service not configured for verification");
                 ApiError::ServiceUnavailable(

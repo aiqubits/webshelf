@@ -130,7 +130,7 @@ pub async fn get_me(
     Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<UserResponse>, ApiError> {
     let user_id = uuid::Uuid::parse_str(&auth_user.user_id)
-        .map_err(|_| ApiError::Internal("Invalid user ID in token".to_string()))?;
+        .expect("auth middleware guarantees valid UUID in token");
 
     let service = UserService::new(state.db.clone());
     let result = service
@@ -168,8 +168,10 @@ pub async fn change_my_password(
 ) -> Result<Json<ChangePasswordResponse>, ApiError> {
     payload.validate()?;
 
+    check_password_strength(&payload.new_password)?;
+
     let user_id = Uuid::parse_str(&auth_user.user_id)
-        .map_err(|_| ApiError::Internal("Invalid user ID in token".to_string()))?;
+        .expect("auth middleware guarantees valid UUID in token");
 
     if payload.current_password == payload.new_password {
         return Err(ApiError::BadRequest(
@@ -183,17 +185,16 @@ pub async fn change_my_password(
         .await?;
 
     // Issue a fresh JWT (the old one is now invalid due to token_version increment).
-    // Use the user's role from the database (user.role) rather than from the old
-    // JWT (auth_user.role) — an admin may have changed the role since the token
-    // was issued, and the database is the authoritative source.
+    // Use the user's data from the database rather than from the old
+    // JWT (auth_user) — the database is the authoritative source of truth.
     let new_token = crate::middlewares::auth::generate_token(
-        &auth_user.user_id,
+        &user.id.to_string(),
         &user.role,
         &state.config.jwt_secret,
         state.config.jwt_expiry_seconds,
         token_version,
     )
-    .map_err(|e| ApiError::Internal(format!("Failed to generate token: {}", e)))?;
+    .map_err(|_| ApiError::Internal("An unexpected error occurred".to_string()))?;
 
     Ok(Json(ChangePasswordResponse {
         message: "Password changed successfully".to_string(),
