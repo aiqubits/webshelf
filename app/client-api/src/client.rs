@@ -178,6 +178,48 @@ impl Client {
     }
 
     // ──────────────────────────────────────────
+    //  Password reset (public)
+    // ──────────────────────────────────────────
+
+    /// 申请密码重置邮件 — `POST /api/public/auth/forgot-password`
+    ///
+    /// 服务端对未知邮箱走 Argon2 dummy hash 恒定分支，**永远返回 200**。
+    /// 客户端无需也无法区分"邮箱是否存在"。若 SMTP 未配置，
+    /// 服务端会以 `503` 拒绝（消息为通用"重置不可用"）。
+    pub async fn forgot_password(
+        &self,
+        email: impl Into<String>,
+    ) -> Result<ForgotPasswordResponse, ClientError> {
+        let body = ForgotPasswordRequest {
+            email: email.into(),
+        };
+        self.post_json_no_auth("/api/public/auth/forgot-password", &body)
+            .await
+    }
+
+    /// 提交 6 位验证码并重置密码 — `POST /api/public/auth/reset-password`
+    ///
+    /// 成功时服务端原子地 `token_version += 1` 并返回全新 JWT，
+    /// 客户端应将 `resp.token` 写入 `AuthState`（等价于登录成功）。
+    ///
+    /// `code` 是邮件中的 6 位数字验证码。失败时统一以 `400` 返回，
+    /// **不区分**"验证码错误 / 已过期 / 暴力尝试上限"——防止 enumeration。
+    pub async fn reset_password(
+        &self,
+        email: impl Into<String>,
+        code: impl Into<String>,
+        new_password: impl Into<String>,
+    ) -> Result<ResetPasswordResponse, ClientError> {
+        let body = ResetPasswordRequest {
+            email: email.into(),
+            code: code.into(),
+            new_password: new_password.into(),
+        };
+        self.post_json_no_auth("/api/public/auth/reset-password", &body)
+            .await
+    }
+
+    // ──────────────────────────────────────────
     //  Public endpoints
     // ──────────────────────────────────────────
 

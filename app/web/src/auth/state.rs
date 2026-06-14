@@ -255,6 +255,39 @@ impl AuthState {
         }
     }
 
+    /// 仅轮转 JWT，不重新拉取用户资料。
+    ///
+    /// 用于 `change_password` / `reset_password` 这类「服务端在事务内
+    /// `token_version += 1` 后下发 `new_token`」的场景。`id`/`role` 等用户
+    /// 字段没有变化（密码不算用户字段），因此不需要再次 `GET /api/users/me`，
+    /// 直接原地替换 token 即可。
+    ///
+    /// 如果新 token 解码失败或已过期，视为会话失效并清空——保守起见宁可让
+    /// 用户重新登录，也不要保留一个永远 401 的"假登录"状态。
+    pub fn swap_token(&mut self, new_token: impl Into<String>) {
+        let new_token = new_token.into();
+        let Some((payload, _user_placeholder)) = parse_token(&new_token) else {
+            // 新 token 格式异常：保守起见，清空会话让用户重新登录。
+            self.logout();
+            return;
+        };
+        if now_unix_secs() + JWT_EXPIRY_LEEWAY_SECS >= payload.exp {
+            // 新 token 已过期（不可能但兜底）：同样清空。
+            self.logout();
+            return;
+        }
+        self.client.set_token(new_token.clone());
+        self.token_expires_at.set(Some(payload.exp));
+        // 复用 login 的持久化策略：有 remember 就写 localStorage，否则清掉。
+        // 这里的意图是"用户既然主动改了密码，明确处于活跃会话中"，新会话
+        // 沿用旧会话的持久化偏好。
+        if crate::auth::load_token().is_some() {
+            crate::auth::save_token(&new_token);
+        } else {
+            crate::auth::clear_token();
+        }
+    }
+
     /// 登出。清除 token、user、localStorage。
     pub fn logout(&mut self) {
         self.client.clear_token();
@@ -264,7 +297,10 @@ impl AuthState {
     }
 
     /// 持久化会话：设置 token + 调用 GET /api/users/me 获取真实用户资料。
-    async fn persist_session_async(&mut self, token: &str, remember: bool) {
+    ///
+    /// 由 `login` / `reset_password` 视图复用 —— 后者消费 reset token
+    /// 后会拿到一个完整的新 JWT，等价于登录成功。
+    pub async fn persist_session_async(&mut self, token: &str, remember: bool) {
         if let Some((payload, _user_placeholder)) = parse_token(token) {
             self.client.set_token(token.to_string());
             self.token_expires_at.set(Some(payload.exp));

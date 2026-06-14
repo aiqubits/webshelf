@@ -14,9 +14,19 @@ CREATE TABLE IF NOT EXISTS users (
     verification_code_expires_at TIMESTAMPTZ,
     verification_code_sent_at TIMESTAMPTZ,
     verification_failed_attempts INTEGER NOT NULL DEFAULT 0,
+    password_reset_token_hash VARCHAR(255),
+    password_reset_expires_at TIMESTAMPTZ,
+    password_reset_sent_at TIMESTAMPTZ,
+    password_reset_failed_attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent ALTERs for existing dev databases that pre-date the password-reset columns.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR(255);
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_expires_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_sent_at TIMESTAMPTZ;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_failed_attempts INTEGER NOT NULL DEFAULT 0;
 
 -- Create index on email for faster lookups
 CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);

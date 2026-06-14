@@ -26,6 +26,9 @@ pub enum ErrorContext {
     /// 邮件验证页面：统一 400 文案（与服务端 anti-enumeration 对齐——
     /// 不区分"用户不存在"、"码错误"、"码过期"、"超过尝试上限"）
     EmailVerification,
+    /// 密码重置页面：与 verify-email 类似，服务端对所有失败分支统一
+    /// 400 + 通用文案以防 enumeration / 凭证探测。
+    PasswordReset,
 }
 
 /// 将 `ClientError` 翻译为中文提示，根据 `ctx` 差异化状态码文案。
@@ -69,6 +72,16 @@ pub fn humanize_error(err: &ClientError, ctx: ErrorContext) -> String {
                     // 统一归入此臂——客户端表单校验已在前置拦截，此处兜底即可。
                     (400, _) => "验证码错误或已过期".to_string(),
                     (503, _) => "邮件服务未配置".to_string(),
+                    _ => format!("请求失败 (HTTP {status}): {msg}"),
+                },
+                ErrorContext::PasswordReset => match (status, code.as_str()) {
+                    // forgot-password: 服务端对未知邮箱与 cooldown 早请求均 200 兜底，
+                    // 真实错误只会是 503（邮件服务未配置）。
+                    // reset-password: 服务端把 "token 不存在 / 已过期 / 错误 /
+                    // 已被消费 / 暴力尝试上限 / 弱密码" 全部统一 400 + 通用文案，
+                    // 前端保持同样的反枚举语义。
+                    (400, _) => "重置验证码无效或已过期".to_string(),
+                    (503, _) => "密码重置功能暂不可用".to_string(),
                     _ => format!("请求失败 (HTTP {status}): {msg}"),
                 },
             }

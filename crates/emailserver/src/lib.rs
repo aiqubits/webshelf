@@ -36,11 +36,9 @@ use lettre::{
     transport::smtp::authentication::Credentials,
 };
 use serde::{Deserialize, Serialize};
-use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::RwLock;
-use url::Url;
 
 /// SMTP email configuration
 #[derive(Debug, Clone, Deserialize)]
@@ -191,58 +189,6 @@ pub struct EmailService {
     runtime: Arc<RwLock<EmailRuntime>>,
 }
 
-fn is_local_development_host(url: &Url) -> bool {
-    match url.host_str() {
-        Some("localhost") => true,
-        Some(host) => {
-            // Url::host_str() wraps IPv6 in brackets (e.g. "[::1]")
-            let stripped = host.strip_prefix('[').and_then(|h| h.strip_suffix(']'));
-            stripped
-                .unwrap_or(host)
-                .parse::<IpAddr>()
-                .map(|ip| ip.is_loopback())
-                .unwrap_or(false)
-        }
-        None => false,
-    }
-}
-
-fn validate_public_app_base_url(app_base_url: &str) -> Result<Url, EmailError> {
-    let parsed = Url::parse(app_base_url).map_err(|e| {
-        EmailError::InvalidConfig(format!("APP_BASE_URL must be a valid absolute URL: {}", e))
-    })?;
-
-    if parsed.host_str().is_none() {
-        return Err(EmailError::InvalidConfig(
-            "APP_BASE_URL must have a host".to_string(),
-        ));
-    }
-
-    if !parsed.username().is_empty() || parsed.password().is_some() {
-        return Err(EmailError::InvalidConfig(
-            "APP_BASE_URL must not contain username or password".to_string(),
-        ));
-    }
-
-    if parsed.query().is_some() || parsed.fragment().is_some() {
-        return Err(EmailError::InvalidConfig(
-            "APP_BASE_URL must not contain query params or fragment".to_string(),
-        ));
-    }
-
-    match parsed.scheme() {
-        "https" => Ok(parsed),
-        "http" if is_local_development_host(&parsed) => Ok(parsed),
-        "http" => Err(EmailError::InvalidConfig(
-            "APP_BASE_URL must use https in non-local environments".to_string(),
-        )),
-        scheme => Err(EmailError::InvalidConfig(format!(
-            "APP_BASE_URL only supports http/https, got {}",
-            scheme
-        ))),
-    }
-}
-
 fn smtp_timeout(timeout_secs: u64) -> Option<Duration> {
     if timeout_secs == 0 {
         None
@@ -261,20 +207,6 @@ fn smtp_security_mode(config: &EmailConfig) -> SmtpSecurityMode {
     } else {
         SmtpSecurityMode::Plain
     }
-}
-
-fn build_password_reset_url(app_base_url: &str, token: &str) -> Result<String, EmailError> {
-    let mut parsed = validate_public_app_base_url(app_base_url)?;
-    let current_path = parsed.path().trim_end_matches('/');
-    let encoded_token =
-        percent_encoding::utf8_percent_encode(token, percent_encoding::NON_ALPHANUMERIC);
-    let next_path = if current_path.is_empty() || current_path == "/" {
-        format!("/auth/reset-password/{}", encoded_token)
-    } else {
-        format!("{}/auth/reset-password/{}", current_path, encoded_token)
-    };
-    parsed.set_path(&next_path);
-    Ok(parsed.into())
 }
 
 fn escape_html(text: &str) -> String {
@@ -448,56 +380,50 @@ Webshelf Team
             .await
     }
 
-    /// Send a password reset email
-    pub async fn send_password_reset_email(
+    /// Send a password-reset verification code email
+    /// this sends a short numeric code that the user manually types into the
+    /// reset-password form. This avoids the need for a frontend route that
+    /// accepts a token in the URL path.
+    pub async fn send_password_reset_code_email(
         &self,
         to: &str,
-        token: &str,
-        app_base_url: &str,
+        code: &str,
+        expires_minutes: i64,
     ) -> Result<(), EmailError> {
-        let reset_url = build_password_reset_url(app_base_url, token)?;
-
-        let subject = "Reset Your Password";
+        let subject = "Your Password Reset Code";
         let text_body = format!(
             r#"Hello!
 
 We received a request to reset your password.
 
-Click the following link to reset your password:
-{}
+Your password reset code is: {}
 
-This link will expire in 1 hour.
-
-If you did not request a password reset, please ignore this email and your password will remain unchanged.
+This code will expire in {} minutes. If you did not request a password reset, please ignore this email.
 
 Best regards,
 Webshelf Team
 "#,
-            reset_url
+            code, expires_minutes
         );
 
         let html_body = format!(
             r#"<html>
 <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
 <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
-<h2 style="color: #2c5282;">Reset Your Password</h2>
+<h2 style="color: #2c5282;">Password Reset Code</h2>
 <p>Hello!</p>
 <p>We received a request to reset your password.</p>
-<p>Click the button below to reset your password:</p>
-<p>
-<a href="{}" style="display: inline-block; padding: 12px 24px; background-color: #2c5282; color: white; text-decoration: none; border-radius: 4px;">
-Reset Password
-</a>
-</p>
-<p>Or copy this link to your browser:<br><code style="word-break: break-all;">{}</code></p>
-<p style="color: #718096; font-size: 14px;">This link will expire in 1 hour.</p>
-<p style="color: #718096; font-size: 14px;">If you did not request a password reset, please ignore this email.</p>
+<p>Enter the following code to reset your password:</p>
+<div style="margin: 24px 0; padding: 16px; background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 8px; text-align: center;">
+<span style="font-size: 28px; letter-spacing: 8px; font-weight: bold; color: #2d3748;">{}</span>
+</div>
+<p style="color: #718096; font-size: 14px;">This code will expire in {} minutes. If you did not request a password reset, please ignore this email.</p>
 <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 20px 0;">
 <p style="color: #718096; font-size: 12px;">Webshelf Team</p>
 </div>
 </body>
 </html>"#,
-            reset_url, reset_url
+            code, expires_minutes
         );
 
         self.send_html_email(to, subject, &text_body, &html_body)
@@ -725,33 +651,6 @@ mod tests {
     }
 
     #[test]
-    fn test_build_password_reset_url_trims_trailing_slash() {
-        let reset_url =
-            build_password_reset_url("https://app.example.com/", "reset456").expect("valid URL");
-        assert_eq!(
-            reset_url,
-            "https://app.example.com/auth/reset-password/reset456"
-        );
-    }
-
-    #[test]
-    fn test_build_password_reset_url_preserves_base_path() {
-        let reset_url = build_password_reset_url("https://app.example.com/console", "reset456")
-            .expect("valid URL");
-        assert_eq!(
-            reset_url,
-            "https://app.example.com/console/auth/reset-password/reset456"
-        );
-    }
-
-    #[test]
-    fn test_build_password_reset_url_rejects_remote_http() {
-        let err = build_password_reset_url("http://example.com", "reset456")
-            .expect_err("remote http should be rejected");
-        assert!(matches!(err, EmailError::InvalidConfig(_)));
-    }
-
-    #[test]
     fn test_smtp_timeout_zero_disables_timeout() {
         assert_eq!(smtp_timeout(0), None);
         assert_eq!(smtp_timeout(30), Some(Duration::from_secs(30)));
@@ -778,16 +677,6 @@ mod tests {
         let mut config = test_config();
         config.use_tls = false;
         assert_eq!(smtp_security_mode(&config), SmtpSecurityMode::Plain);
-    }
-
-    #[tokio::test]
-    async fn test_invalid_public_base_url_reports_error() {
-        let service = EmailService::new(test_config());
-        let err = service
-            .send_password_reset_email("test@example.com", "token", "http://example.com")
-            .await
-            .expect_err("invalid public base URL should fail");
-        assert!(matches!(err, EmailError::InvalidConfig(_)));
     }
 
     #[test]
@@ -818,42 +707,6 @@ mod tests {
 
         let config = test_config();
         assert!(config.is_configured());
-    }
-
-    #[test]
-    fn test_is_local_development_host_localhost() {
-        let url = Url::parse("http://localhost:3000").unwrap();
-        assert!(is_local_development_host(&url));
-    }
-
-    #[test]
-    fn test_is_local_development_host_loopback_ipv4() {
-        let url = Url::parse("http://127.0.0.1:3000").unwrap();
-        assert!(is_local_development_host(&url));
-    }
-
-    #[test]
-    fn test_is_local_development_host_loopback_ipv6() {
-        let url = Url::parse("http://[::1]:3000").unwrap();
-        assert!(is_local_development_host(&url));
-    }
-
-    #[test]
-    fn test_is_local_development_host_remote() {
-        let url = Url::parse("https://example.com").unwrap();
-        assert!(!is_local_development_host(&url));
-    }
-
-    #[test]
-    fn test_is_local_development_host_no_host() {
-        let url = Url::parse("file:///path/to/file").unwrap();
-        assert!(!is_local_development_host(&url));
-    }
-
-    #[test]
-    fn test_validate_public_url_accepts_localhost_http() {
-        let url = validate_public_app_base_url("http://localhost:3000").expect("should accept");
-        assert_eq!(url.host_str(), Some("localhost"));
     }
 
     #[test]

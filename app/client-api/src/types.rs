@@ -77,6 +77,51 @@ pub struct ResendCodeResponse {
 }
 
 // ──────────────────────────────────────────────
+//  Password reset types
+// ──────────────────────────────────────────────
+
+/// Forgot password request body
+///
+/// 仅含 `email` —— 服务端对未知邮箱走 dummy hash 恒定分支，
+/// 永远返回 200 + 通用文案（防 enumeration），因此请求体不会泄露用户存在性。
+#[derive(Debug, Serialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+/// Forgot password response
+#[derive(Debug, Deserialize)]
+pub struct ForgotPasswordResponse {
+    pub message: String,
+}
+
+/// Reset password request body
+///
+/// `code` 必须是 6 位数字验证码（来自密码重置邮件），
+/// `new_password` 须满足服务端复杂度校验（≥8 字符 + 复杂度）。
+#[derive(Debug, Serialize)]
+pub struct ResetPasswordRequest {
+    pub email: String,
+    pub code: String,
+    pub new_password: String,
+}
+
+/// Reset password response
+///
+/// 与 `LoginResponse` 同形（多一个 `message`），因为服务端在事务内
+/// 原子地 `token_version += 1` 后直接签发新 JWT —— 验证码校验通过
+/// 即等于登录。
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordResponse {
+    pub message: String,
+    pub token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub user_id: String,
+    pub role: String,
+}
+
+// ──────────────────────────────────────────────
 //  User types
 // ──────────────────────────────────────────────
 
@@ -149,7 +194,12 @@ pub struct ChangePasswordRequest {
 }
 
 /// Change password response
+///
+/// `new_token` 必须被调用方消费 —— 服务端在改密时原子地
+/// `token_version += 1`，原 JWT 永久失效；调用方必须用 `new_token` 替换
+/// 旧 token，否则下次 API 调用会 401。
 #[derive(Debug, Deserialize)]
 pub struct ChangePasswordResponse {
     pub message: String,
+    pub new_token: String,
 }

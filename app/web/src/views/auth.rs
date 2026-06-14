@@ -92,6 +92,9 @@ pub fn Auth() -> Element {
                 remember: Some(remember),
                 loading: *loading.read(),
                 error: error_msg.read().clone(),
+                on_forgot: move |_: MouseEvent| {
+                    nav.push(Route::ForgotPassword {});
+                },
                 on_submit: move |payload: AuthPayload| {
                     if *loading.read() {
                         return;

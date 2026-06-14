@@ -388,6 +388,10 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
         verification_code_expires_at: Set(None),
         verification_code_sent_at: Set(None),
         verification_failed_attempts: Set(0),
+        password_reset_token_hash: Set(None),
+        password_reset_expires_at: Set(None),
+        password_reset_sent_at: Set(None),
+        password_reset_failed_attempts: Set(0),
     };
 
     match user.insert(db).await {

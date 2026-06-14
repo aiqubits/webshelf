@@ -5,6 +5,7 @@ use validator::Validate;
 use crate::AppState;
 use crate::repositories::user::CreateUserInput;
 use crate::services::auth::{AuthService, LoginRequest, LoginResponse};
+use crate::services::password_reset::{PasswordResetError, PasswordResetService};
 use crate::services::user::UserService;
 use crate::services::verification::VerificationService;
 use crate::utils::error::ApiError;
@@ -205,5 +206,117 @@ pub async fn resend_code(
 
     Ok(Json(ResendCodeResponse {
         message: "A new verification code has been sent".to_string(),
+    }))
+}
+
+/// Forgot-password request — initiate a password-reset email.
+///
+/// Always returns 200 OK on a syntactically valid email to prevent
+/// user enumeration; the response body is identical regardless of whether
+/// the email is registered. Actual delivery failure (SMTP not configured,
+/// cooldown exceeded) surfaces as 503/400 from the service mapping.
+#[derive(Debug, Deserialize, Validate)]
+pub struct ForgotPasswordRequestBody {
+    #[validate(email(message = "must be a valid email address"))]
+    email: String,
+}
+
+#[derive(Serialize)]
+pub struct ForgotPasswordResponse {
+    message: String,
+}
+
+pub async fn forgot_password(
+    State(state): State<AppState>,
+    Json(payload): Json<ForgotPasswordRequestBody>,
+) -> Result<Json<ForgotPasswordResponse>, ApiError> {
+    payload.validate()?;
+
+    let email = payload.email.to_lowercase();
+
+    let service = PasswordResetService::new(state.db.clone(), state.email.clone());
+
+    // Anti-enumeration: swallow `TooSoon` to prevent leaking whether an
+    // email is registered via the cooldown window. Non-existent users
+    // always get 200; existent users within cooldown must also get 200
+    // (the same generic message) so that an attacker cannot distinguish
+    // the two cases by measuring response differences between first and
+    // second request.
+    if let Err(e) = service.request_reset(&email).await
+        && !matches!(e, PasswordResetError::TooSoon)
+    {
+        return Err(e.into());
+    }
+
+    // The message intentionally does not reveal whether the email is registered.
+    Ok(Json(ForgotPasswordResponse {
+        message: "If that email is registered, a reset code has been sent".to_string(),
+    }))
+}
+
+/// Reset-password request — consume the verification code sent in the
+/// reset email and replace the user's password.
+///
+/// On success, returns a fresh JWT so the user is auto-logged-in.
+#[derive(Debug, Deserialize, Validate)]
+pub struct ResetPasswordRequestBody {
+    #[validate(email(message = "must be a valid email address"))]
+    email: String,
+
+    #[validate(length(min = 6, max = 6, message = "code must be 6 digits"))]
+    code: String,
+
+    #[validate(length(min = 8, message = "password must be at least 8 characters"))]
+    new_password: String,
+}
+
+#[derive(Serialize)]
+pub struct ResetPasswordResponse {
+    message: String,
+    /// Fresh JWT issued after the password is replaced.
+    pub token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub user_id: String,
+    pub role: String,
+}
+
+pub async fn reset_password(
+    State(state): State<AppState>,
+    Json(payload): Json<ResetPasswordRequestBody>,
+) -> Result<Json<ResetPasswordResponse>, ApiError> {
+    payload.validate()?;
+    check_password_strength(&payload.new_password)?;
+
+    // Reject non-numeric codes early to avoid wasting Argon2 CPU
+    // on obviously invalid inputs.
+    if !payload.code.chars().all(|c| c.is_ascii_digit()) {
+        return Err(ApiError::BadRequest("code must be 6 digits".to_string()));
+    }
+
+    let email = payload.email.to_lowercase();
+
+    let service = PasswordResetService::new(state.db.clone(), state.email.clone());
+    let outcome = service
+        .reset_password(&email, &payload.code, &payload.new_password)
+        .await?;
+
+    let new_token = crate::middlewares::auth::generate_token(
+        &outcome.user_id.to_string(),
+        &outcome.role,
+        &state.config.jwt_secret,
+        state.config.jwt_expiry_seconds,
+        outcome.token_version,
+    )
+    .map_err(|_| ApiError::Internal("An unexpected error occurred".to_string()))?;
+
+    tracing::info!("Password reset completed for user {}", outcome.user_id);
+    Ok(Json(ResetPasswordResponse {
+        message: "Password reset successfully".to_string(),
+        token: new_token,
+        token_type: "Bearer".to_string(),
+        expires_in: state.config.jwt_expiry_seconds,
+        user_id: outcome.user_id.to_string(),
+        role: outcome.role,
     }))
 }

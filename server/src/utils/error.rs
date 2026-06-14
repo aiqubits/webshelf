@@ -165,6 +165,38 @@ impl From<crate::services::verification::VerificationError> for ApiError {
     }
 }
 
+// Convert PasswordResetError to ApiError for type-safe error mapping.
+//
+// All "code-side" failures (invalid/expired, too-soon, too-many-attempts)
+// are mapped to 400 BadRequest with a generic message so that an attacker
+// cannot distinguish "user does not exist" from "code is wrong/expired"
+// or "user is locked out". This matches the anti-enumeration posture of
+// the verification flow.
+impl From<crate::services::password_reset::PasswordResetError> for ApiError {
+    fn from(err: crate::services::password_reset::PasswordResetError) -> Self {
+        match err {
+            crate::services::password_reset::PasswordResetError::InvalidOrExpired => {
+                ApiError::BadRequest("Invalid or expired reset code".to_string())
+            }
+            crate::services::password_reset::PasswordResetError::TooManyAttempts => {
+                tracing::warn!("User exceeded max password-reset attempts");
+                ApiError::BadRequest("Invalid or expired reset code".to_string())
+            }
+            crate::services::password_reset::PasswordResetError::TooSoon => {
+                ApiError::BadRequest("Please wait before requesting a new reset code".to_string())
+            }
+            crate::services::password_reset::PasswordResetError::EmailNotConfigured => {
+                tracing::warn!("Email service not configured for password reset");
+                ApiError::ServiceUnavailable("Password reset is currently unavailable".to_string())
+            }
+            crate::services::password_reset::PasswordResetError::Internal(e) => {
+                tracing::error!("Password-reset internal error: {:?}", e);
+                ApiError::Internal("An unexpected error occurred".to_string())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

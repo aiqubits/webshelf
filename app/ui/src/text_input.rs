@@ -26,13 +26,11 @@ pub fn TextInput(
         InputType::Text => "text",
         InputType::Email => "email",
         InputType::Password => "password",
+        InputType::Number => "number",
     };
 
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/text_input.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/text_input.css") }
         div { class: "ws-input",
             if let Some(label_text) = label.as_ref() {
                 label { class: "ws-input__label", "{label_text}" }
@@ -65,4 +63,5 @@ pub enum InputType {
     Text,
     Email,
     Password,
+    Number,
 }

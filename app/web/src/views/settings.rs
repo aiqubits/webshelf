@@ -88,7 +88,7 @@ pub fn Settings() -> Element {
                         let np = new_password.read().clone();
                         let client = auth.client.clone();
                         let bus = log_bus;
-                        let auth_async = auth.clone();
+                        let mut auth_async = auth.clone();
                         let nav_async = nav;
                         let path = "/api/users/me/password".to_string();
 
@@ -101,8 +101,10 @@ pub fn Settings() -> Element {
                             // 与 Dashboard / Users 保持一致：401/403 统一走 handle_unauth
                             // （注销 + 跳 /auth），避免在修改密码页会话失效时
                             // 只看到静态错误文案（Issue #3）。
+                            // 传入 clone：handle_unauth 会 move auth_async，
+                            // 后面 swap_token 还要再用一次。
                             if let Err(err) = &res
-                                && handle_unauth(err, auth_async, nav_async, bus)
+                                && handle_unauth(err, auth_async.clone(), nav_async, bus)
                             {
                                 submitting.set(false);
                                 return;
@@ -111,6 +113,11 @@ pub fn Settings() -> Element {
                             submitting.set(false);
                             match res {
                                 Ok(resp) => {
+                                    // 服务端在事务内 `token_version += 1`，旧 JWT 永久失效；
+                                    // 必须用 `new_token` 替换本地缓存，否则下一次 API 调用
+                                    // 会 401 → 401 拦截器把用户踢回 /auth，"改密成功"实际上
+                                    // 把用户踢下线（B1）。
+                                    auth_async.swap_token(resp.new_token);
                                     success_msg.set(Some(resp.message));
                                     current_password.set(String::new());
                                     new_password.set(String::new());

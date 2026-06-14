@@ -1463,3 +1463,621 @@ async fn test_unverified_email_cannot_login() {
 
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 }
+
+// ---------------------------------------------------------------------------
+// Password-reset endpoint tests
+// ---------------------------------------------------------------------------
+
+/// Insert a password-reset verification code directly into the database
+/// for a given email.  This bypasses the email-send path so we can
+/// deterministically test the `reset_password` branch even when the SMTP
+/// service is not configured.
+///
+/// Returns the plaintext code so the caller can submit it.
+async fn seed_reset_code(email: &str, expires_in_minutes: i64) -> String {
+    use argon2::{Argon2, PasswordHasher, password_hash::SaltString};
+    use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set};
+    use webshelf_server::repositories::user::{
+        ActiveModel, Column as UserColumn, Entity as UserEntity,
+    };
+    use webshelf_server::utils::load_config;
+
+    let config = load_config("config.toml", "development").expect("Failed to load config");
+    let db = Database::connect(&config.database_url)
+        .await
+        .expect("Failed to connect to database");
+
+    let user = UserEntity::find()
+        .filter(UserColumn::Email.eq(email.to_lowercase()))
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("User must exist before seeding reset code");
+
+    // Generate a 6-digit code and hash it with Argon2 (same primitive the
+    // service uses).
+    use rand::Rng;
+    let code_int = rand::thread_rng().gen_range(0..1_000_000);
+    let code = format!("{:06}", code_int);
+    let argon2 = Argon2::default();
+    let salt = SaltString::generate(&mut rand::thread_rng());
+    let code_hash = argon2
+        .hash_password(code.as_bytes(), &salt)
+        .expect("Failed to hash reset code")
+        .to_string();
+
+    let now = chrono::Utc::now();
+    let expires_at = now + chrono::Duration::minutes(expires_in_minutes);
+
+    let mut active_model: ActiveModel = user.into();
+    active_model.password_reset_token_hash = Set(Some(code_hash));
+    active_model.password_reset_expires_at = Set(Some(expires_at));
+    active_model.password_reset_sent_at = Set(Some(now));
+    active_model.password_reset_failed_attempts = Set(0);
+    active_model.updated_at = Set(now);
+    active_model.update(&db).await.unwrap();
+
+    code
+}
+
+/// Forgot-password with a syntactically invalid email → 400 BadRequest.
+#[tokio::test]
+async fn test_forgot_password_invalid_email() {
+    let app = create_test_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/forgot-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({ "email": "not-an-email" })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Forgot-password for a non-existent email must return 200 OK with the
+/// generic message — this is the anti-enumeration contract.
+#[tokio::test]
+async fn test_forgot_password_nonexistent_email_returns_ok() {
+    let app = create_test_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/forgot-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": "no-such-user-12345@example.com"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Non-existent email must return 200 OK (anti-enumeration)"
+    );
+    let body = body_to_json(response.into_body()).await;
+    assert_eq!(
+        body["message"],
+        "If that email is registered, a reset code has been sent"
+    );
+}
+
+/// Forgot-password with SMTP unconfigured must return 503 Service Unavailable,
+/// regardless of whether the user exists.
+#[tokio::test]
+async fn test_forgot_password_email_not_configured() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "fpg_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    // Register user.
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": "Password123!",
+                        "name": "FPG Test",
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/forgot-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({ "email": &email })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(
+        response.status(),
+        StatusCode::SERVICE_UNAVAILABLE,
+        "Forgot-password must surface 503 when SMTP is not configured"
+    );
+}
+
+/// Reset-password rejects a malformed code (wrong length / non-numeric).
+#[tokio::test]
+async fn test_reset_password_invalid_code_length() {
+    let app = create_test_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": "user@example.com",
+                        "code": "12345",    // 5 digits, not 6
+                        "new_password": "NewPassword456!"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Reset-password rejects a weak new password.
+#[tokio::test]
+async fn test_reset_password_weak_new_password() {
+    let app = create_test_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": "user@example.com",
+                        "code": "123456",
+                        "new_password": "weak"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// End-to-end reset flow:
+/// 1. Register user (auto-verified)
+/// 2. Seed a known reset code directly into the DB (bypass SMTP)
+/// 3. POST /reset-password with the correct code → 200 + new_token
+/// 4. Old tokens (issued before the reset) must be rejected
+/// 5. Re-using the same reset code must fail (single-use)
+#[tokio::test]
+async fn test_reset_password_success_and_token_invalidation() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "rstok_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let original_password = "Password123!";
+
+    // 1. Register user.
+    let register_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": original_password,
+                        "name": "Reset OK"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(register_response.status(), StatusCode::OK);
+
+    // 2. Capture the original JWT so we can verify it gets invalidated later.
+    let login_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": original_password
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login_response.status(), StatusCode::OK);
+    let old_token = body_to_json(login_response.into_body()).await["token"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // 3. Seed a known reset code into the DB.
+    let reset_code = seed_reset_code(&email, 60).await;
+
+    // 4. Submit the reset with the correct code + new password.
+    let new_password = "NewSecure789!";
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "code": reset_code,
+                        "new_password": new_password
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    let fresh_token = body["token"].as_str().unwrap();
+    assert!(!fresh_token.is_empty());
+    assert_eq!(body["token_type"], "Bearer");
+
+    // 5. Old token must be rejected (token_version was atomically incremented).
+    let me_old = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", old_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        me_old.status(),
+        StatusCode::UNAUTHORIZED,
+        "Old JWT must be rejected after password reset"
+    );
+
+    // 6. Fresh token must grant access.
+    let me_new = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", fresh_token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(me_new.status(), StatusCode::OK);
+
+    // 7. Verify password_reset_* fields are cleared after successful reset.
+    {
+        use sea_orm::{ColumnTrait, Database, EntityTrait, QueryFilter};
+        use webshelf_server::repositories::user::{Column as UserColumn, Entity as UserEntity};
+        use webshelf_server::utils::load_config;
+
+        let config = load_config("config.toml", "development").expect("Failed to load config");
+        let db = Database::connect(&config.database_url)
+            .await
+            .expect("Failed to connect to database");
+        let user = UserEntity::find()
+            .filter(UserColumn::Email.eq(email.to_lowercase()))
+            .one(&db)
+            .await
+            .unwrap()
+            .expect("User must exist");
+
+        assert!(
+            user.password_reset_token_hash.is_none(),
+            "password_reset_token_hash must be cleared after successful reset"
+        );
+        assert!(
+            user.password_reset_expires_at.is_none(),
+            "password_reset_expires_at must be cleared after successful reset"
+        );
+        assert!(
+            user.password_reset_sent_at.is_none(),
+            "password_reset_sent_at must be cleared after successful reset"
+        );
+        assert_eq!(
+            user.password_reset_failed_attempts, 0,
+            "password_reset_failed_attempts must be 0 after successful reset"
+        );
+    }
+
+    // 8. Re-using the same reset code must fail (single-use).
+    let reuse = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "code": reset_code,
+                        "new_password": "AnotherPass321!"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        reuse.status(),
+        StatusCode::BAD_REQUEST,
+        "Reset code must be single-use"
+    );
+
+    // 9. Login with the NEW password must succeed; OLD password must fail.
+    let login_new = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": new_password
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login_new.status(), StatusCode::OK);
+
+    let login_old = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/login")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": original_password
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(login_old.status(), StatusCode::UNAUTHORIZED);
+}
+
+/// Reset-password with a wrong code must return 400.
+#[tokio::test]
+async fn test_reset_password_wrong_code() {
+    let app = create_test_app().await;
+
+    let email = format!(
+        "rwrt_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": "Password123!",
+                        "name": "Wrong Code"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Seed a real code, but submit a *different* code.
+    let _real_code = seed_reset_code(&email, 60).await;
+    let wrong_code = "999999".to_string();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "code": wrong_code,
+                        "new_password": "NewPassword456!"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Reset-password for a non-existent email must return 400 (same shape as
+/// invalid-code) to prevent user enumeration.
+#[tokio::test]
+async fn test_reset_password_nonexistent_email() {
+    let app = create_test_app().await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": "ghost@example.com",
+                        "code": "123456",
+                        "new_password": "NewPassword456!"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+/// Reset-password with an expired code must return 400.
+#[tokio::test]
+async fn test_reset_password_expired_code() {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set};
+    use webshelf_server::repositories::user::{
+        ActiveModel, Column as UserColumn, Entity as UserEntity,
+    };
+    use webshelf_server::utils::load_config;
+
+    let app = create_test_app().await;
+
+    let email = format!(
+        "rexp_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": "Password123!",
+                        "name": "Expired Code"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // Seed a code, then set expires_at to the past.
+    let code = seed_reset_code(&email, 60).await;
+
+    let config = load_config("config.toml", "development").expect("Failed to load config");
+    let db = Database::connect(&config.database_url)
+        .await
+        .expect("Failed to connect to database");
+    let user = UserEntity::find()
+        .filter(UserColumn::Email.eq(email.to_lowercase()))
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("User must exist");
+
+    let mut active_model: ActiveModel = user.into();
+    active_model.password_reset_expires_at =
+        Set(Some(chrono::Utc::now() - chrono::Duration::hours(1)));
+    active_model.updated_at = Set(chrono::Utc::now());
+    active_model.update(&db).await.unwrap();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/reset-password")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "code": code,
+                        "new_password": "NewPassword456!"
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}

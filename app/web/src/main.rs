@@ -2,7 +2,9 @@ use dioxus::prelude::*;
 
 use auth::AuthState;
 use components::{AppShellLayout, LogBus};
-use views::{Auth, Dashboard, NotFound, Settings, Users, VerifyEmail};
+use views::{
+    Auth, Dashboard, ForgotPassword, NotFound, ResetPassword, Settings, Users, VerifyEmail,
+};
 
 mod api;
 mod auth;
@@ -24,6 +26,11 @@ enum Route {
     Auth {},
     #[route("/verify-email/:email")]
     VerifyEmail { email: String },
+    #[route("/forgot-password")]
+    ForgotPassword {},
+    #[route("/reset-password")]
+    #[route("/reset-password/:email")]
+    ResetPassword { email: Option<String> },
     #[route("/:..route")]
     NotFound { route: Vec<String> },
 }

@@ -49,6 +49,19 @@ pub struct Model {
     /// Failed verification attempt counter (for brute-force protection)
     #[sea_orm(default_value = 0)]
     pub verification_failed_attempts: i32,
+
+    /// Argon2 hash of the active password-reset token (single-use)
+    pub password_reset_token_hash: Option<String>,
+
+    /// When the password-reset token expires
+    pub password_reset_expires_at: Option<DateTimeUtc>,
+
+    /// When the password-reset email was last sent (for resend cooldown)
+    pub password_reset_sent_at: Option<DateTimeUtc>,
+
+    /// Failed password-reset attempts counter (brute-force protection)
+    #[sea_orm(default_value = 0)]
+    pub password_reset_failed_attempts: i32,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -126,6 +139,10 @@ mod tests {
             verification_code_expires_at: None,
             verification_code_sent_at: None,
             verification_failed_attempts: 0,
+            password_reset_token_hash: None,
+            password_reset_expires_at: None,
+            password_reset_sent_at: None,
+            password_reset_failed_attempts: 0,
         };
 
         let response = UserResponse::from(model.clone());

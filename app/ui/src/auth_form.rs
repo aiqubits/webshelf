@@ -35,6 +35,10 @@ pub fn AuthForm(
     #[props(default)] remember: Option<Signal<bool>>,
     #[props(default = false)] loading: bool,
     #[props(default)] error: Option<String>,
+    /// 点击「忘记凭证?」链接时由调用方注入的处理（如导航到密码重置路由）。
+    /// 不传则降级为默认行为（链接不可点击）。
+    #[props(default)]
+    on_forgot: Option<EventHandler<MouseEvent>>,
     on_submit: EventHandler<AuthPayload>,
 ) -> Element {
     rsx! {
@@ -155,7 +159,19 @@ pub fn AuthForm(
                             }
                             "维持持久化登录"
                         }
-                        a { class: "ws-auth__forgot", href: "#", "忘记凭证?" }
+                        // 「忘记凭证?」链接 —— 旧版硬编码 `href="#"` 是死链；
+                        // 现由调用方注入 on_forgot 实现真正的导航，未传则降级为不可点击。
+                        a {
+                            class: "ws-auth__forgot",
+                            href: "#",
+                            onclick: move |e| {
+                                if let Some(ref h) = on_forgot {
+                                    e.prevent_default();
+                                    h.call(e);
+                                }
+                            },
+                            "忘记凭证?"
+                        }
                     }
                 }
 
