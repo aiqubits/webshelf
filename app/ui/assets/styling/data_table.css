@@ -126,3 +126,17 @@
   color: var(--color-text-muted);
   font-variant-numeric: tabular-nums;
 }
+
+/* system 角色保护标识 */
+.ws-table__protected {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(148, 163, 184, 0.1);
+  white-space: nowrap;
+}

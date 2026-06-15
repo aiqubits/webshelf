@@ -226,10 +226,12 @@ async fn test_invalid_json_response() {
 // ──────────────────────────────────────────────
 
 #[tokio::test]
-async fn test_structured_error_body() {
+async fn test_structured_error_body_raw_json() {
     let (client, mock_server) = create_test_client().await;
 
-    // 后端返回格式化错误 {"error": "...", "message": "..."}
+    // 后端返回结构化错误 {"error": "...", "message": "..."}
+    // Client::handle_response 不再预先格式化为 "[code] message"，
+    // 而是将原始 JSON body 原样传递给调用方，由 humanize_error 自行解析。
     Mock::given(method("POST"))
         .and(path("/api/public/auth/login"))
         .respond_with(ResponseTemplate::new(422).set_body_json(serde_json::json!({
@@ -247,11 +249,25 @@ async fn test_structured_error_body() {
     match err {
         ClientError::Other(status, msg) => {
             assert_eq!(status, 422);
-            assert!(msg.contains("validation_error"));
-            assert!(msg.contains("email"));
+            // 验证传递的是原始 JSON body，而非预格式化的 "[code] message"。
+            // 调用方 (如 humanize_error) 可自行反序列化 ErrorBody。
+            assert!(msg.starts_with('{'), "Expected raw JSON body, got: {msg:?}");
+            assert!(
+                msg.contains(r#""validation_error""#),
+                "Raw JSON should contain error code, got: {msg:?}"
+            );
+            assert!(
+                msg.contains(r#""email must be a valid email address""#),
+                "Raw JSON should contain error message, got: {msg:?}"
+            );
+            // 额外验证：不应包含旧格式的方括号前缀
+            assert!(
+                !msg.starts_with('['),
+                "Should NOT contain pre-formatted '[code]' pattern, got: {msg:?}"
+            );
         }
         other => panic!(
-            "Expected Other(422, ...) with structured error, got {:?}",
+            "Expected Other(422, ...) with raw JSON body, got {:?}",
             other
         ),
     }

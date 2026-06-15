@@ -39,6 +39,7 @@ pub fn Dashboard() -> Element {
     // use_effect 异步任务版本号 —— 防止旧任务覆盖新任务的 checking 状态。
     // 工作原理同 users.rs 中的 list_version 模式。
     let mut health_version = use_signal(|| 0u64);
+    let user_count_version = use_signal(|| 0u64);
     // 初始拉取健康信息 + 用户总数（如果是 admin）。
     // effect 追踪 auth.user 变化：当用户登录、登出、角色变更时自动刷新数据。
     {
@@ -48,9 +49,14 @@ pub fn Dashboard() -> Element {
         let checking_for_effect = checking;
         let auth_for_effect = auth.clone();
         let mut version_signal = health_version;
+        let mut uc_version_signal = user_count_version;
         use_effect(move || {
             // 递增版本号并快照当前值，供异步任务完成后校验。
             let version = version_signal.with_mut(|v| {
+                *v += 1;
+                *v
+            });
+            let uc_version = uc_version_signal.with_mut(|v| {
                 *v += 1;
                 *v
             });
@@ -60,15 +66,33 @@ pub fn Dashboard() -> Element {
             let nav_inner = nav_for_effect;
             let mut checking_inner = checking_for_effect;
             let version_check = version_signal;
+            let uc_version_check = uc_version_signal;
             // 在 effect 闭包内实时读取 auth.user 以建立信号追踪，
             // 确保用户角色变更时触发重取。
             // system 角色同样具备 admin 能力，因此也拉取用户总数。
             let is_admin = is_admin_or_system(auth_for_effect.user.read().as_ref());
             spawn(async move {
                 checking_inner.set(true);
-                run_health_check(client.clone(), health, latency_ms, bus).await;
+                run_health_check(
+                    client.clone(),
+                    health,
+                    latency_ms,
+                    bus,
+                    version,
+                    version_check,
+                )
+                .await;
                 if is_admin {
-                    run_user_count(client, total_users, bus, auth_inner, nav_inner).await;
+                    run_user_count(
+                        client,
+                        total_users,
+                        bus,
+                        auth_inner,
+                        nav_inner,
+                        uc_version,
+                        uc_version_check,
+                    )
+                    .await;
                 }
                 // 版本校验：仅当本任务仍为最新版本时才修改信号状态，
                 // 避免旧任务误覆盖新任务的 loading / 数据。
@@ -104,7 +128,7 @@ pub fn Dashboard() -> Element {
         });
         checking.set(true);
         spawn(async move {
-            run_health_check(client, health, latency_ms, bus).await;
+            run_health_check(client, health, latency_ms, bus, version, health_version).await;
             // 版本号校验：仅最新任务才能重置 checking，
             // 旧任务不触碰信号，避免按钮提前释放。
             if health_version() == version {
@@ -223,10 +247,16 @@ async fn run_health_check(
     mut health: Signal<HealthState>,
     mut latency_ms: Signal<Option<f64>>,
     bus: LogBus,
+    version: u64,
+    health_version: Signal<u64>,
 ) {
     let started = now_unix_ms();
     let res = client.health_check().await;
     let elapsed = (now_unix_ms() - started) as f64;
+    // 版本号校验：有更新的 health check 已启动时，放弃本次写入
+    if health_version() != version {
+        return;
+    }
     match res {
         Ok(hr) => {
             latency_ms.set(Some(elapsed));
@@ -256,8 +286,13 @@ async fn run_user_count(
     bus: LogBus,
     auth: AuthState,
     nav: Navigator,
+    version: u64,
+    user_count_version: Signal<u64>,
 ) {
     let res = client.list_users(1, 1).await;
+    if user_count_version() != version {
+        return;
+    }
     match res {
         Ok(page) => {
             total_users.set(Some(page.total));

@@ -5,6 +5,7 @@
 use dioxus::prelude::*;
 use ui::{Button, ButtonType, InputType, TextInput};
 
+use crate::Route;
 use crate::api::{ErrorContext, handle_unauth, humanize_error};
 use crate::auth::AuthState;
 use crate::components::{HttpMethod, LogBus, push_log_result};
@@ -21,6 +22,21 @@ pub fn Settings() -> Element {
     let mut submitting = use_signal(|| false);
     let mut form_error = use_signal(|| Option::<String>::None);
     let mut success_msg = use_signal(|| Option::<String>::None);
+
+    // Auth guard: 未认证用户不可见密码修改表单
+    let authenticated_at_render = auth.is_authenticated();
+    let auth_for_guard = auth.clone();
+    use_effect(move || {
+        if !auth_for_guard.is_authenticated() {
+            nav.replace(Route::Auth {});
+        }
+    });
+
+    if !authenticated_at_render {
+        return rsx! {
+            Fragment {}
+        };
+    }
 
     // 切换 / 进入页面时清空表单
     {

@@ -201,6 +201,8 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
     let role = u.role.clone();
     let created = u.created_at;
 
+    let is_system = role == "system";
+
     let u_for_edit = u.clone();
     let u_for_delete = u;
     let mut s_edit = signals;
@@ -235,18 +237,27 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
             }
             td { class: "ws-table__mono", "{format_dt(&created)}" }
             td {
-                div { class: "ws-table__row-actions",
-                    button {
-                        class: "ws-table__action",
-                        title: "编辑",
-                        onclick: edit_handler,
-                        i { class: "fa-solid fa-pen" }
+                if is_system {
+                    div { class: "ws-table__row-actions",
+                        span { class: "ws-table__protected",
+                            i { class: "fa-solid fa-shield-halved" }
+                            " 受保护"
+                        }
                     }
-                    button {
-                        class: "ws-table__action ws-table__action--danger",
-                        title: "删除",
-                        onclick: delete_handler,
-                        i { class: "fa-solid fa-trash" }
+                } else {
+                    div { class: "ws-table__row-actions",
+                        button {
+                            class: "ws-table__action",
+                            title: "编辑",
+                            onclick: edit_handler,
+                            i { class: "fa-solid fa-pen" }
+                        }
+                        button {
+                            class: "ws-table__action ws-table__action--danger",
+                            title: "删除",
+                            onclick: delete_handler,
+                            i { class: "fa-solid fa-trash" }
+                        }
                     }
                 }
             }
@@ -451,12 +462,24 @@ fn render_form_modal(
         let role = signals_for_submit.form_role.cloned();
         let editing_id = editing_for_submit.as_ref().map(|u| u.id);
         let kind_now = kind;
-        // 同步校验：密码为空时在 spawn 前提前返回，避免 loading 闪烁
-        if kind_now == ModalKind::Create && password.is_empty() {
-            signals_for_submit
-                .form_error
-                .set(Some("密码不能为空".into()));
-            return;
+        // 同步校验：避免空字段浪费网络请求（Create 模式下全部必填）
+        if kind_now == ModalKind::Create {
+            if name.trim().is_empty() {
+                signals_for_submit.form_error.set(Some("用户名为空".into()));
+                return;
+            }
+            if email.trim().is_empty() {
+                signals_for_submit
+                    .form_error
+                    .set(Some("邮箱不能为空".into()));
+                return;
+            }
+            if password.is_empty() {
+                signals_for_submit
+                    .form_error
+                    .set(Some("密码不能为空".into()));
+                return;
+            }
         }
         let client_async = client.clone();
         let bus_async = log_bus;

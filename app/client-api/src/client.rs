@@ -5,7 +5,7 @@ use serde::{Serialize, de::DeserializeOwned};
 use uuid::Uuid;
 
 use crate::config::ClientConfig;
-use crate::error::{ClientError, ErrorBody};
+use crate::error::ClientError;
 use crate::types::*;
 
 /// 指数退避延迟的最大位移量（shift 范围 0..=2），延迟序列：500ms, 1s, 2s
@@ -504,10 +504,11 @@ impl Client {
             let text = response.text().await.unwrap_or_default();
             let default_msg = status.canonical_reason().unwrap_or("Unknown error");
 
-            // 解析结构化错误体并构建消息，同时通过 from_status 正确分类
-            let message = if let Ok(body) = serde_json::from_str::<ErrorBody>(&text) {
-                format!("[{}] {}", body.error, body.message)
-            } else if text.is_empty() {
+            // 传递原始响应体文本，由调用方 (如 humanize_error) 做结构化解析
+            // 不在此处格式化 ErrorBody，避免前端错误码匹配死代码。
+            // The raw JSON text is passed through so that callers like
+            // humanize_error can parse it themselves.
+            let message = if text.is_empty() {
                 default_msg.to_string()
             } else {
                 text

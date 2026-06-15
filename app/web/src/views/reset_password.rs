@@ -28,6 +28,23 @@ pub fn ResetPassword(email: Option<String>) -> Element {
     let mut submitting = use_signal(|| false);
     let mut error_msg = use_signal(|| Option::<String>::None);
 
+    // 已登录守卫：已登录用户改密应走 /settings（修改密码），
+    // 而非通过忘记密码的重置流程。
+    // 在首次渲染时即检查并返回空 Fragment，避免渲染完整表单后闪跳。
+    let authenticated = auth.is_authenticated();
+    let auth_for_auth_guard = auth.clone();
+    use_effect(move || {
+        if auth_for_auth_guard.is_authenticated() {
+            nav.replace(Route::Settings {});
+        }
+    });
+
+    if authenticated {
+        return rsx! {
+            Fragment {}
+        };
+    }
+
     rsx! {
         div { class: "ws-reset",
             div { class: "ws-reset__orb ws-reset__orb--cyan" }
