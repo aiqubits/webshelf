@@ -21,9 +21,11 @@ pub fn AppShellLayout() -> Element {
     let active_nav = match route {
         Route::Dashboard {} => NavKey::Dashboard,
         Route::Users {} => NavKey::Users,
-        // 本布局包裹 Dashboard / Settings / Users（见 main.rs 路由定义），
-        // Auth / NotFound 等路由在 AppShellLayout 外部，不会到达此分支。
-        // 通配臂作为防御性兜底：新路由若被错误放入本布局时高亮 Dashboard。
+        // Settings 在本布局内但没有专用 NavKey，沿用 Dashboard 高亮。
+        Route::Settings {} => NavKey::Dashboard,
+        // 通配臂——此布局仅包裹 Dashboard / Settings / Users（见 main.rs 路由定义），
+        // 其他 Route 变体不应到达本布局。若未来新增路由加入此布局，
+        // 编译器不会警告，需手动在此处补充分支。
         _ => NavKey::Dashboard,
     };
 

@@ -72,6 +72,9 @@ pub fn Users() -> Element {
         let bus = log_bus;
         let auth_for_effect = auth.clone();
         use_effect(move || {
+            // 读取 list_version 以注册为 use_effect 的响应式依赖。
+            // 值被主动丢弃，只有读取信号的副作用是必要的——
+            // 缺少此行会导致 effect 在列表变更后不会重新执行。
             let _ = list_version.cloned();
             let client = client.clone();
             let mut list = list;
