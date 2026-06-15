@@ -1274,16 +1274,18 @@ async fn test_verify_email_with_nonexistent_email() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
-// Test that resend-code returns 503 when email service is not configured
-// AND the user exists.  For non-existent emails the response must always
-// be 200 OK (anti-enumeration), so this test first registers a real user.
+// Test that resend-code returns 200 OK when email service is not configured
+// AND the user exists but is auto-verified (registration auto-verifies
+// when email service is unconfigured).  Verified users don't need a code,
+// so the endpoint returns 200 immediately regardless of SMTP state.
 #[tokio::test]
 async fn test_resend_code_with_unconfigured_email_service() {
     let app = create_test_app().await;
 
     // Register a real user so the email lookup succeeds.
+    // Registration auto-verifies when email service is unconfigured.
     let email = format!(
-        "resend_503_{}@example.com",
+        "resend_200_{}@example.com",
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
@@ -1300,7 +1302,7 @@ async fn test_resend_code_with_unconfigured_email_service() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": "Password123!",
-                        "name": "Resend 503 Test",
+                        "name": "Resend 200 Test",
                     }))
                     .unwrap(),
                 ))
@@ -1309,7 +1311,9 @@ async fn test_resend_code_with_unconfigured_email_service() {
         .await
         .unwrap();
 
-    // A syntactically valid, registered email — but the email service is not configured.
+    // A syntactically valid, registered (auto-verified) email — resend-code
+    // returns 200 because the user is already verified, even when the email
+    // service is not configured.
     let response = app
         .oneshot(
             Request::builder()
@@ -1324,7 +1328,7 @@ async fn test_resend_code_with_unconfigured_email_service() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(response.status(), StatusCode::OK);
 }
 
 // Test that resend-code with a non-existent email returns 200 OK
@@ -1417,6 +1421,88 @@ async fn test_resend_code_verified_user_returns_ok() {
         StatusCode::OK,
         "Second request must also return 200 (verified user bypasses email checks)"
     );
+}
+
+// Test that resend-code returns 503 SERVICE_UNAVAILABLE when email service
+// is not configured AND the user exists but email_verified is false.
+// This is the 503 path — the user exists, is NOT verified, and there is
+// no SMTP to resend from.
+#[tokio::test]
+async fn test_resend_code_unverified_user_returns_503() {
+    use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set};
+    use webshelf_server::repositories::user::{
+        ActiveModel, Column as UserColumn, Entity as UserEntity,
+    };
+    use webshelf_server::utils::load_config;
+
+    let app = create_test_app().await;
+
+    let email = format!(
+        "resend_503_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+
+    // 1. Register via API — user is auto-verified (email service not configured)
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": "Password123!",
+                        "name": "Resend503Test",
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    // 2. Directly set email_verified = false in the database to simulate
+    //    the state of an unverified user with no SMTP configured.
+    let config = load_config("config.toml", "development").expect("Failed to load config");
+    let db = Database::connect(&config.database_url)
+        .await
+        .expect("Failed to connect to database");
+
+    let user = UserEntity::find()
+        .filter(UserColumn::Email.eq(email.to_lowercase()))
+        .one(&db)
+        .await
+        .unwrap()
+        .expect("User should exist after registration");
+
+    let mut active_model: ActiveModel = user.into();
+    active_model.email_verified = Set(false);
+    active_model.updated_at = Set(chrono::Utc::now());
+    active_model.update(&db).await.unwrap();
+
+    // 3. Resend-code with an unverified user — email service is not configured,
+    //    so the endpoint must return 503 SERVICE_UNAVAILABLE.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/resend-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({ "email": &email })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
 }
 
 // ---------------------------------------------------------------------------
