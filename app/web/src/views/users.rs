@@ -330,6 +330,13 @@ fn render_delete_modal(
                 .set(Some("未选择目标用户".into()));
             return;
         };
+        // 防御性检查：系统用户不可删除（后端同样保护）
+        if u.role == "system" {
+            signals_for_submit
+                .form_error
+                .set(Some("系统管理员不可删除".into()));
+            return;
+        }
         let target_id = u.id;
         signals_for_submit.submitting.set(true);
         signals_for_submit.form_error.set(None);
@@ -462,6 +469,18 @@ fn render_form_modal(
         let role = signals_for_submit.form_role.cloned();
         let editing_id = editing_for_submit.as_ref().map(|u| u.id);
         let kind_now = kind;
+        // 防御性检查：系统用户不可编辑（后端同样保护，UI 按钮已隐藏）
+        if kind_now == ModalKind::Edit
+            && editing_for_submit
+                .as_ref()
+                .map(|u| u.role == "system")
+                .unwrap_or(false)
+        {
+            signals_for_submit
+                .form_error
+                .set(Some("系统管理员不可编辑".into()));
+            return;
+        }
         // 同步校验：避免空字段浪费网络请求（Create 模式下全部必填）
         if kind_now == ModalKind::Create {
             if name.trim().is_empty() {

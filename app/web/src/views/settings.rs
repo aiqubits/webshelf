@@ -24,15 +24,19 @@ pub fn Settings() -> Element {
     let mut success_msg = use_signal(|| Option::<String>::None);
 
     // Auth guard: 未认证用户不可见密码修改表单
+    // 注意：必须先等待 initialization 完成（restore_from_storage_async），
+    // 否则 authenticated 永远是 false，导致已登录用户被误跳转（Issue B1）。
+    let initialized = *auth.initialized.read();
     let authenticated_at_render = auth.is_authenticated();
     let auth_for_guard = auth.clone();
     use_effect(move || {
-        if !auth_for_guard.is_authenticated() {
+        if *auth_for_guard.initialized.read() && !auth_for_guard.is_authenticated() {
             nav.replace(Route::Auth {});
         }
+        // 未初始化时不跳转，等待 restore 完成
     });
 
-    if !authenticated_at_render {
+    if !initialized || !authenticated_at_render {
         return rsx! {
             Fragment {}
         };

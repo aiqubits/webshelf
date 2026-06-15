@@ -82,11 +82,3 @@ impl From<serde_json::Error> for ClientError {
         Self::Deserialization(format!("Failed to parse response: {}", e))
     }
 }
-
-/// 服务端返回的结构化错误体
-#[derive(Debug, serde::Deserialize)]
-#[allow(dead_code)]
-pub(crate) struct ErrorBody {
-    pub error: String,
-    pub message: String,
-}

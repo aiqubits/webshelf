@@ -31,15 +31,18 @@ pub fn ResetPassword(email: Option<String>) -> Element {
     // 已登录守卫：已登录用户改密应走 /settings（修改密码），
     // 而非通过忘记密码的重置流程。
     // 在首次渲染时即检查并返回空 Fragment，避免渲染完整表单后闪跳。
+    // 注意：必须先等待 initialization 完成（restore_from_storage_async），
+    // 否则 authenticated 永远是 false，导致表单闪现（Issue B1）。
+    let initialized = *auth.initialized.read();
     let authenticated = auth.is_authenticated();
     let auth_for_auth_guard = auth.clone();
     use_effect(move || {
-        if auth_for_auth_guard.is_authenticated() {
+        if *auth_for_auth_guard.initialized.read() && auth_for_auth_guard.is_authenticated() {
             nav.replace(Route::Settings {});
         }
     });
 
-    if authenticated {
+    if !initialized || authenticated {
         return rsx! {
             Fragment {}
         };
