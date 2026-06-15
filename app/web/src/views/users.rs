@@ -464,7 +464,7 @@ fn render_form_modal(
             return;
         }
         let name = signals_for_submit.form_name.cloned();
-        let email = signals_for_submit.form_email.cloned();
+        let email = signals_for_submit.form_email.cloned().to_lowercase();
         let password = signals_for_submit.form_password.cloned();
         let role = signals_for_submit.form_role.cloned();
         let editing_id = editing_for_submit.as_ref().map(|u| u.id);
@@ -481,24 +481,22 @@ fn render_form_modal(
                 .set(Some("系统管理员不可编辑".into()));
             return;
         }
-        // 同步校验：避免空字段浪费网络请求（Create 模式下全部必填）
-        if kind_now == ModalKind::Create {
-            if name.trim().is_empty() {
-                signals_for_submit.form_error.set(Some("用户名为空".into()));
-                return;
-            }
-            if email.trim().is_empty() {
-                signals_for_submit
-                    .form_error
-                    .set(Some("邮箱不能为空".into()));
-                return;
-            }
-            if password.is_empty() {
-                signals_for_submit
-                    .form_error
-                    .set(Some("密码不能为空".into()));
-                return;
-            }
+        // 同步校验：避免空字段浪费网络请求（Create 与 Edit 模式均需校验 name/email）
+        if name.trim().is_empty() {
+            signals_for_submit.form_error.set(Some("用户名为空".into()));
+            return;
+        }
+        if email.trim().is_empty() {
+            signals_for_submit
+                .form_error
+                .set(Some("邮箱不能为空".into()));
+            return;
+        }
+        if kind_now == ModalKind::Create && password.is_empty() {
+            signals_for_submit
+                .form_error
+                .set(Some("密码不能为空".into()));
+            return;
         }
         let client_async = client.clone();
         let bus_async = log_bus;
