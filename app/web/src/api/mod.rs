@@ -140,3 +140,159 @@ pub fn handle_unauth(
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // ── is_unauth ────────────────────────────────────────
+
+    #[test]
+    fn is_unauth_401_returns_true() {
+        let err = ClientError::Other(401, "unauthorized".into());
+        assert!(is_unauth(&err));
+    }
+
+    #[test]
+    fn is_unauth_403_returns_false() {
+        let err = ClientError::Other(403, "forbidden".into());
+        assert!(!is_unauth(&err));
+    }
+
+    #[test]
+    fn is_unauth_400_returns_false() {
+        let err = ClientError::Other(400, "bad request".into());
+        assert!(!is_unauth(&err));
+    }
+
+    #[test]
+    fn is_unauth_network_returns_false() {
+        let err = ClientError::Network("timeout".into());
+        assert!(!is_unauth(&err));
+    }
+
+    #[test]
+    fn is_unauth_server_error_401_returns_false() {
+        let err = ClientError::ServerError(401, "Unauthorized".into());
+        assert!(!is_unauth(&err));
+    }
+
+    // ── humanize_error: Auth context ─────────────────────
+
+    #[test]
+    fn humanize_auth_401() {
+        let err = ClientError::Other(401, r#"{"error":"unauthorized"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::Auth);
+        assert_eq!(msg, "邮箱或密码错误");
+    }
+
+    #[test]
+    fn humanize_auth_validation_error() {
+        let err = ClientError::Other(
+            400,
+            r#"{"error":"validation_error","message":"email is invalid"}"#.into(),
+        );
+        let msg = humanize_error(&err, ErrorContext::Auth);
+        assert!(msg.contains("参数错误"));
+    }
+
+    #[test]
+    fn humanize_auth_conflict() {
+        let err = ClientError::Other(
+            409,
+            r#"{"error":"conflict","message":"email already registered"}"#.into(),
+        );
+        let msg = humanize_error(&err, ErrorContext::Auth);
+        assert_eq!(msg, "该邮箱已注册");
+    }
+
+    #[test]
+    fn humanize_auth_network() {
+        let err = ClientError::Network("connection refused".into());
+        let msg = humanize_error(&err, ErrorContext::Auth);
+        assert!(msg.contains("网络异常"));
+    }
+
+    // ── humanize_error: UserManagement context ───────────
+
+    #[test]
+    fn humanize_usermgmt_401() {
+        let err = ClientError::Other(401, r#"{"error":"unauthorized"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        assert_eq!(msg, "未登录或会话已过期");
+    }
+
+    #[test]
+    fn humanize_usermgmt_403() {
+        let err = ClientError::Other(403, r#"{"error":"forbidden"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        assert_eq!(msg, "权限不足 (需 admin)");
+    }
+
+    #[test]
+    fn humanize_usermgmt_404() {
+        let err = ClientError::Other(404, r#"{"error":"not_found"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        assert_eq!(msg, "用户不存在");
+    }
+
+    #[test]
+    fn humanize_usermgmt_server_error() {
+        let err = ClientError::ServerError(500, "Internal Server Error".into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        assert!(msg.contains("服务器错误"));
+    }
+
+    #[test]
+    fn humanize_rate_limited() {
+        let err = ClientError::RateLimited("Too many requests".into());
+        let msg = humanize_error(&err, ErrorContext::Auth);
+        assert_eq!(msg, "请求过于频繁，请稍后再试");
+    }
+
+    #[test]
+    fn humanize_deserialization() {
+        let err = ClientError::Deserialization("expected `{`".into());
+        let msg = humanize_error(&err, ErrorContext::Auth);
+        assert!(msg.contains("响应解析失败"));
+    }
+
+    #[test]
+    fn humanize_config() {
+        let err = ClientError::Config("bad base url".into());
+        let msg = humanize_error(&err, ErrorContext::Auth);
+        assert!(msg.contains("客户端配置错误"));
+    }
+
+    // ── humanize_error: EmailVerification context ────────
+
+    #[test]
+    fn humanize_verify_400() {
+        let err = ClientError::Other(400, r#"{"error":"invalid_code"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::EmailVerification);
+        assert_eq!(msg, "验证码错误或已过期");
+    }
+
+    #[test]
+    fn humanize_verify_503() {
+        let err = ClientError::Other(503, r#"{"error":"mail_unconfigured"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::EmailVerification);
+        assert_eq!(msg, "邮件服务未配置");
+    }
+
+    // ── humanize_error: PasswordReset context ────────────
+
+    #[test]
+    fn humanize_reset_400() {
+        let err = ClientError::Other(400, r#"{"error":"invalid_token"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::PasswordReset);
+        assert_eq!(msg, "重置验证码无效或已过期");
+    }
+
+    #[test]
+    fn humanize_reset_503() {
+        let err = ClientError::Other(503, r#"{"error":"mail_unconfigured"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::PasswordReset);
+        assert_eq!(msg, "密码重置功能暂不可用");
+    }
+}

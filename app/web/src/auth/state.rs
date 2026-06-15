@@ -53,6 +53,36 @@ fn is_auth_failure(err: &ClientError) -> bool {
     matches!(err, ClientError::Other(401, _) | ClientError::Other(403, _))
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn auth_failure_401() {
+        assert!(is_auth_failure(&ClientError::Other(401, "x".into())));
+    }
+
+    #[test]
+    fn auth_failure_403() {
+        assert!(is_auth_failure(&ClientError::Other(403, "x".into())));
+    }
+
+    #[test]
+    fn auth_failure_400_is_not() {
+        assert!(!is_auth_failure(&ClientError::Other(400, "x".into())));
+    }
+
+    #[test]
+    fn auth_failure_500_is_not() {
+        assert!(!is_auth_failure(&ClientError::ServerError(500, "x".into())));
+    }
+
+    #[test]
+    fn auth_failure_network_is_not() {
+        assert!(!is_auth_failure(&ClientError::Network("timeout".into())));
+    }
+}
+
 /// 当前已登录用户。
 #[derive(Debug, Clone, PartialEq)]
 pub struct CurrentUser {

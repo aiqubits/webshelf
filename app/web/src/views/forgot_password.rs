@@ -25,12 +25,22 @@ pub fn ForgotPassword() -> Element {
     let mut error_msg = use_signal(|| Option::<String>::None);
 
     // 已登录守卫：让"找回密码"对已登录用户毫无意义，直接踢回首页。
+    // 注意：必须先等待 initialization 完成（restore_from_storage_async），
+    // 否则 authenticated 永远是 false，导致已登录用户闪现表单（同 reset_password.rs 做法）。
+    let initialized = *auth.initialized.read();
+    let authenticated = auth.is_authenticated();
     let auth_for_auth_guard = auth.clone();
     use_effect(move || {
-        if auth_for_auth_guard.is_authenticated() {
+        if *auth_for_auth_guard.initialized.read() && auth_for_auth_guard.is_authenticated() {
             nav.replace(Route::Dashboard {});
         }
     });
+
+    if !initialized || authenticated {
+        return rsx! {
+            Fragment {}
+        };
+    }
 
     rsx! {
         div { class: "ws-forgot",

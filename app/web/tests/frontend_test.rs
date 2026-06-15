@@ -4,10 +4,11 @@
 //!
 //! Dioxus 组件测试需要在 VirtualDom 运行时上下文中进行。
 //! 在 Dioxus 0.7 中，Signal::new() 只能在组件内部调用。
-//! 我们通过在 VirtualDom 组件内部创建 Signal 并执行断言的方式来测试。
-//! 组件在 `rebuild_in_place()` 期间运行，断言失败会通过 panic 传播到测试。
 //!
-//! 对于跨组件捕获的结果，使用 `AtomicBool` 作为 side channel。
+//! 重要：Dioxus 0.7 在 `any_props::render()` 内部使用 `catch_unwind` 包裹
+//! 组件渲染函数，组件闭包内的 `assert!`/`unreachable!` panic **不会**传播到
+//! 测试框架。必须使用 `AtomicBool` 作为 side channel 将结果传递到
+//! VirtualDom 外部再进行断言。
 
 use dioxus::prelude::*;
 use dioxus_core::VirtualDom;
@@ -23,8 +24,14 @@ use std::sync::atomic::{AtomicBool, Ordering};
 // 3. 若 `signal() != snapshot` → 丢弃，避免旧任务覆盖新数据
 
 /// 基本版本不匹配检测：版本变更后旧任务应被丢弃。
+///
+/// 使用 `AtomicBool` 作为 side channel 绕过 Dioxus 的
+/// `catch_unwind`（panic 不会传播到测试框架）。
 #[test]
 fn stale_task_version_mismatch_aborts() {
+    static MISMATCH_DETECTED: AtomicBool = AtomicBool::new(false);
+    static MATCH_DETECTED: AtomicBool = AtomicBool::new(false);
+
     let mut dom = VirtualDom::new(|| {
         let mut version = Signal::new(0u64);
 
@@ -32,17 +39,18 @@ fn stale_task_version_mismatch_aborts() {
         let task1_snapshot = *version.read();
         *version.write() += 1; // 模拟另一任务启动 → 版本变为 1
 
-        // 任务 1 执行完异步操作后检查：版本不匹配 → 应丢弃
-        assert!(
-            *version.read() != task1_snapshot,
-            "版本变更后旧任务应被丢弃"
-        );
+        // 版本不匹配 → 应丢弃
+        if *version.read() != task1_snapshot {
+            MISMATCH_DETECTED.store(true, Ordering::SeqCst);
+        }
 
         // 任务 3 快照版本（version=1），无其他任务干扰
         let task3_snapshot = *version.read();
 
-        // 任务 3 检查：版本匹配 → 应保留
-        assert_eq!(*version.read(), task3_snapshot, "最新任务应通过版本检查");
+        // 版本匹配 → 应保留
+        if *version.read() == task3_snapshot {
+            MATCH_DETECTED.store(true, Ordering::SeqCst);
+        }
 
         rsx! {
             div {}
@@ -50,11 +58,24 @@ fn stale_task_version_mismatch_aborts() {
         }
     });
     dom.rebuild_in_place();
+
+    assert!(
+        MISMATCH_DETECTED.load(Ordering::SeqCst),
+        "版本变更后旧任务应被丢弃"
+    );
+    assert!(
+        MATCH_DETECTED.load(Ordering::SeqCst),
+        "最新任务应通过版本检查"
+    );
 }
 
 /// 多任务链式版本递增：验证只有最新任务通过版本检查。
 #[test]
 fn stale_task_version_chain() {
+    static T1_DISCARDED: AtomicBool = AtomicBool::new(false);
+    static T2_DISCARDED: AtomicBool = AtomicBool::new(false);
+    static T3_PASSED: AtomicBool = AtomicBool::new(false);
+
     let mut dom = VirtualDom::new(|| {
         let mut version = Signal::new(0u64);
 
@@ -73,9 +94,15 @@ fn stale_task_version_chain() {
             *version.read()
         };
 
-        assert!(*version.read() != v1, "任务 1 应被丢弃");
-        assert!(*version.read() != v2, "任务 2 应被丢弃");
-        assert_eq!(*version.read(), v3, "任务 3 应通过检查");
+        if *version.read() != v1 {
+            T1_DISCARDED.store(true, Ordering::SeqCst);
+        }
+        if *version.read() != v2 {
+            T2_DISCARDED.store(true, Ordering::SeqCst);
+        }
+        if *version.read() == v3 {
+            T3_PASSED.store(true, Ordering::SeqCst);
+        }
 
         rsx! {
             div {}
@@ -83,24 +110,34 @@ fn stale_task_version_chain() {
         }
     });
     dom.rebuild_in_place();
+
+    assert!(T1_DISCARDED.load(Ordering::SeqCst), "任务 1 应被丢弃");
+    assert!(T2_DISCARDED.load(Ordering::SeqCst), "任务 2 应被丢弃");
+    assert!(T3_PASSED.load(Ordering::SeqCst), "任务 3 应通过检查");
 }
 
 /// 验证 Signal 的 Copy 语义：快照独立于原信号变化。
 #[test]
 fn signal_version_copy_isolates_snapshot() {
+    static SNAPSHOT_PRESERVED: AtomicBool = AtomicBool::new(false);
+    static SIGNAL_UPDATED: AtomicBool = AtomicBool::new(false);
+
     let mut dom = VirtualDom::new(|| {
         let mut version = Signal::new(42u64);
 
         // 快照：通过 Copy 获得独立副本
         let snapshot = *version.read();
-        assert_eq!(snapshot, 42);
 
         // 写入原信号
         *version.write() = 100;
 
         // 快照不受影响
-        assert_eq!(snapshot, 42, "快照应不受版本变更影响");
-        assert_eq!(*version.read(), 100, "信号本身已更新");
+        if snapshot == 42 {
+            SNAPSHOT_PRESERVED.store(true, Ordering::SeqCst);
+        }
+        if *version.read() == 100 {
+            SIGNAL_UPDATED.store(true, Ordering::SeqCst);
+        }
 
         rsx! {
             div {}
@@ -108,11 +145,21 @@ fn signal_version_copy_isolates_snapshot() {
         }
     });
     dom.rebuild_in_place();
+
+    assert!(
+        SNAPSHOT_PRESERVED.load(Ordering::SeqCst),
+        "快照应不受版本变更影响"
+    );
+    assert!(SIGNAL_UPDATED.load(Ordering::SeqCst), "信号本身已更新");
 }
 
 /// 模拟 `run_health_check` 的完整模式：先 await 后版本检查。
 #[test]
 fn health_check_version_check_after_await() {
+    static MATCH_PASSED: AtomicBool = AtomicBool::new(false);
+    static STALE_DISCARDED: AtomicBool = AtomicBool::new(false);
+    static NEW_TASK_PASSED: AtomicBool = AtomicBool::new(false);
+
     let mut dom = VirtualDom::new(|| {
         let mut version = Signal::new(0u64);
 
@@ -124,7 +171,9 @@ fn health_check_version_check_after_await() {
 
         // ── 模拟异步 await 后（health_check() 完成）的版本校验 ──
         // 场景 A：版本匹配 → 继续（正常情况）
-        assert_eq!(*version.read(), task_version, "正常完成时应通过版本校验");
+        if *version.read() == task_version {
+            MATCH_PASSED.store(true, Ordering::SeqCst);
+        }
 
         // 场景 B：另一任务中途递增了版本 → 应丢弃
         let task2_version = {
@@ -132,8 +181,12 @@ fn health_check_version_check_after_await() {
             *version.read()
         };
 
-        assert!(*version.read() != task_version, "旧任务应被后续点击废弃");
-        assert_eq!(*version.read(), task2_version, "最新任务应通过校验");
+        if *version.read() != task_version {
+            STALE_DISCARDED.store(true, Ordering::SeqCst);
+        }
+        if *version.read() == task2_version {
+            NEW_TASK_PASSED.store(true, Ordering::SeqCst);
+        }
 
         rsx! {
             div {}
@@ -141,6 +194,16 @@ fn health_check_version_check_after_await() {
         }
     });
     dom.rebuild_in_place();
+
+    assert!(
+        MATCH_PASSED.load(Ordering::SeqCst),
+        "正常完成时应通过版本校验"
+    );
+    assert!(
+        STALE_DISCARDED.load(Ordering::SeqCst),
+        "旧任务应被后续点击废弃"
+    );
+    assert!(NEW_TASK_PASSED.load(Ordering::SeqCst), "最新任务应通过校验");
 }
 
 // ──────────────────────────────────────────────
@@ -155,6 +218,7 @@ fn health_check_version_check_after_await() {
 fn system_role_detection() {
     static SYSTEM_DETECTED: AtomicBool = AtomicBool::new(false);
     static NON_SYSTEM_DETECTED: AtomicBool = AtomicBool::new(false);
+    static ADMIN_EXCLUDED: AtomicBool = AtomicBool::new(false);
 
     let mut dom = VirtualDom::new(|| {
         // 模拟 row_element 中的各种角色
@@ -163,14 +227,17 @@ fn system_role_detection() {
         let admin_role = "admin".to_string();
         let another_system = "system".to_string();
 
-        // 核心断言：is_system = role == "system"
-        assert!(system_role == "system");
-        assert!(user_role != "system");
-        assert!(admin_role != "system");
-        assert!(another_system == "system");
-
-        SYSTEM_DETECTED.store(system_role == "system", Ordering::SeqCst);
-        NON_SYSTEM_DETECTED.store(user_role != "system", Ordering::SeqCst);
+        // 用 side-channel 替代 assert!，避免被 catch_unwind 吞没
+        // 每个检查独立 AtomicBool，失败时可精确定位具体哪个条件不符。
+        if system_role == "system" && another_system == "system" {
+            SYSTEM_DETECTED.store(true, Ordering::SeqCst);
+        }
+        if user_role != "system" {
+            NON_SYSTEM_DETECTED.store(true, Ordering::SeqCst);
+        }
+        if admin_role != "system" {
+            ADMIN_EXCLUDED.store(true, Ordering::SeqCst);
+        }
 
         rsx! {
             div {}
@@ -187,6 +254,7 @@ fn system_role_detection() {
         NON_SYSTEM_DETECTED.load(Ordering::SeqCst),
         "非 system 角色应被排除"
     );
+    assert!(ADMIN_EXCLUDED.load(Ordering::SeqCst), "admin 角色应被排除");
 }
 
 /// 验证基于 `is_system` 的条件渲染分支：
@@ -201,18 +269,18 @@ fn system_role_guards_edit_delete_buttons() {
         //   if is_system { 显示"受保护" } else { 显示编辑/删除按钮 }
 
         // system 角色 → protected 分支
+        // 注意：原先此处有 else { unreachable!() }，但因 Dioxus 0.7 用
+        // catch_unwind 包裹渲染组件，panic 不传播到测试框架。改用
+        // AtomicBool side-channel 在 VirtualDom 外部验证分支正确性。
         let is_system = "system" == "system";
         if is_system {
             SYSTEM_PROTECTED.store(true, Ordering::SeqCst);
-        } else {
-            unreachable!("system role should enter protected branch");
         }
 
         // user 角色 → action 按钮分支
+        // 同上，unreachable!() 被外部 AtomicBool 断言替代。
         let is_user_system = "user" == "system";
-        if is_user_system {
-            unreachable!("user role should NOT enter protected branch");
-        } else {
+        if !is_user_system {
             USER_HAS_ACTIONS.store(true, Ordering::SeqCst);
         }
 
@@ -223,6 +291,12 @@ fn system_role_guards_edit_delete_buttons() {
     });
     dom.rebuild_in_place();
 
-    assert!(SYSTEM_PROTECTED.load(Ordering::SeqCst));
-    assert!(USER_HAS_ACTIONS.load(Ordering::SeqCst));
+    assert!(
+        SYSTEM_PROTECTED.load(Ordering::SeqCst),
+        "system 角色应进入 protected 分支"
+    );
+    assert!(
+        USER_HAS_ACTIONS.load(Ordering::SeqCst),
+        "user 角色应进入 action 按钮分支"
+    );
 }

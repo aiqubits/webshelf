@@ -379,3 +379,44 @@ fn is_admin_or_system(user: Option<&CurrentUser>) -> bool {
         Some("admin") | Some("system")
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::is_admin_or_system;
+    use crate::auth::CurrentUser;
+    use uuid::Uuid;
+
+    fn make_user(role: &str) -> CurrentUser {
+        CurrentUser {
+            id: Uuid::nil(),
+            role: role.to_string(),
+            name: String::new(),
+            email: String::new(),
+        }
+    }
+
+    #[test]
+    fn admin_is_admin() {
+        assert!(is_admin_or_system(Some(&make_user("admin"))));
+    }
+
+    #[test]
+    fn system_is_admin() {
+        assert!(is_admin_or_system(Some(&make_user("system"))));
+    }
+
+    #[test]
+    fn user_is_not_admin() {
+        assert!(!is_admin_or_system(Some(&make_user("user"))));
+    }
+
+    #[test]
+    fn none_is_not_admin() {
+        assert!(!is_admin_or_system(None));
+    }
+
+    #[test]
+    fn guest_role_is_not_admin() {
+        assert!(!is_admin_or_system(Some(&make_user("guest"))));
+    }
+}
