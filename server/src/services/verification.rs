@@ -172,15 +172,18 @@ impl VerificationService {
     }
 
     pub async fn send_verification_email(&self, email: &str) -> Result<(), VerificationError> {
-        if !self.email.is_configured().await {
-            return Err(VerificationError::EmailNotConfigured);
-        }
-
         let email_normalized = email.to_lowercase();
         let user = match self.find_user_by_email(&email_normalized).await? {
             Some(u) => u,
             None => return Ok(()),
         };
+
+        // Check email service configuration AFTER user lookup so that
+        // non-existent emails always receive 200 regardless of SMTP state,
+        // preventing user-enumeration via the 503 response.
+        if !self.email.is_configured().await {
+            return Err(VerificationError::EmailNotConfigured);
+        }
 
         if user.email_verified {
             return Ok(());
@@ -362,11 +365,12 @@ impl VerificationService {
     }
 
     pub async fn resend_code(&self, email: &str) -> Result<(), VerificationError> {
-        if !self.email.is_configured().await {
-            return Err(VerificationError::EmailNotConfigured);
-        }
-
         let email_normalized = email.to_lowercase();
+
+        // Anti-enumeration: look up the user BEFORE checking SMTP
+        // configuration.  Non-existent emails always receive 200
+        // regardless of SMTP state so that an attacker cannot infer
+        // user existence from a 503 response.
         let user = match self.find_user_by_email(&email_normalized).await? {
             Some(u) => u,
             None => {
@@ -378,8 +382,18 @@ impl VerificationService {
             }
         };
 
+        // Already-verified users don't need another code.
+        // This check MUST come before the email-config check so that
+        // auto-verified users (dev/test environments without SMTP) get
+        // 200 OK rather than 503 EmailNotConfigured.
         if user.email_verified {
             return Ok(());
+        }
+
+        // Only check SMTP configuration after confirming the user exists
+        // and is not already verified.
+        if !self.email.is_configured().await {
+            return Err(VerificationError::EmailNotConfigured);
         }
 
         let now = Utc::now();

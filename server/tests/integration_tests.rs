@@ -1274,15 +1274,65 @@ async fn test_verify_email_with_nonexistent_email() {
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
 }
 
-// Test that resend-code returns 503 when email service is not configured.
+// Test that resend-code returns 503 when email service is not configured
+// AND the user exists.  For non-existent emails the response must always
+// be 200 OK (anti-enumeration), so this test first registers a real user.
 #[tokio::test]
 async fn test_resend_code_with_unconfigured_email_service() {
     let app = create_test_app().await;
 
-    // A syntactically valid email — but the email service is not configured.
-    let payload = json!({
-        "email": "user@example.com"
-    });
+    // Register a real user so the email lookup succeeds.
+    let email = format!(
+        "resend_503_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let _ = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": &email,
+                        "password": "Password123!",
+                        "name": "Resend 503 Test",
+                    }))
+                    .unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    // A syntactically valid, registered email — but the email service is not configured.
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/resend-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({ "email": &email })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+}
+
+// Test that resend-code with a non-existent email returns 200 OK
+// (anti-enumeration — must not reveal whether the email is registered)
+// even when the email service is not configured.
+#[tokio::test]
+async fn test_resend_code_nonexistent_email_returns_ok() {
+    let app = create_test_app().await;
 
     let response = app
         .oneshot(
@@ -1290,13 +1340,83 @@ async fn test_resend_code_with_unconfigured_email_service() {
                 .method("POST")
                 .uri("/api/public/auth/resend-code")
                 .header("content-type", "application/json")
-                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .body(Body::from(
+                    serde_json::to_string(&json!({
+                        "email": "no-such-user-resend@example.com"
+                    }))
+                    .unwrap(),
+                ))
                 .unwrap(),
         )
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    assert_eq!(
+        response.status(),
+        StatusCode::OK,
+        "Non-existent email must return 200 OK (anti-enumeration)"
+    );
+}
+
+// Test that resend-code with a registered (auto-verified) user returns
+// 200 OK even when the email service is not configured.
+// Previously this returned 503 (EmailNotConfigured) because the email
+// config check ran before the email_verified check.  The fix reorders
+// the checks so that already-verified users get 200 regardless of SMTP
+// state.
+#[tokio::test]
+async fn test_resend_code_verified_user_returns_ok() {
+    let app = create_test_app().await;
+
+    // Register a user — auto-verified because email service is unconfigured.
+    // Since the user is already verified, resend-code should return 200
+    // immediately (email_verified check before email-config check).
+    let email = format!(
+        "resend_ok_{}@example.com",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+    );
+    let _ = register_and_login(&app, &email).await;
+
+    // First resend-code request — should succeed (user is already verified).
+    let response1 = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/resend-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({ "email": &email })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response1.status(), StatusCode::OK);
+
+    // Second resend-code request — must also return 200 (verified user
+    // bypasses the cooldown check entirely).
+    let response2 = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/resend-code")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    serde_json::to_string(&json!({ "email": &email })).unwrap(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        response2.status(),
+        StatusCode::OK,
+        "Second request must also return 200 (verified user bypasses email checks)"
+    );
 }
 
 // ---------------------------------------------------------------------------

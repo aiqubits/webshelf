@@ -96,23 +96,23 @@ impl PasswordResetService {
     /// Request a password-reset verification code sent to the user's email.
     ///
     /// Anti-enumeration:
-    /// - When the email service is not configured, returns `EmailNotConfigured`
-    ///   (mapped to 503) BEFORE any user lookup, so the response is identical
-    ///   for existing and non-existing users.
     /// - For non-existing users, performs a dummy Argon2 hash so the timing
-    ///   matches the existent-user path and returns `Ok(())`.
+    ///   matches the existent-user path and returns `Ok(())` — regardless of
+    ///   whether the email service is configured.  This prevents attackers
+    ///   from inferring user existence via a 503 response.
+    /// - When the email service is not configured and the user exists, returns
+    ///   `EmailNotConfigured` (mapped to 503) AFTER the user lookup, so the
+    ///   503 only surfaces for registered emails.
     /// - For existing users within cooldown, returns `TooSoon`.
     /// - For existing users past cooldown, stores a new code hash and sends
     ///   the verification email.
     pub async fn request_reset(&self, email: &str) -> Result<(), PasswordResetError> {
-        if !self.email.is_configured().await {
-            return Err(PasswordResetError::EmailNotConfigured);
-        }
-
         let email_normalized = email.to_lowercase();
 
         // Anti-enumeration: if the user does not exist, perform a dummy
-        // Argon2 verify (same CPU cost as the real path) and return Ok(()).
+        // Argon2 verify (same CPU cost as the real path) and return Ok(())
+        // WITHOUT checking email service configuration first.  This ensures
+        // non-existent emails always receive 200 regardless of SMTP state.
         let user = match self.find_user_by_email(&email_normalized).await? {
             Some(u) => u,
             None => {
@@ -120,6 +120,13 @@ impl PasswordResetService {
                 return Ok(());
             }
         };
+
+        // Only check email service configuration AFTER confirming the user
+        // exists.  This prevents leaking user existence information via the
+        // 503 response.
+        if !self.email.is_configured().await {
+            return Err(PasswordResetError::EmailNotConfigured);
+        }
 
         let now = Utc::now();
         let cooldown_threshold = now - Duration::seconds(RESEND_COOLDOWN_SECONDS);

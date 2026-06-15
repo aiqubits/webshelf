@@ -7,7 +7,7 @@ use crate::repositories::user::CreateUserInput;
 use crate::services::auth::{AuthService, LoginRequest, LoginResponse};
 use crate::services::password_reset::{PasswordResetError, PasswordResetService};
 use crate::services::user::UserService;
-use crate::services::verification::VerificationService;
+use crate::services::verification::{VerificationError, VerificationService};
 use crate::utils::error::ApiError;
 use crate::utils::validator::check_password_strength;
 
@@ -202,10 +202,26 @@ pub async fn resend_code(
     let email = payload.email.to_lowercase();
 
     let service = VerificationService::new(state.db.clone(), state.email.clone());
-    service.resend_code(&email).await?;
+
+    // Anti-enumeration: swallow `TooSoon` to prevent leaking whether an
+    // email is registered via the cooldown window.  Non-existent users
+    // always get 200; existent users within cooldown must also get 200
+    // (the same generic message) so that an attacker cannot distinguish
+    // the two cases by measuring response differences between first and
+    // second request.
+    if let Err(e) = service.resend_code(&email).await {
+        if matches!(e, VerificationError::TooSoon) {
+            tracing::info!(
+                "Resend-code within cooldown for {} (TooSoon swallowed)",
+                email
+            );
+        } else {
+            return Err(e.into());
+        }
+    }
 
     Ok(Json(ResendCodeResponse {
-        message: "A new verification code has been sent".to_string(),
+        message: "If that email is registered, a new verification code has been sent".to_string(),
     }))
 }
 
@@ -213,8 +229,10 @@ pub async fn resend_code(
 ///
 /// Always returns 200 OK on a syntactically valid email to prevent
 /// user enumeration; the response body is identical regardless of whether
-/// the email is registered. Actual delivery failure (SMTP not configured,
-/// cooldown exceeded) surfaces as 503/400 from the service mapping.
+/// the email is registered. Cooldown errors are swallowed (still 200) so
+/// that attackers cannot distinguish registered from unregistered emails
+/// by sending a second request within the cooldown window. SMTP
+/// configuration failures surface as 503 only for registered emails.
 #[derive(Debug, Deserialize, Validate)]
 pub struct ForgotPasswordRequestBody {
     #[validate(email(message = "must be a valid email address"))]
@@ -242,10 +260,15 @@ pub async fn forgot_password(
     // (the same generic message) so that an attacker cannot distinguish
     // the two cases by measuring response differences between first and
     // second request.
-    if let Err(e) = service.request_reset(&email).await
-        && !matches!(e, PasswordResetError::TooSoon)
-    {
-        return Err(e.into());
+    if let Err(e) = service.request_reset(&email).await {
+        if matches!(e, PasswordResetError::TooSoon) {
+            tracing::info!(
+                "Forgot-password within cooldown for {} (TooSoon swallowed)",
+                email
+            );
+        } else {
+            return Err(e.into());
+        }
     }
 
     // The message intentionally does not reveal whether the email is registered.
