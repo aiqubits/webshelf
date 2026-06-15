@@ -10,6 +10,7 @@ use crate::AppState;
 use crate::middlewares::auth::AuthUser;
 use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
+use crate::utils::JsonOrForm;
 use crate::utils::error::ApiError;
 use crate::utils::validator::check_password_strength;
 
@@ -104,7 +105,7 @@ pub struct CreateUserRequest {
 /// Create a new user
 pub async fn create_user(
     State(state): State<AppState>,
-    Json(payload): Json<CreateUserRequest>,
+    JsonOrForm(payload): JsonOrForm<CreateUserRequest>,
 ) -> Result<Json<UserResponse>, ApiError> {
     // Validate request payload
     payload.validate()?;
@@ -164,7 +165,7 @@ pub struct ChangePasswordResponse {
 pub async fn change_my_password(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
-    Json(payload): Json<ChangePasswordRequest>,
+    JsonOrForm(payload): JsonOrForm<ChangePasswordRequest>,
 ) -> Result<Json<ChangePasswordResponse>, ApiError> {
     payload.validate()?;
 
@@ -251,7 +252,7 @@ fn validate_role(role: &str) -> Result<(), ValidationError> {
 pub async fn update_user(
     State(state): State<AppState>,
     Path(id): Path<Uuid>,
-    Json(payload): Json<UpdateUserRequest>,
+    JsonOrForm(payload): JsonOrForm<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, ApiError> {
     // Validate request payload
     payload.validate()?;

@@ -8,6 +8,7 @@ use crate::services::auth::{AuthService, LoginRequest, LoginResponse};
 use crate::services::password_reset::{PasswordResetError, PasswordResetService};
 use crate::services::user::UserService;
 use crate::services::verification::{VerificationError, VerificationService};
+use crate::utils::JsonOrForm;
 use crate::utils::error::ApiError;
 use crate::utils::validator::check_password_strength;
 
@@ -24,7 +25,7 @@ pub struct LoginRequestBody {
 /// Login endpoint
 pub async fn login(
     State(state): State<AppState>,
-    Json(payload): Json<LoginRequestBody>,
+    JsonOrForm(payload): JsonOrForm<LoginRequestBody>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     payload.validate()?;
 
@@ -74,7 +75,7 @@ pub struct RegisterResponse {
 /// Register endpoint
 pub async fn register(
     State(state): State<AppState>,
-    Json(payload): Json<RegisterRequestBody>,
+    JsonOrForm(payload): JsonOrForm<RegisterRequestBody>,
 ) -> Result<Json<RegisterResponse>, ApiError> {
     payload.validate().inspect_err(|e| {
         tracing::warn!("Registration validation failed: {:?}", e);
@@ -157,7 +158,7 @@ pub struct VerifyEmailResponse {
 /// Verify email endpoint
 pub async fn verify_email(
     State(state): State<AppState>,
-    Json(payload): Json<VerifyEmailRequestBody>,
+    JsonOrForm(payload): JsonOrForm<VerifyEmailRequestBody>,
 ) -> Result<Json<VerifyEmailResponse>, ApiError> {
     payload.validate()?;
 
@@ -194,7 +195,7 @@ pub struct ResendCodeResponse {
 /// Resend verification code endpoint
 pub async fn resend_code(
     State(state): State<AppState>,
-    Json(payload): Json<ResendCodeRequestBody>,
+    JsonOrForm(payload): JsonOrForm<ResendCodeRequestBody>,
 ) -> Result<Json<ResendCodeResponse>, ApiError> {
     payload.validate()?;
 
@@ -246,7 +247,7 @@ pub struct ForgotPasswordResponse {
 
 pub async fn forgot_password(
     State(state): State<AppState>,
-    Json(payload): Json<ForgotPasswordRequestBody>,
+    JsonOrForm(payload): JsonOrForm<ForgotPasswordRequestBody>,
 ) -> Result<Json<ForgotPasswordResponse>, ApiError> {
     payload.validate()?;
 
@@ -306,7 +307,7 @@ pub struct ResetPasswordResponse {
 
 pub async fn reset_password(
     State(state): State<AppState>,
-    Json(payload): Json<ResetPasswordRequestBody>,
+    JsonOrForm(payload): JsonOrForm<ResetPasswordRequestBody>,
 ) -> Result<Json<ResetPasswordResponse>, ApiError> {
     payload.validate()?;
     check_password_strength(&payload.new_password)?;

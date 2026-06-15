@@ -382,18 +382,16 @@ impl VerificationService {
             }
         };
 
-        // Already-verified users don't need another code.
-        // This check MUST come before the email-config check so that
-        // auto-verified users (dev/test environments without SMTP) get
-        // 200 OK rather than 503 EmailNotConfigured.
-        if user.email_verified {
-            return Ok(());
-        }
-
-        // Only check SMTP configuration after confirming the user exists
-        // and is not already verified.
+        // Only check SMTP configuration after confirming the user exists.
+        // If email service is not configured, fail with 503 regardless of
+        // verification status — there is nothing to resend.
         if !self.email.is_configured().await {
             return Err(VerificationError::EmailNotConfigured);
+        }
+
+        // Already-verified users don't need another code.
+        if user.email_verified {
+            return Ok(());
         }
 
         let now = Utc::now();
