@@ -402,7 +402,7 @@ input, textarea, select {
   box-shadow: var(--shadow-sm);
   border-radius: var(--radius-2xl);
   padding: 20px;
-  height: 340px;
+  height: 520px;
   display: flex;
   flex-direction: column;
 }
@@ -444,4 +444,14 @@ input, textarea, select {
   overflow-y: auto;
   flex: 1;
   min-height: 0;
+}
+
+.ws-routes__empty {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-text-muted);
+  text-align: center;
+  padding: 24px 0;
 }

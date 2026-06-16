@@ -13,7 +13,7 @@ use ui::{
 
 use crate::auth::{AuthState, CurrentUser};
 use crate::components::{
-    HttpMethod, LogBus, LogEntry, LogKind, now_unix_ms, push_log_err, push_log_ok,
+    HttpMethod, LogBus, LogEntry, LogKind, SearchSignal, now_unix_ms, push_log_err, push_log_ok,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -28,6 +28,7 @@ pub fn Dashboard() -> Element {
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
+    let SearchSignal(search_query) = use_context::<SearchSignal>();
 
     let health = use_signal(|| HealthState {
         status_label: "—".to_string(),
@@ -104,9 +105,27 @@ pub fn Dashboard() -> Element {
         });
     }
 
-    // 控制台行：从 LogBus 取并附加种子注释。
+    // 控制台行：从 LogBus 取并附加种子注释，支持搜索框实时过滤。
     let bus_entries = log_bus.entries;
-    let console_lines = use_memo(move || build_console_lines(&bus_entries.read()));
+    let console_lines = use_memo(move || {
+        let entries = bus_entries.read();
+        let q = search_query.read().clone();
+        if q.is_empty() {
+            build_console_lines(&entries)
+        } else {
+            let q_lower = q.to_lowercase();
+            let filtered: Vec<LogEntry> = entries
+                .iter()
+                .filter(|e| {
+                    e.path.to_lowercase().contains(&q_lower)
+                        || e.method.as_str().to_lowercase().contains(&q_lower)
+                        || e.status.to_lowercase().contains(&q_lower)
+                })
+                .cloned()
+                .collect();
+            build_console_lines(&filtered)
+        }
+    });
     let console_lines_signal: ReadSignal<Vec<ConsoleLine>> = console_lines.into();
 
     let user_name = auth
@@ -141,6 +160,52 @@ pub fn Dashboard() -> Element {
     let health_snapshot = health.read().clone();
     let latency_snapshot = *latency_ms.read();
     let users_snapshot = *total_users.read();
+    let search_text = search_query.cloned();
+
+    const API_ROUTES: &[(RouteMethod, &str, &str)] = &[
+        // ── 公共端点（无需认证）──
+        (RouteMethod::Get, "/api/health", "健康检查，公共端点"),
+        // ── 认证端点（无需认证）──
+        (
+            RouteMethod::Post,
+            "/api/public/auth/login",
+            "登录，颁发 JWT",
+        ),
+        (RouteMethod::Post, "/api/public/auth/register", "注册新账户"),
+        (
+            RouteMethod::Post,
+            "/api/public/auth/verify-email",
+            "提交 6 位邮箱验证码",
+        ),
+        (
+            RouteMethod::Post,
+            "/api/public/auth/resend-code",
+            "重新发送验证码（60s 冷却）",
+        ),
+        (
+            RouteMethod::Post,
+            "/api/public/auth/forgot-password",
+            "申请密码重置邮件",
+        ),
+        (
+            RouteMethod::Post,
+            "/api/public/auth/reset-password",
+            "提交验证码并重置密码",
+        ),
+        // ── 自助端点（任意已认证用户）──
+        (RouteMethod::Get, "/api/users/me", "获取当前用户资料"),
+        (
+            RouteMethod::Post,
+            "/api/users/me/password",
+            "修改当前用户密码",
+        ),
+        // ── 管理端点（require_admin）──
+        (RouteMethod::Get, "/api/users", "分页列出用户"),
+        (RouteMethod::Post, "/api/users", "创建新用户"),
+        (RouteMethod::Get, "/api/users/{id}", "获取单个用户"),
+        (RouteMethod::Put, "/api/users/{id}", "更新用户字段"),
+        (RouteMethod::Delete, "/api/users/{id}", "删除用户"),
+    ];
 
     rsx! {
         div { class: "ws-dashboard",
@@ -229,20 +294,31 @@ pub fn Dashboard() -> Element {
                         p { class: "ws-routes__subtitle", "axum::Router 的关键端点速查" }
                     }
                     div { class: "ws-routes__list",
-                        RouteCard {
-                            method: RouteMethod::Post,
-                            path: "/api/public/auth/login".to_string(),
-                            description: "颁发 JWT，公共端点".to_string(),
-                        }
-                        RouteCard {
-                            method: RouteMethod::Get,
-                            path: "/api/users".to_string(),
-                            description: "分页列出用户，require_admin".to_string(),
-                        }
-                        RouteCard {
-                            method: RouteMethod::Put,
-                            path: "/api/users/{id}".to_string(),
-                            description: "更新用户字段，require_admin".to_string(),
+                        {
+                            let filtered_routes: Vec<_> = if search_text.is_empty() {
+                                API_ROUTES.to_vec()
+                            } else {
+                                let q = search_text.to_lowercase();
+                                API_ROUTES
+                                    .iter()
+                                    .filter(|(_, path, desc)| {
+                                        path.to_lowercase().contains(&q)
+                                            || desc.to_lowercase().contains(&q)
+                                    })
+                                    .copied()
+                                    .collect()
+                            };
+                            if filtered_routes.is_empty() && !search_text.is_empty() {
+                                rsx! {
+                                    p { class: "ws-routes__empty", "无匹配结果" }
+                                }
+                            } else {
+                                rsx! {
+                                    for (method , path , desc) in filtered_routes.into_iter() {
+                                        RouteCard { method, path: path.to_string(), description: desc.to_string() }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

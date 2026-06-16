@@ -2,6 +2,12 @@ use dioxus::prelude::*;
 
 use ui::{AppShell, NavKey, Sidebar, TopHeader};
 
+/// 搜索信号包装类型，通过 `use_context_provider` 全局注入。
+///
+/// 在 `AppShellLayout` 中创建，`Users` 等消费方通过 `use_context` 读取。
+#[derive(Clone, Copy)]
+pub struct SearchSignal(pub Signal<String>);
+
 use crate::Route;
 use crate::auth::AuthState;
 use crate::components::TokenExpiryGuard;
@@ -14,6 +20,7 @@ use crate::components::TokenExpiryGuard;
 pub fn AppShellLayout() -> Element {
     let mut sidebar_open = use_signal(|| false);
     let search_value = use_signal(String::new);
+    use_context_provider(|| SearchSignal(search_value));
     let nav = use_navigator();
     let mut auth = use_context::<AuthState>();
 

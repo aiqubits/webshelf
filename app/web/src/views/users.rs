@@ -15,7 +15,7 @@ use ui::{
 
 use crate::api::{ErrorContext, humanize_error};
 use crate::auth::AuthState;
-use crate::components::{HttpMethod, LogBus, push_log_err, push_log_ok};
+use crate::components::{HttpMethod, LogBus, SearchSignal, push_log_err, push_log_ok};
 
 #[derive(Debug, Clone)]
 enum ListState {
@@ -54,6 +54,7 @@ pub fn Users() -> Element {
 
     let list = use_signal(|| ListState::Loading);
     let list_version = use_signal(|| 0u64);
+    let SearchSignal(search_query) = use_context::<SearchSignal>();
 
     let signals = UsersSignals {
         modal_kind: use_signal(|| ModalKind::None),
@@ -111,6 +112,7 @@ pub fn Users() -> Element {
     }
 
     let list_snapshot = list.cloned();
+    let search_text = search_query.cloned();
     let kind_snapshot = *signals.modal_kind.read();
     let form_error_snapshot = signals.form_error.read().clone();
     let submitting_snapshot = *signals.submitting.read();
@@ -149,7 +151,7 @@ pub fn Users() -> Element {
                 }
             }
 
-            {render_table(list_snapshot, signals)}
+            {render_table(list_snapshot, search_text, signals)}
 
             {
                 render_modal(
@@ -169,7 +171,7 @@ pub fn Users() -> Element {
     }
 }
 
-fn render_table(list_snapshot: ListState, signals: UsersSignals) -> Element {
+fn render_table(list_snapshot: ListState, search_text: String, signals: UsersSignals) -> Element {
     match list_snapshot {
         ListState::Loading => rsx! {
             div { class: "ws-users__status",
@@ -184,8 +186,23 @@ fn render_table(list_snapshot: ListState, signals: UsersSignals) -> Element {
             }
         },
         ListState::Loaded(items) => {
+            // 前端实时搜索过滤：按用户名或邮箱（不区分大小写）
+            let filtered: Vec<UserResponse> = if search_text.is_empty() {
+                items
+            } else {
+                let q = search_text.to_lowercase();
+                items
+                    .into_iter()
+                    .filter(|u| {
+                        u.name.to_lowercase().contains(&q) || u.email.to_lowercase().contains(&q)
+                    })
+                    .collect()
+            };
             let columns = build_columns();
-            let rows: Vec<Element> = items.into_iter().map(|u| row_element(u, signals)).collect();
+            let rows: Vec<Element> = filtered
+                .into_iter()
+                .map(|u| row_element(u, signals))
+                .collect();
             rsx! {
                 DataTable {
                     columns,

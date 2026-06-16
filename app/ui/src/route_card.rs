@@ -12,10 +12,7 @@ pub fn RouteCard(method: RouteMethod, path: String, description: String) -> Elem
     );
 
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/route_card.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/route_card.css") }
         div { class: card_class,
             span { class: badge_class, "{method.label()}" }
             div { class: "ws-route__body",
@@ -34,6 +31,8 @@ pub enum RouteMethod {
     Get,
     /// PUT → pink 卡片背景 + rose badge
     Put,
+    /// DELETE → rose 卡片背景 + rose badge
+    Delete,
 }
 
 impl RouteMethod {
@@ -42,6 +41,7 @@ impl RouteMethod {
             Self::Post => "POST",
             Self::Get => "GET",
             Self::Put => "PUT",
+            Self::Delete => "DELETE",
         }
     }
 
@@ -50,6 +50,7 @@ impl RouteMethod {
             Self::Post => "indigo",
             Self::Get => "purple",
             Self::Put => "pink",
+            Self::Delete => "rose",
         }
     }
 
@@ -58,6 +59,7 @@ impl RouteMethod {
             Self::Post => "indigo",
             Self::Get => "purple",
             Self::Put => "rose",
+            Self::Delete => "rose",
         }
     }
 }

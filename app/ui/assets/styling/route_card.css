@@ -23,6 +23,11 @@
   border-color: var(--color-accent-pink-soft-border);
 }
 
+.ws-route--rose {
+  background: rgba(255, 241, 242, 0.5);
+  border-color: #fecaca;
+}
+
 .ws-route__badge {
   display: inline-flex;
   align-items: center;
