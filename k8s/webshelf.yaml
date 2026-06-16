@@ -46,6 +46,16 @@ spec:
             secretKeyRef:
               name: webshelf-secrets
               key: jwt_secret
+        - name: WEBSHELF_SYSTEM_ADMIN_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: webshelf-secrets
+              key: system_admin_email
+        - name: WEBSHELF_SYSTEM_ADMIN_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: webshelf-secrets
+              key: system_admin_password
         volumeMounts:
         - name: config-volume
           mountPath: /app/config.toml
