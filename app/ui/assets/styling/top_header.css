@@ -44,6 +44,11 @@
   color: var(--color-text-primary);
 }
 
+.ws-top-header__hamburger svg {
+  width: 16px;
+  height: 16px;
+}
+
 @media (min-width: 768px) {
   .ws-top-header__hamburger {
     display: none;
@@ -76,7 +81,8 @@
 }
 
 .ws-top-header__search-icon {
-  font-size: 12px;
+  width: 14px;
+  height: 14px;
   color: var(--color-text-muted);
   flex-shrink: 0;
 }
@@ -246,8 +252,9 @@
   color: #991b1b;
 }
 
-.ws-top-header__logout i {
-  font-size: 11px;
+.ws-top-header__logout svg {
+  width: 12px;
+  height: 12px;
 }
 
 @media (max-width: 640px) {

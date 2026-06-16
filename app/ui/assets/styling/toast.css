@@ -110,9 +110,13 @@
   background: transparent;
   border: none;
   cursor: pointer;
-  font-size: 11px;
   flex-shrink: 0;
   transition: var(--ease-nav);
+}
+
+.ws-toast__close svg {
+  width: 12px;
+  height: 12px;
 }
 
 .ws-toast__close:hover {

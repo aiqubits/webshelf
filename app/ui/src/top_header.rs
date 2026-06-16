@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{LogOut, Menu, Search};
 
 /// TopHeader —— 80px sticky 顶栏。
 ///
@@ -25,10 +26,10 @@ pub fn TopHeader(
                 button {
                     class: "ws-top-header__hamburger",
                     onclick: move |e| on_sidebar_toggle.call(e),
-                    i { class: "fa-solid fa-bars" }
+                    Menu {}
                 }
                 div { class: "ws-top-header__search",
-                    i { class: "fa-solid fa-magnifying-glass ws-top-header__search-icon" }
+                    Search { class: "ws-top-header__search-icon" }
                     input {
                         class: "ws-top-header__search-input",
                         r#type: "text",
@@ -68,7 +69,7 @@ pub fn TopHeader(
                             r#type: "button",
                             title: "登出",
                             onclick: move |e| handler.call(e),
-                            i { class: "fa-solid fa-arrow-right-from-bracket" }
+                            LogOut {}
                             span { "登出" }
                         }
                     },

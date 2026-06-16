@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use client_api::UserResponse;
 use dioxus::prelude::dioxus_router::Navigator;
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{LoaderCircle, Pencil, Plus, ShieldHalf, Trash2, TriangleAlert};
 
 use ui::{
     Align, Badge, BadgeVariant, Button, ButtonType, Column, DataTable, InputType, Modal, TextInput,
@@ -138,11 +139,11 @@ pub fn Users() -> Element {
                 }
                 div { class: "ws-users__header-actions",
                     span { class: "ws-users__guard-pill",
-                        i { class: "fa-solid fa-shield-halved" }
+                        ShieldHalf {}
                         "require_admin 中间件保护区域"
                     }
                     Button { onclick: open_create,
-                        i { class: "fa-solid fa-plus" }
+                        Plus {}
                         "创建新用户 (POST)"
                     }
                 }
@@ -172,13 +173,13 @@ fn render_table(list_snapshot: ListState, signals: UsersSignals) -> Element {
     match list_snapshot {
         ListState::Loading => rsx! {
             div { class: "ws-users__status",
-                i { class: "fa-solid fa-spinner fa-spin" }
+                LoaderCircle { class: "ws-btn__spinner" }
                 "正在加载用户列表…"
             }
         },
         ListState::Error(msg) => rsx! {
             div { class: "ws-users__status ws-users__status--error",
-                i { class: "fa-solid fa-triangle-exclamation" }
+                TriangleAlert {}
                 "{msg}"
             }
         },
@@ -243,7 +244,7 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
                 if is_system {
                     div { class: "ws-table__row-actions",
                         span { class: "ws-table__protected",
-                            i { class: "fa-solid fa-shield-halved" }
+                            ShieldHalf {}
                             " 受保护"
                         }
                     }
@@ -253,13 +254,13 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
                             class: "ws-table__action",
                             title: "编辑",
                             onclick: edit_handler,
-                            i { class: "fa-solid fa-pen" }
+                            Pencil {}
                         }
                         button {
                             class: "ws-table__action ws-table__action--danger",
                             title: "删除",
                             onclick: delete_handler,
-                            i { class: "fa-solid fa-trash" }
+                            Trash2 {}
                         }
                     }
                 }

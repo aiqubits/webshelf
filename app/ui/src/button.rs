@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_icons::lucide::LoaderCircle;
 
 /// 按钮 —— 唯一 CTA 变体（indigo→purple 渐变）。
 ///
@@ -24,12 +25,9 @@ pub fn Button(
     };
 
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/button.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/button.css") }
         button {
-            class: class,
+            class,
             r#type: type_attr,
             disabled: disabled || loading,
             onclick: move |e| {
@@ -38,7 +36,7 @@ pub fn Button(
                 }
             },
             if loading {
-                i { class: "fa-solid fa-spinner fa-spin ws-btn__spinner" }
+                LoaderCircle { class: "ws-btn__spinner" }
             }
             {children}
         }

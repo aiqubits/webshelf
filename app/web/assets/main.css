@@ -3,9 +3,6 @@
 /* 字体 */
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
 
-/* Font Awesome 6.4.0 */
-@import url('https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css');
-
 * {
   box-sizing: border-box;
 }
@@ -66,13 +63,10 @@ input, textarea, select {
   color: var(--color-text-tertiary);
 }
 
-.ws-view-placeholder > i.fa-solid {
-  font-size: 56px;
-  background: var(--color-brand-gradient);
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
+.ws-view-placeholder svg {
+  width: 56px;
+  height: 56px;
+  stroke: var(--color-brand-indigo);
 }
 
 .ws-view-placeholder h1 {

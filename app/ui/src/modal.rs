@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_icons::lucide::X;
 
 /// 通用 Modal 容器 —— 按 DESIGN.md §3.7 规格实现。
 ///
@@ -39,7 +40,7 @@ pub fn Modal(
                         r#type: "button",
                         aria_label: "关闭",
                         onclick: move |e| on_close.call(e),
-                        i { class: "fa-solid fa-xmark" }
+                        X {}
                     }
                 }
                 div { class: "ws-modal__body", {children} }

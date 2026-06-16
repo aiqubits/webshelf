@@ -44,5 +44,11 @@
 }
 
 .ws-btn__spinner {
-  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  animation: ws-spin 1s linear infinite;
+}
+
+@keyframes ws-spin {
+  to { transform: rotate(360deg); }
 }

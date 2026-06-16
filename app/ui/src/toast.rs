@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_icons::lucide::X;
 
 /// 一条 toast 通知的展示数据。
 ///
@@ -164,7 +165,7 @@ fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u128>
             button {
                 class: "ws-toast__close",
                 onclick: move |_| on_dismiss.call(id),
-                i { class: "fa-solid fa-xmark" }
+                X {}
             }
         }
     }

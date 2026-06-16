@@ -8,8 +8,8 @@ pub fn StatsCard(
     label: String,
     value: String,
     sub: String,
-    /// FontAwesome 图标类（不含 `fa-solid` 前缀），例如 `"fa-heart-pulse"`。
-    icon: &'static str,
+    /// Lucide 图标组件，例如 `rsx! { HeartPulse {} }`。
+    icon: Element,
     #[props(default = StatsAccent::Indigo)] accent: StatsAccent,
     #[props(default)] value_color: StatsValueColor,
 ) -> Element {
@@ -20,19 +20,14 @@ pub fn StatsCard(
     );
 
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/stats_card.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/stats_card.css") }
         div { class: "ws-stats",
             div { class: "ws-stats__body",
                 span { class: "ws-stats__label", "{label}" }
                 span { class: value_class, "{value}" }
                 span { class: "ws-stats__sub", "{sub}" }
             }
-            div { class: icon_class,
-                i { class: "fa-solid {icon}" }
-            }
+            div { class: icon_class, {icon} }
         }
     }
 }

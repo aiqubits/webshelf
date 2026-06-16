@@ -64,8 +64,12 @@
   border-radius: 8px;
   background: #f8fafc;
   color: var(--color-text-muted);
-  font-size: 12px;
   transition: background 150ms ease, color 150ms ease;
+}
+
+.ws-modal__close svg {
+  width: 14px;
+  height: 14px;
 }
 
 .ws-modal__close:hover {

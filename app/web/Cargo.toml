@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 ui = { workspace = true }
+dioxus-icons = { workspace = true }
 client-api = { workspace = true }
 chrono = { workspace = true }
 uuid = { workspace = true }

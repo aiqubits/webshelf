@@ -5,6 +5,7 @@
 use client_api::ClientError;
 use dioxus::prelude::dioxus_router::Navigator;
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{Gauge, HeartPulse, ShieldHalf, Users as UsersIcon};
 use ui::{
     Button, CodeConsole, ConsoleKind, ConsoleLine, RouteCard, RouteMethod, StatsAccent, StatsCard,
     StatsValueColor,
@@ -161,7 +162,7 @@ pub fn Dashboard() -> Element {
                             onclick: on_run_health,
                             disabled: checking(),
                             loading: checking(),
-                            i { class: "fa-solid fa-heart-pulse ws-hero__cta-icon" }
+                            HeartPulse { class: "ws-hero__cta-icon" }
                             "点此调用健康检查 (GET /health)"
                         }
                     }
@@ -173,7 +174,9 @@ pub fn Dashboard() -> Element {
                     label: "服务健康度".to_string(),
                     value: health_snapshot.status_label.clone(),
                     sub: format!("版本: {}", health_snapshot.version),
-                    icon: "fa-heart-pulse",
+                    icon: rsx! {
+                        HeartPulse {}
+                    },
                     accent: StatsAccent::Emerald,
                     value_color: if health_snapshot.ok { StatsValueColor::Emerald } else { StatsValueColor::Default },
                 }
@@ -186,7 +189,9 @@ pub fn Dashboard() -> Element {
                             None => "—".to_string(),
                         },
                         sub: "GET /api/users".to_string(),
-                        icon: "fa-users",
+                        icon: rsx! {
+                            UsersIcon {}
+                        },
                         accent: StatsAccent::Indigo,
                     }
                 }
@@ -197,14 +202,18 @@ pub fn Dashboard() -> Element {
                         None => "—".to_string(),
                     },
                     sub: "/api/health 单次 RTT".to_string(),
-                    icon: "fa-gauge-high",
+                    icon: rsx! {
+                        Gauge {}
+                    },
                     accent: StatsAccent::Purple,
                 }
                 StatsCard {
                     label: "中间件拦截器状态".to_string(),
                     value: "Active".to_string(),
                     sub: "拦截器: require_admin".to_string(),
-                    icon: "fa-shield-halved",
+                    icon: rsx! {
+                        ShieldHalf {}
+                    },
                     accent: StatsAccent::Amber,
                     value_color: StatsValueColor::Amber,
                 }
