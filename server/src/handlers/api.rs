@@ -10,6 +10,7 @@ use crate::AppState;
 use crate::middlewares::auth::AuthUser;
 use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
+use crate::services::verification::{VerificationError, VerificationService};
 use crate::utils::JsonOrForm;
 use crate::utils::error::ApiError;
 use crate::utils::validator::check_password_strength;
@@ -103,6 +104,10 @@ pub struct CreateUserRequest {
 }
 
 /// Create a new user
+///
+/// After creation, handles email verification consistent with the public
+/// registration flow: if the email service is configured, sends a verification
+/// email; if not, auto-verifies the user so admin-created accounts can log in.
 pub async fn create_user(
     State(state): State<AppState>,
     JsonOrForm(payload): JsonOrForm<CreateUserRequest>,
@@ -113,14 +118,54 @@ pub async fn create_user(
     // Validate password strength (complexity rules)
     check_password_strength(&payload.password)?;
 
+    // Normalize email to lowercase once at the entry point
+    let email = payload.email.to_lowercase();
+
     let service = UserService::new(state.db.clone());
-    let result = service
+    let mut result = service
         .create_user(CreateUserInput {
-            email: payload.email,
+            email: email.clone(),
             password: payload.password,
             name: payload.name,
         })
         .await?;
+
+    // Handle email verification (consistent with public registration flow).
+    // Admin-created users should be able to log in — if email service is
+    // not configured, auto-verify; if send fails, auto-verify as fallback.
+    let verification = VerificationService::new(state.db.clone(), state.email.clone());
+    match verification.send_verification_email(&email).await {
+        Ok(()) => {
+            tracing::info!("Verification code sent to admin-created user: {}", email);
+        }
+        Err(err) => {
+            // Log the specific reason for the failure
+            match &err {
+                VerificationError::EmailNotConfigured => {
+                    tracing::warn!(
+                        "Email service not configured — auto-verifying admin-created user: {}",
+                        email
+                    );
+                }
+                _ => {
+                    tracing::error!("Failed to send verification email: {:?}", err);
+                }
+            }
+            // Fallback: auto-verify so admin-created users can log in.
+            // This handles both the case where email is not configured
+            // (dev/test) and transient SMTP failures.
+            if let Err(e) = verification.auto_verify(&email).await {
+                tracing::error!(
+                    "Failed to auto-verify admin-created user after email send failure: {:?}",
+                    e
+                );
+                return Err(ApiError::Internal(
+                    "An unexpected error occurred".to_string(),
+                ));
+            }
+            result.email_verified = true;
+        }
+    }
 
     Ok(Json(result))
 }
