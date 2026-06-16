@@ -23,6 +23,7 @@ use crate::{
     routes::{api_routes, auth_routes},
     utils::{init_logger, load_config},
 };
+use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
 
 /// Command-line arguments
 #[derive(Parser, Debug, Clone)]
@@ -250,10 +251,22 @@ pub fn build_app_router(state: AppState, env: &str) -> Router {
     let cors = configure_cors(&allowed_origins, env);
     let compression = CompressionLayer::new();
 
+    // Create the login rate limiter (disabled if Redis is not configured).
+    let rate_limiter = match &state.redis {
+        Some(client) => RedisRateLimiter::new(client.clone(), RateLimitConfig::default()),
+        None => {
+            tracing::warn!(
+                "Redis not available — login rate limiting is disabled. \
+                 Set WEBSHELF_REDIS_URL or redis_url in config.toml to enable."
+            );
+            RedisRateLimiter::disabled(RateLimitConfig::default())
+        }
+    };
+
     // Middleware layers are applied in reverse order (last added = first to execute).
     Router::new()
         .nest("/api", api_routes())
-        .nest("/api/public/auth", auth_routes())
+        .nest("/api/public/auth", auth_routes(rate_limiter))
         .layer(axum_middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,
@@ -429,10 +442,13 @@ pub async fn start_server(bootstrap_result: BootstrapResult) -> Result<()> {
 
     tracing::info!("Server is ready to accept connections");
 
-    axum::serve(listener, app)
-        .with_graceful_shutdown(shutdown_signal())
-        .await
-        .context("Server failed")?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown_signal())
+    .await
+    .context("Server failed")?;
 
     tracing::info!("Server shutdown completed");
     Ok(())

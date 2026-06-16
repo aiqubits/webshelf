@@ -2017,6 +2017,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "distributed-ratelimit"
+version = "0.1.0"
+dependencies = [
+ "redis",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "dlopen2"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7753,6 +7763,7 @@ dependencies = [
  "chrono",
  "clap",
  "config",
+ "distributed-ratelimit",
  "emailserver",
  "http",
  "http-body-util",

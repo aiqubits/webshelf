@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver"]
+members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver", "crates/distributed-ratelimit"]
 # resolver = "3" is required for Rust edition 2024
 # Minimum Rust version: 1.92+
 resolver = "3"
@@ -42,6 +42,7 @@ client-api = { path = "app/client-api" }
 
 # Shared crates
 emailserver = { path = "crates/emailserver" }
+distributed-ratelimit = { path = "crates/distributed-ratelimit" }
 
 # ── Release 优化 ──────────────────────────────────────
 [profile.release]

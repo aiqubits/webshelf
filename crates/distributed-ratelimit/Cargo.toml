@@ -1,0 +1,18 @@
+[package]
+name = "distributed-ratelimit"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Redis-based distributed rate limiter with fixed-window counters."
+
+[dependencies]
+redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+tokio = { version = "1", features = ["sync"] }
+tracing.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros", "rt"] }

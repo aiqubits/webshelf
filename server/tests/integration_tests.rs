@@ -25,6 +25,7 @@ use tower::ServiceExt;
 
 // Helper function to create test app
 async fn create_test_app() -> Router {
+    use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
     use redis::Client as RedisClient;
     use sea_orm::Database;
     use webshelf_server::utils::load_config;
@@ -77,7 +78,10 @@ async fn create_test_app() -> Router {
     // Build test router with same middleware stack as main app
     Router::new()
         .nest("/api", api_routes())
-        .nest("/api/public/auth", auth_routes())
+        .nest(
+            "/api/public/auth",
+            auth_routes(RedisRateLimiter::disabled(RateLimitConfig::default())),
+        )
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             auth_middleware,

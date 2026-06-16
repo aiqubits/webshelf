@@ -25,6 +25,7 @@ sea-orm = { version = "1", features = ["sqlx-postgres", "runtime-tokio-rustls", 
 
 # Redis for distributed locking
 redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
+distributed-ratelimit.workspace = true
 
 # Configuration
 config = "0.15"
