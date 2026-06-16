@@ -96,7 +96,7 @@ jobs:
     - name: Build Web
       run: |
         export PATH="$HOME/.cargo/bin:$PATH"
-        cd app/web && dx build --release
+        cargo build --profile release-wasm -p web --target wasm32-unknown-unknown
 
   # ========================================
   # Client API Library CI

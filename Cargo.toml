@@ -50,4 +50,9 @@ codegen-units = 1      # 最大优化机会（牺牲编译速度）
 strip = true           # 移除调试符号
 # panic = "abort" 会禁用服务器端的 panic unwind 机制，
 # 导致 panic_middleware 无法通过 tokio::spawn 捕获 panic 并返回 500。
-# 如需为 WASM 前端优化体积，请在 app/web/Cargo.toml 中单独配置。
+
+# ── WASM 前端专用 Release profile ──────────────────────
+# 使用方式: cargo build --profile release-wasm -p web --target wasm32-unknown-unknown
+[profile.release-wasm]
+inherits = "release"
+panic = "abort"        # WASM 前端：减少 panic 展开代码
