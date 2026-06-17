@@ -81,7 +81,7 @@ async fn test_409_conflict() {
         .await;
 
     let err = client
-        .create_user("dup@example.com", "SecurePass123!", "Dup")
+        .create_user("dup@example.com", "SecurePass123!", "Dup", None)
         .await
         .unwrap_err();
 

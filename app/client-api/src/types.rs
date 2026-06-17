@@ -142,6 +142,8 @@ pub struct CreateUserRequest {
     pub email: String,
     pub password: String,
     pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
 }
 
 /// Update user request body (admin — all fields optional)

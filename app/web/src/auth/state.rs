@@ -114,6 +114,10 @@ impl CurrentUser {
     pub fn is_admin(&self) -> bool {
         self.role == "admin" || self.role == "system"
     }
+
+    pub fn is_system(&self) -> bool {
+        self.role == "system"
+    }
 }
 
 /// 一次解码 token，返回 `(payload, user)`。失败时返回 `None`。

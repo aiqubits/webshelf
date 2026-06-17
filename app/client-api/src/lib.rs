@@ -2,12 +2,12 @@
 //!
 //! # 快速开始
 //!
-//! ```rust,ignore
+//! ```rust,no_run
 //! # use client_api::{Client, ClientConfig};
+//! # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
 //! # // ⚠ 本示例需要真实后端，仅作 API 参考。
-//! # // 编译验证（无真实后端运行）请使用 `rust,no_run` 示例。
 //! // 原生平台：指定后端地址（本地开发用 localhost，生产用域名）
-//! let client = Client::new(ClientConfig::new("http://localhost:8080"))?;
+//! let client = Client::new(ClientConfig::new("http://127.0.0.1:8080"))?;
 //!
 //! // 注意：空 base_url（相对路径）仅在 WASM（浏览器）环境下有效，
 //! // 原生平台（桌面/移动端）必须使用完整的 http:// 或 https:// URL。
@@ -21,6 +21,8 @@
 //! for u in &users.items {
 //!     println!("{} <{}>", u.name, u.email);
 //! }
+//! # Ok(())
+//! # }
 //! ```
 //!
 //! # Builder 模式
@@ -28,7 +30,7 @@
 //! ```rust,no_run
 //! use client_api::{Client, ClientConfig};
 //!
-//! let config = ClientConfig::new("http://localhost:8080")
+//! let config = ClientConfig::new("http://127.0.0.1:8080")
 //!     .with_timeout(60)
 //!     .with_max_retries(5);
 //! let client = Client::new(config).expect("valid config");

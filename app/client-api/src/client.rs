@@ -18,11 +18,11 @@ use std::time::Duration;
 ///
 /// # Examples
 ///
-/// ```rust,ignore
+/// ```rust,no_run
 /// # use client_api::{Client, ClientConfig};
+/// # async fn _doctest() -> Result<(), Box<dyn std::error::Error>> {
 /// # // ⚠ 本示例需要真实后端，仅作 API 参考。
-///
-/// let client = Client::new(ClientConfig::new("http://localhost:8080"))?;
+/// let client = Client::new(ClientConfig::new("http://127.0.0.1:8080"))?;
 ///
 /// // 登录
 /// let login = client.login("admin@example.com", "password123").await?;
@@ -33,6 +33,8 @@ use std::time::Duration;
 /// for u in &users.items {
 ///     println!("{} <{}>", u.name, u.email);
 /// }
+/// # Ok(())
+/// # }
 /// ```
 #[derive(Debug, Clone)]
 pub struct Client {
@@ -274,16 +276,20 @@ impl Client {
     }
 
     /// 创建用户 — `POST /api/users`（需要 admin 角色）
+    ///
+    /// `role` 仅在当前用户为 system 时生效；admin 创建时强制为 "user"。
     pub async fn create_user(
         &self,
         email: impl Into<String>,
         password: impl Into<String>,
         name: impl Into<String>,
+        role: Option<String>,
     ) -> Result<UserResponse, ClientError> {
         let body = CreateUserRequest {
             email: email.into(),
             password: password.into(),
             name: name.into(),
+            role,
         };
         self.post_json("/api/users", &body, None).await
     }
@@ -525,19 +531,19 @@ mod tests {
 
     #[test]
     fn test_config_stored() {
-        let config = ClientConfig::new("http://localhost:8080")
+        let config = ClientConfig::new("http://127.0.0.1:8080")
             .with_timeout(45)
             .with_max_retries(5);
         let client = Client::new(config.clone()).unwrap();
 
-        assert_eq!(client.config().base_url, "http://localhost:8080");
+        assert_eq!(client.config().base_url, "http://127.0.0.1:8080");
         assert_eq!(client.config().timeout_secs, 45);
         assert_eq!(client.config().max_retries, 5);
     }
 
     #[test]
     fn test_token_management() {
-        let client = Client::new(ClientConfig::new("http://localhost:8080")).unwrap();
+        let client = Client::new(ClientConfig::new("http://127.0.0.1:8080")).unwrap();
         assert!(!client.is_authenticated());
         assert!(client.token().is_none());
 
@@ -551,7 +557,7 @@ mod tests {
 
     #[test]
     fn test_token_shared_across_clones() {
-        let client = Client::new(ClientConfig::new("http://localhost:8080")).unwrap();
+        let client = Client::new(ClientConfig::new("http://127.0.0.1:8080")).unwrap();
         let cloned = client.clone();
 
         client.set_token("shared-token");
@@ -563,7 +569,7 @@ mod tests {
 
     #[test]
     fn test_config_validation_http() {
-        let config = ClientConfig::new("http://localhost:8080");
+        let config = ClientConfig::new("http://127.0.0.1:8080");
         assert!(Client::new(config).is_ok());
     }
 
@@ -584,13 +590,13 @@ mod tests {
 
     #[test]
     fn test_config_validation_rejects_ftp() {
-        let config = ClientConfig::new("ftp://localhost");
+        let config = ClientConfig::new("ftp://127.0.0.1");
         assert!(Client::new(config).is_err());
     }
 
     #[test]
     fn test_config_validation_rejects_zero_timeout() {
-        let config = ClientConfig::new("http://localhost:8080").with_timeout(0);
+        let config = ClientConfig::new("http://127.0.0.1:8080").with_timeout(0);
         assert!(Client::new(config).is_err());
     }
 

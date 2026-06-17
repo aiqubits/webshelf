@@ -89,11 +89,15 @@ pub async fn register(
 
     let service = UserService::new(state.db.clone());
     let user = service
-        .create_user(CreateUserInput {
-            email: email.clone(),
-            password: payload.password,
-            name: payload.name,
-        })
+        .create_user(
+            CreateUserInput {
+                email: email.clone(),
+                password: payload.password,
+                name: payload.name,
+                role: None,
+            },
+            "user",
+        )
         .await?;
 
     let verification = VerificationService::new(state.db.clone(), state.email.clone());

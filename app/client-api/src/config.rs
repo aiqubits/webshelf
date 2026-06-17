@@ -10,13 +10,13 @@ use crate::error::ClientError;
 /// use client_api::ClientConfig;
 ///
 /// // 原生平台：指定后端地址
-/// let config = ClientConfig::new("http://localhost:8080");
+/// let config = ClientConfig::new("http://127.0.0.1:8080");
 ///
 /// // 空 base_url 仅在 WASM（浏览器）下有效
 /// // let config = ClientConfig::new("");
 ///
 /// // Builder 模式自定义
-/// let config = ClientConfig::new("http://localhost:8080")
+/// let config = ClientConfig::new("http://127.0.0.1:8080")
 ///     .with_timeout(60)
 ///     .with_max_retries(5);
 /// ```
@@ -122,11 +122,11 @@ impl ClientConfig {
 }
 
 impl Default for ClientConfig {
-    /// 默认配置使用 `http://localhost:8080` 作为 base_url，
+    /// 默认配置使用 `http://127.0.0.1:8080` 作为 base_url，
     /// 适用于本地开发环境。生产环境请通过 `ClientConfig::new()` 显式指定。
     fn default() -> Self {
         Self {
-            base_url: "http://localhost:8080".to_string(),
+            base_url: "http://127.0.0.1:8080".to_string(),
             timeout_secs: 30,
             max_retries: 3,
         }
@@ -140,7 +140,7 @@ mod tests {
     #[test]
     fn test_config_validation() {
         // 有效配置：HTTP
-        let config = ClientConfig::new("http://localhost:8080");
+        let config = ClientConfig::new("http://127.0.0.1:8080");
         assert!(config.validate().is_ok());
 
         // 有效配置：HTTPS
@@ -152,32 +152,32 @@ mod tests {
         assert!(config.validate().is_err());
 
         // 无效配置：错误协议
-        let config = ClientConfig::new("ftp://localhost");
+        let config = ClientConfig::new("ftp://127.0.0.1");
         assert!(config.validate().is_err());
 
         // 无效配置：超时为 0
-        let config = ClientConfig::new("http://localhost:8080").with_timeout(0);
+        let config = ClientConfig::new("http://127.0.0.1:8080").with_timeout(0);
         assert!(config.validate().is_err());
     }
 
     #[test]
     fn test_build_url() {
         // 正常 URL
-        let config = ClientConfig::new("http://localhost:8080");
+        let config = ClientConfig::new("http://127.0.0.1:8080");
         assert_eq!(
             config.build_url("/api/v1/users"),
-            "http://localhost:8080/api/v1/users"
+            "http://127.0.0.1:8080/api/v1/users"
         );
         assert_eq!(
             config.build_url("api/v1/users"),
-            "http://localhost:8080/api/v1/users"
+            "http://127.0.0.1:8080/api/v1/users"
         );
 
         // 带尾部斜杠的 URL
-        let config = ClientConfig::new("http://localhost:8080/");
+        let config = ClientConfig::new("http://127.0.0.1:8080/");
         assert_eq!(
             config.build_url("/api/v1/users"),
-            "http://localhost:8080/api/v1/users"
+            "http://127.0.0.1:8080/api/v1/users"
         );
 
         // 空字符串（相对路径）
@@ -188,11 +188,11 @@ mod tests {
 
     #[test]
     fn test_builder_pattern() {
-        let config = ClientConfig::new("http://localhost:8080")
+        let config = ClientConfig::new("http://127.0.0.1:8080")
             .with_timeout(60)
             .with_max_retries(5);
 
-        assert_eq!(config.base_url, "http://localhost:8080");
+        assert_eq!(config.base_url, "http://127.0.0.1:8080");
         assert_eq!(config.timeout_secs, 60);
         assert_eq!(config.max_retries, 5);
     }
@@ -200,7 +200,7 @@ mod tests {
     #[test]
     fn test_default_config() {
         let config = ClientConfig::default();
-        assert_eq!(config.base_url, "http://localhost:8080");
+        assert_eq!(config.base_url, "http://127.0.0.1:8080");
         assert_eq!(config.timeout_secs, 30);
         assert_eq!(config.max_retries, 3);
     }

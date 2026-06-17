@@ -37,7 +37,7 @@ services:
       - webshelf-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/api/health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -64,7 +64,7 @@ services:
       - webshelf-net
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/nginx-health"]
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:80/nginx-health"]
       interval: 30s
       timeout: 10s
       retries: 3

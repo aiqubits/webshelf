@@ -111,6 +111,7 @@ impl From<crate::services::user::UserError> for ApiError {
             crate::services::user::UserError::Forbidden(msg) => ApiError::Forbidden(msg),
             crate::services::user::UserError::WeakPassword(msg) => ApiError::BadRequest(msg),
             crate::services::user::UserError::SamePassword(msg) => ApiError::BadRequest(msg),
+            crate::services::user::UserError::NotAllowed(msg) => ApiError::Forbidden(msg),
             crate::services::user::UserError::Internal(e) => {
                 tracing::error!("Internal error: {:?}", e);
                 ApiError::Internal("An unexpected error occurred".to_string())

@@ -75,6 +75,8 @@ pub struct CreateUserInput {
     pub email: String,
     pub password: String,
     pub name: String,
+    /// Role override (only effective when actor is system)
+    pub role: Option<String>,
 }
 
 /// User update input

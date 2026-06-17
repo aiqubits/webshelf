@@ -13,6 +13,8 @@ use ui::{
     Align, Badge, BadgeVariant, Button, ButtonType, Column, DataTable, InputType, Modal, TextInput,
 };
 
+use uuid::Uuid;
+
 use crate::api::{ErrorContext, humanize_error};
 use crate::auth::AuthState;
 use crate::components::{HttpMethod, LogBus, SearchSignal, push_log_err, push_log_ok};
@@ -119,6 +121,19 @@ pub fn Users() -> Element {
     let editing_snapshot = signals.editing_user.read().clone();
     let deleting_snapshot = signals.deleting_user.read().clone();
 
+    // Current user role and ID for permission checks
+    let current_user = auth.user.read().as_ref().cloned();
+    let current_role = current_user
+        .as_ref()
+        .map(|u| u.role.clone())
+        .unwrap_or_default();
+    let actor_is_system = current_user
+        .as_ref()
+        .map(|u| u.is_system())
+        .unwrap_or(false);
+    let actor_is_admin = current_user.as_ref().map(|u| u.is_admin()).unwrap_or(false);
+    let current_user_id = current_user.map(|u| u.id).unwrap_or_default();
+
     let mut signals_for_open = signals;
     let open_create = move |_: MouseEvent| {
         signals_for_open.form_name.set(String::new());
@@ -151,7 +166,18 @@ pub fn Users() -> Element {
                 }
             }
 
-            {render_table(list_snapshot, search_text, signals)}
+            {
+                {
+                    render_table(
+                        list_snapshot,
+                        search_text,
+                        signals,
+                        current_user_id,
+                        actor_is_system,
+                        actor_is_admin,
+                    )
+                }
+            }
 
             {
                 render_modal(
@@ -165,13 +191,21 @@ pub fn Users() -> Element {
                     log_bus,
                     auth.clone(),
                     nav,
+                    current_role,
                 )
             }
         }
     }
 }
 
-fn render_table(list_snapshot: ListState, search_text: String, signals: UsersSignals) -> Element {
+fn render_table(
+    list_snapshot: ListState,
+    search_text: String,
+    signals: UsersSignals,
+    current_user_id: Uuid,
+    actor_is_system: bool,
+    actor_is_admin: bool,
+) -> Element {
     match list_snapshot {
         ListState::Loading => rsx! {
             div { class: "ws-users__status",
@@ -201,7 +235,7 @@ fn render_table(list_snapshot: ListState, search_text: String, signals: UsersSig
             let columns = build_columns();
             let rows: Vec<Element> = filtered
                 .into_iter()
-                .map(|u| row_element(u, signals))
+                .map(|u| row_element(u, signals, actor_is_system, actor_is_admin, current_user_id))
                 .collect();
             rsx! {
                 DataTable {
@@ -214,7 +248,13 @@ fn render_table(list_snapshot: ListState, search_text: String, signals: UsersSig
     }
 }
 
-fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
+fn row_element(
+    u: UserResponse,
+    signals: UsersSignals,
+    actor_is_system: bool,
+    actor_is_admin: bool,
+    current_user_id: Uuid,
+) -> Element {
     // 直接从原结构上提取展示字段，避免先 clone 再逐字段 clone 的冗余。
     let id_for_key = u.id;
     let name = u.name.clone();
@@ -223,6 +263,12 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
     let created = u.created_at;
 
     let is_system = role == "system";
+    let is_self = u.id == current_user_id;
+
+    // Edit permission: system can edit all non-system; admin can only edit users
+    let can_edit = (actor_is_system && !is_system) || (actor_is_admin && role == "user");
+    // Delete permission: same as edit, but cannot delete self
+    let can_delete = can_edit && !is_self;
 
     let u_for_edit = u.clone();
     let u_for_delete = u;
@@ -265,19 +311,30 @@ fn row_element(u: UserResponse, signals: UsersSignals) -> Element {
                             " 受保护"
                         }
                     }
+                } else if !can_edit && !can_delete {
+                    div { class: "ws-table__row-actions",
+                        span { class: "ws-table__protected",
+                            ShieldHalf {}
+                            " 权限不足"
+                        }
+                    }
                 } else {
                     div { class: "ws-table__row-actions",
-                        button {
-                            class: "ws-table__action",
-                            title: "编辑",
-                            onclick: edit_handler,
-                            Pencil {}
+                        if can_edit {
+                            button {
+                                class: "ws-table__action",
+                                title: "编辑",
+                                onclick: edit_handler,
+                                Pencil {}
+                            }
                         }
-                        button {
-                            class: "ws-table__action ws-table__action--danger",
-                            title: "删除",
-                            onclick: delete_handler,
-                            Trash2 {}
+                        if can_delete {
+                            button {
+                                class: "ws-table__action ws-table__action--danger",
+                                title: "删除",
+                                onclick: delete_handler,
+                                Trash2 {}
+                            }
                         }
                     }
                 }
@@ -310,6 +367,7 @@ fn render_modal(
     log_bus: LogBus,
     auth: AuthState,
     nav: Navigator,
+    current_role: String,
 ) -> Element {
     if kind == ModalKind::None {
         return VNode::empty();
@@ -317,12 +375,29 @@ fn render_modal(
 
     if kind == ModalKind::DeleteConfirm {
         return render_delete_modal(
-            form_error, submitting, deleting, signals, client, log_bus, auth, nav,
+            form_error,
+            submitting,
+            deleting,
+            signals,
+            client,
+            log_bus,
+            auth,
+            nav,
+            current_role,
         );
     }
 
     render_form_modal(
-        kind, form_error, submitting, editing, signals, client, log_bus, auth, nav,
+        kind,
+        form_error,
+        submitting,
+        editing,
+        signals,
+        client,
+        log_bus,
+        auth,
+        nav,
+        current_role,
     )
 }
 
@@ -336,6 +411,7 @@ fn render_delete_modal(
     log_bus: LogBus,
     auth: AuthState,
     nav: Navigator,
+    current_role: String,
 ) -> Element {
     let on_close = move |_: MouseEvent| close_all(signals);
     let on_cancel = move |_: MouseEvent| close_all(signals);
@@ -356,6 +432,13 @@ fn render_delete_modal(
             signals_for_submit
                 .form_error
                 .set(Some("系统管理员不可删除".into()));
+            return;
+        }
+        // 防御性检查：admin 不能删除 admin 或 system（后端同样保护）
+        if current_role == "admin" && u.role != "user" {
+            signals_for_submit
+                .form_error
+                .set(Some("权限不足：管理员只能删除普通用户".into()));
             return;
         }
         let target_id = u.id;
@@ -454,6 +537,7 @@ fn render_form_modal(
     log_bus: LogBus,
     auth: AuthState,
     nav: Navigator,
+    current_role: String,
 ) -> Element {
     let title = if kind == ModalKind::Create {
         "创建新用户"
@@ -479,6 +563,8 @@ fn render_form_modal(
 
     let editing_for_submit = editing.clone();
     let mut signals_for_submit = signals;
+    // Admin 不能修改 role，clone 一份供闭包使用（current_role 在之后 JSX 中还有引用）
+    let current_role_for_submit = current_role.clone();
     let on_submit = move |_: MouseEvent| {
         // 防止快速双击触发两次 spawn
         if *signals_for_submit.submitting.read() {
@@ -525,10 +611,20 @@ fn render_form_modal(
         let auth_async = auth.clone();
         signals_for_submit.submitting.set(true);
         signals_for_submit.form_error.set(None);
+        // Admin 不能修改 role，不发送该字段；仅 system 可以
+        // 在 spawn 外部计算布尔值以避免 String 被移入 async move 块
+        let actor_is_sys = current_role_for_submit == "system";
         spawn(async move {
             let res = match kind_now {
                 ModalKind::Create => {
-                    let r = client_async.create_user(&email, &password, &name).await;
+                    let create_role = if actor_is_sys {
+                        Some(role.clone())
+                    } else {
+                        None
+                    };
+                    let r = client_async
+                        .create_user(&email, &password, &name, create_role)
+                        .await;
                     if r.is_ok() {
                         push_log_ok(bus_async, HttpMethod::Post, "/api/users");
                     }
@@ -540,13 +636,13 @@ fn render_form_modal(
                         s_async.submitting.set(false);
                         return;
                     };
+                    let edit_role = if actor_is_sys {
+                        Some(role.clone())
+                    } else {
+                        None
+                    };
                     let r = client_async
-                        .update_user(
-                            id,
-                            Some(email.clone()),
-                            Some(name.clone()),
-                            Some(role.clone()),
-                        )
+                        .update_user(id, Some(email.clone()), Some(name.clone()), edit_role)
                         .await;
                     if r.is_ok() {
                         push_log_ok(bus_async, HttpMethod::Put, &format!("/api/users/{id}"));
@@ -638,9 +734,29 @@ fn render_form_modal(
                         ),
                     }
                 }
-                if kind == ModalKind::Edit {
+                if kind == ModalKind::Edit && current_role == "system" {
                     div { class: "ws-form-field",
                         label { class: "ws-form-label", "系统授权标签" }
+                        div { class: "ws-form-pill-group",
+                            button {
+                                r#type: "button",
+                                class: if role_now == "admin" { "ws-form-pill ws-form-pill--active" } else { "ws-form-pill" },
+                                onclick: pick_admin,
+                                "管理员"
+                            }
+                            button {
+                                r#type: "button",
+                                class: if role_now == "user" { "ws-form-pill ws-form-pill--active" } else { "ws-form-pill" },
+                                onclick: pick_user,
+                                "普通用户"
+                            }
+                        }
+                    }
+                }
+                // 创建模式：仅 system 角色可设置初始角色
+                if kind == ModalKind::Create && current_role == "system" {
+                    div { class: "ws-form-field",
+                        label { class: "ws-form-label", "初始授权标签" }
                         div { class: "ws-form-pill-group",
                             button {
                                 r#type: "button",

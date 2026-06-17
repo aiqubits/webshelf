@@ -5,7 +5,7 @@ use client_api::{Client, ClientConfig, ClientError};
 /// - **WASM（浏览器）**：使用空 `base_url`，请求会指向 `window.location.origin/api/...`，
 ///   通常配合 Nginx 反向代理同源部署。
 /// - **Native（桌面 / 移动 / 测试）**：读取 `WEBSHELF_API_URL` 环境变量，
-///   未设置则回退到 `http://localhost:8080`。
+///   未设置则回退到 `http://127.0.0.1:8080`。
 pub fn make_client() -> Result<Client, ClientError> {
     let config = client_config();
     Client::new(config)
@@ -21,7 +21,7 @@ fn client_config() -> ClientConfig {
     #[cfg(not(target_arch = "wasm32"))]
     {
         let base = std::env::var("WEBSHELF_API_URL")
-            .unwrap_or_else(|_| "http://localhost:8080".to_string());
+            .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
         ClientConfig::new(base)
     }
 }

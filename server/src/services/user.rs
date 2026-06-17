@@ -11,7 +11,6 @@ use sea_orm::{
     EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set, Statement, TransactionTrait,
 };
 use uuid::Uuid;
-
 /// Typed errors for user service operations
 #[derive(Debug, thiserror::Error)]
 pub enum UserError {
@@ -27,6 +26,8 @@ pub enum UserError {
     WeakPassword(String),
     #[error("Password unchanged: {0}")]
     SamePassword(String),
+    #[error("Operation not allowed: {0}")]
+    NotAllowed(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
 }
@@ -68,20 +69,49 @@ impl UserService {
     }
 
     /// Create a new user
-    pub async fn create_user(&self, input: CreateUserInput) -> Result<UserResponse, UserError> {
+    pub async fn create_user(
+        &self,
+        input: CreateUserInput,
+        actor_role: &str,
+    ) -> Result<UserResponse, UserError> {
         tracing::trace!("Creating user with email: {}", input.email);
 
         require_password(&input.password).map_err(UserError::WeakPassword)?;
 
         let password_hash = hash_password(&input.password).context("Failed to hash password")?;
 
+        // Determine role based on actor's authority
+        let role = match actor_role {
+            "system" => {
+                let r = input.role.as_deref().unwrap_or("user");
+                if r != "user" && r != "admin" {
+                    return Err(UserError::NotAllowed(
+                        "Role must be 'user' or 'admin'".to_string(),
+                    ));
+                }
+                r.to_string()
+            }
+            "admin" => {
+                if input.role.as_deref() == Some("admin") {
+                    return Err(UserError::NotAllowed(
+                        "Admin can only create user accounts".to_string(),
+                    ));
+                }
+                "user".to_string()
+            }
+            _ => "user".to_string(),
+        };
+
         let now = Utc::now();
         let user = ActiveModel {
             id: Set(Uuid::new_v4()),
+            // Email is already normalized to lowercase by the handler (the
+            // caller's responsibility). The .to_lowercase() here is idempotent
+            // and serves as defense-in-depth.
             email: Set(input.email.to_lowercase()),
             password_hash: Set(password_hash),
             name: Set(input.name),
-            role: Set("user".to_string()),
+            role: Set(role),
             created_at: Set(now),
             updated_at: Set(now),
             token_version: Set(1),
@@ -113,12 +143,39 @@ impl UserService {
         Ok(UserResponse::from(result))
     }
 
-    /// Get user by ID
+    /// Get user by ID (unscoped — caller is responsible for authorization).
+    ///
+    /// This is used internally (e.g., `get_me`) where the actor is fetching their
+    /// own data. No role-based filtering is applied.
     pub async fn get_user(&self, id: Uuid) -> Result<Option<UserResponse>, UserError> {
         let user = UserEntity::find_by_id(id)
             .one(&self.db)
             .await
             .context("Failed to query user")?;
+
+        Ok(user.map(UserResponse::from))
+    }
+
+    /// Get user by ID with RBAC scope enforcement.
+    ///
+    /// When `actor_role` is `"admin"`, the query filters to only return users with
+    /// `role = "user"`. This ensures that non-existent users and scoped-out users
+    /// both return `None`, eliminating the timing side-channel that would otherwise
+    /// allow an admin to distinguish "user does not exist" from "user exists but is
+    /// not a regular user".
+    pub async fn get_user_scoped(
+        &self,
+        id: Uuid,
+        actor_role: &str,
+    ) -> Result<Option<UserResponse>, UserError> {
+        let mut query = UserEntity::find_by_id(id);
+
+        // Admin scope: admin can only view user accounts
+        if actor_role == "admin" {
+            query = query.filter(Column::Role.eq("user"));
+        }
+
+        let user = query.one(&self.db).await.context("Failed to query user")?;
 
         Ok(user.map(UserResponse::from))
     }
@@ -150,6 +207,7 @@ impl UserService {
         &self,
         id: Uuid,
         input: UpdateUserInput,
+        actor_role: &str,
     ) -> Result<UserResponse, UserError> {
         let user = UserEntity::find_by_id(id)
             .one(&self.db)
@@ -158,9 +216,32 @@ impl UserService {
             .ok_or(UserError::NotFound)?;
 
         // Prevent modification of the system admin account (security boundary)
+        // NOTE: returns NotFound (not Forbidden) to prevent user enumeration —
+        // non-existent users and protected accounts are indistinguishable.
         if user.role == "system" {
-            return Err(UserError::Forbidden(
-                "Cannot modify the system admin account".to_string(),
+            tracing::warn!(
+                target_user_id = %id,
+                "Attempt to modify system account — returning NotFound"
+            );
+            return Err(UserError::NotFound);
+        }
+
+        // Admin scope: can only modify user accounts
+        // NOTE: returns NotFound (not NotAllowed) to prevent user enumeration.
+        if actor_role == "admin" && user.role != "user" {
+            tracing::warn!(
+                target_user_id = %id,
+                actor_role = %actor_role,
+                target_role = %user.role,
+                "Admin attempted to modify non-user account — returning NotFound"
+            );
+            return Err(UserError::NotFound);
+        }
+
+        // Admin cannot promote users to admin
+        if actor_role == "admin" && input.role.as_deref() == Some("admin") {
+            return Err(UserError::NotAllowed(
+                "Admin cannot promote users to admin".to_string(),
             ));
         }
 
@@ -183,6 +264,15 @@ impl UserService {
         let mut token_version_stmt: Option<Statement> = None;
 
         if let Some(ref new_role) = input.role {
+            // Defense-in-depth: validate role value is one of the allowed values.
+            // Handler-level validation should catch this first, but the service
+            // must not blindly persist arbitrary role values.
+            if new_role != "user" && new_role != "admin" {
+                return Err(UserError::NotAllowed(
+                    "Role must be 'user' or 'admin'".to_string(),
+                ));
+            }
+
             tracing::info!(
                 target_user_id = %id,
                 old_role = %old_role,
@@ -349,21 +439,59 @@ impl UserService {
     }
 
     /// Delete user
-    pub async fn delete_user(&self, id: Uuid) -> Result<(), UserError> {
-        // Prevent deletion of the system admin account
+    pub async fn delete_user(
+        &self,
+        id: Uuid,
+        actor_role: &str,
+        actor_id: Uuid,
+    ) -> Result<(), UserError> {
+        // Fetch target first so non-existent users always get NotFound
+        // regardless of actor_id or role checks (anti-enumeration).
         let target = UserEntity::find_by_id(id)
             .one(&self.db)
             .await
             .context("Failed to query user")?
             .ok_or(UserError::NotFound)?;
 
-        if target.role == "system" {
-            return Err(UserError::Forbidden(
-                "Cannot delete the system admin account".to_string(),
+        // Prevent self-deletion (check after DB fetch so that a non-existent
+        // user ID that happens to match actor_id still returns NotFound).
+        if id == actor_id {
+            return Err(UserError::NotAllowed(
+                "Cannot delete your own account".to_string(),
             ));
         }
 
-        let result = UserEntity::delete_by_id(id)
+        // Prevent deletion of the system admin account
+        if target.role == "system" {
+            tracing::warn!(
+                target_user_id = %id,
+                "Attempt to delete system account — returning NotFound"
+            );
+            return Err(UserError::NotFound);
+        }
+
+        // Admin scope: can only delete user accounts
+        // NOTE: returns NotFound (not NotAllowed) to prevent user enumeration.
+        if actor_role == "admin" && target.role != "user" {
+            tracing::warn!(
+                target_user_id = %id,
+                actor_role = %actor_role,
+                target_role = %target.role,
+                "Admin attempted to delete non-user account — returning NotFound"
+            );
+            return Err(UserError::NotFound);
+        }
+
+        // Use delete_many with role filter for admin as TOCTOU defense:
+        // the target's role could have changed between the fetch above and
+        // this DELETE statement. Adding AND role = 'user' makes the delete
+        // safely fail (0 rows) instead of deleting a now-protected account.
+        let mut delete_stmt = UserEntity::delete_many().filter(Column::Id.eq(id));
+        if actor_role == "admin" {
+            delete_stmt = delete_stmt.filter(Column::Role.eq("user"));
+        }
+
+        let result = delete_stmt
             .exec(&self.db)
             .await
             .context("Failed to delete user")?;
@@ -380,15 +508,21 @@ impl UserService {
     pub async fn list_users(
         &self,
         params: PaginationParams,
+        actor_role: &str,
     ) -> Result<PaginatedResponse<UserResponse>, UserError> {
         // Sanitize pagination inputs: clamp zero to 1 and cap large values
         // to reasonable bounds to prevent overflow or excessive offsets.
         let page = params.page.clamp(1, 1_000_000);
         let per_page = params.per_page.clamp(1, 100);
 
-        let paginator = UserEntity::find()
-            .order_by_desc(Column::CreatedAt)
-            .paginate(&self.db, per_page);
+        let mut query = UserEntity::find().order_by_desc(Column::CreatedAt);
+
+        // Admin scope: only see user role users
+        if actor_role == "admin" {
+            query = query.filter(Column::Role.eq("user"));
+        }
+
+        let paginator = query.paginate(&self.db, per_page);
 
         let total = paginator
             .num_items()

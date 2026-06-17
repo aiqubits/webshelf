@@ -73,14 +73,18 @@ impl From<PaginatedResponse<UserResponse>> for PaginatedUsersResponse {
 /// List users with pagination
 pub async fn list_users(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Query(query): Query<ListUsersQuery>,
 ) -> Result<Json<PaginatedUsersResponse>, ApiError> {
     let service = UserService::new(state.db.clone());
     let result = service
-        .list_users(PaginationParams {
-            page: query.page,
-            per_page: query.per_page,
-        })
+        .list_users(
+            PaginationParams {
+                page: query.page,
+                per_page: query.per_page,
+            },
+            &auth_user.role,
+        )
         .await?;
 
     Ok(Json(PaginatedUsersResponse::from(result)))
@@ -101,6 +105,10 @@ pub struct CreateUserRequest {
         message = "name must be between 2 and 50 characters"
     ))]
     name: String,
+
+    /// Role override (only effective when actor is system)
+    #[validate(custom(function = "validate_role"))]
+    role: Option<String>,
 }
 
 /// Create a new user
@@ -110,6 +118,7 @@ pub struct CreateUserRequest {
 /// email; if not, auto-verifies the user so admin-created accounts can log in.
 pub async fn create_user(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     JsonOrForm(payload): JsonOrForm<CreateUserRequest>,
 ) -> Result<Json<UserResponse>, ApiError> {
     // Validate request payload
@@ -121,13 +130,26 @@ pub async fn create_user(
     // Normalize email to lowercase once at the entry point
     let email = payload.email.to_lowercase();
 
+    // Non-system actors cannot assign roles via create; only system can.
+    // Normalize to None early so the service layer is not sent a role
+    // request that would be ignored anyway.
+    let requested_role = if auth_user.role == "system" {
+        payload.role
+    } else {
+        None
+    };
+
     let service = UserService::new(state.db.clone());
     let mut result = service
-        .create_user(CreateUserInput {
-            email: email.clone(),
-            password: payload.password,
-            name: payload.name,
-        })
+        .create_user(
+            CreateUserInput {
+                email: email.clone(),
+                password: payload.password,
+                name: payload.name,
+                role: requested_role,
+            },
+            &auth_user.role,
+        )
         .await?;
 
     // Handle email verification (consistent with public registration flow).
@@ -251,11 +273,12 @@ pub async fn change_my_password(
 /// Get a user by ID
 pub async fn get_user(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<UserResponse>, ApiError> {
     let service = UserService::new(state.db.clone());
     let result = service
-        .get_user(id)
+        .get_user_scoped(id, &auth_user.role)
         .await?
         .ok_or_else(|| ApiError::NotFound("User not found".to_string()))?;
 
@@ -296,6 +319,7 @@ fn validate_role(role: &str) -> Result<(), ValidationError> {
 /// Update a user
 pub async fn update_user(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
     JsonOrForm(payload): JsonOrForm<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, ApiError> {
@@ -309,6 +333,15 @@ pub async fn update_user(
         ));
     }
 
+    // Non-system actors cannot modify roles via update; only system can.
+    // Normalize to None early so the service layer is not sent a role
+    // request that would be ignored anyway.
+    let requested_role = if auth_user.role == "system" {
+        payload.role
+    } else {
+        None
+    };
+
     let service = UserService::new(state.db.clone());
     let result = service
         .update_user(
@@ -316,8 +349,9 @@ pub async fn update_user(
             UpdateUserInput {
                 email: payload.email,
                 name: payload.name,
-                role: payload.role,
+                role: requested_role,
             },
+            &auth_user.role,
         )
         .await?;
 
@@ -327,10 +361,15 @@ pub async fn update_user(
 /// Delete a user
 pub async fn delete_user(
     State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
     Path(id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor_id = Uuid::parse_str(&auth_user.user_id).map_err(|_| {
+        tracing::error!("Invalid UUID in auth token for user: {}", auth_user.user_id);
+        ApiError::Internal("An unexpected error occurred".to_string())
+    })?;
     let service = UserService::new(state.db.clone());
-    service.delete_user(id).await?;
+    service.delete_user(id, &auth_user.role, actor_id).await?;
 
     Ok(Json(serde_json::json!({
         "message": "User deleted successfully"

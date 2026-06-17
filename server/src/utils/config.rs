@@ -87,12 +87,12 @@ impl Default for DatabaseConfig {
 
 // Default database connection URL
 fn default_database_url() -> String {
-    "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@localhost:5432/webshelf".to_string()
+    "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@127.0.0.1:5432/webshelf".to_string()
 }
 
 // Default Redis connection URL
 fn default_redis_url() -> String {
-    "redis://:CHANGE_ME_REDIS_PASSWORD@localhost:6379".to_string()
+    "redis://:CHANGE_ME_REDIS_PASSWORD@127.0.0.1:6379".to_string()
 }
 
 // Default JWT secret key — must be replaced before deployment
@@ -192,7 +192,7 @@ mod tests {
         let config = ServerConfig {
             host: "127.0.0.1".to_string(),
             port: 8080,
-            allowed_origins: vec!["http://localhost:3000".to_string()],
+            allowed_origins: vec!["http://127.0.0.1:3000".to_string()],
         };
         let cloned = config.clone();
         assert_eq!(config.host, cloned.host);
@@ -212,8 +212,8 @@ mod tests {
     #[test]
     fn test_app_config_clone() {
         let config = AppConfig {
-            database_url: "postgres://localhost".to_string(),
-            redis_url: "redis://localhost".to_string(),
+            database_url: "postgres://127.0.0.1".to_string(),
+            redis_url: "redis://127.0.0.1".to_string(),
             jwt_secret: "secret".to_string(),
             jwt_expiry_seconds: 7200,
             system_admin_email: "admin@webshelf.local".to_string(),

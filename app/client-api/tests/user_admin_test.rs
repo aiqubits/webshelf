@@ -125,7 +125,7 @@ async fn test_create_user_success() {
         .await;
 
     let user = client
-        .create_user("new@example.com", "SecurePass123!", "New User")
+        .create_user("new@example.com", "SecurePass123!", "New User", None)
         .await
         .unwrap();
 
@@ -149,7 +149,7 @@ async fn test_create_user_duplicate_email() {
         .await;
 
     let result = client
-        .create_user(fixtures::TEST_EMAIL, "SecurePass123!", "Dup")
+        .create_user(fixtures::TEST_EMAIL, "SecurePass123!", "Dup", None)
         .await;
 
     assert!(result.is_err());
