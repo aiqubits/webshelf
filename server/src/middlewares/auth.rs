@@ -96,8 +96,7 @@ pub async fn auth_middleware(
     match validate_token(&token, jwt_secret) {
         Ok(claims) => {
             // Verify token_version against the database
-            let user_id = uuid::Uuid::parse_str(&claims.sub);
-            let user_id = match user_id {
+            let user_id: i64 = match claims.sub.parse() {
                 Ok(id) => id,
                 Err(_) => {
                     tracing::warn!("Invalid user ID format in token: {}", claims.sub);
@@ -134,7 +133,7 @@ pub async fn auth_middleware(
 /// lifetime, falling back to DB on cache miss.
 async fn verify_token_version(
     db: &sea_orm::DatabaseConnection,
-    user_id: uuid::Uuid,
+    user_id: i64,
     token_version: i32,
 ) -> anyhow::Result<()> {
     let user = UserEntity::find_by_id(user_id)

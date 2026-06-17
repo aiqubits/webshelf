@@ -808,7 +808,6 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.18",
  "tokio",
- "uuid",
  "web-sys",
  "wiremock",
 ]
@@ -7651,7 +7650,6 @@ dependencies = [
  "serde_json",
  "tokio",
  "ui",
- "uuid",
  "web-sys",
 ]
 

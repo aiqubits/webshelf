@@ -1,3 +1,4 @@
+use crate::snowflake::SnowflakeId;
 use sea_orm::entity::prelude::*;
 use serde::Deserialize;
 use serde::Serialize as SerializeTrait;
@@ -6,9 +7,9 @@ use serde::Serialize as SerializeTrait;
 #[derive(Clone, Debug, PartialEq, Eq, DeriveEntityModel)]
 #[sea_orm(table_name = "users")]
 pub struct Model {
-    /// Unique user identifier
+    /// Unique user identifier (Snowflake ID)
     #[sea_orm(primary_key, auto_increment = false)]
-    pub id: Uuid,
+    pub id: i64,
 
     /// User email address (unique)
     #[sea_orm(unique)]
@@ -90,7 +91,7 @@ pub struct UpdateUserInput {
 /// User response (without sensitive data)
 #[derive(Debug, SerializeTrait)]
 pub struct UserResponse {
-    pub id: Uuid,
+    pub id: SnowflakeId,
     pub email: String,
     pub name: String,
     pub role: String,
@@ -105,7 +106,7 @@ pub struct UserResponse {
 impl From<Model> for UserResponse {
     fn from(model: Model) -> Self {
         Self {
-            id: model.id,
+            id: SnowflakeId::new(model.id),
             email: model.email,
             name: model.name,
             role: model.role,
@@ -125,7 +126,7 @@ mod tests {
     #[test]
     fn test_user_response_from_model() {
         let now = Utc::now();
-        let user_id = Uuid::new_v4();
+        let user_id: i64 = 1001;
 
         let model = Model {
             id: user_id,
@@ -149,7 +150,7 @@ mod tests {
 
         let response = UserResponse::from(model.clone());
 
-        assert_eq!(response.id, user_id);
+        assert_eq!(response.id, SnowflakeId::new(user_id));
         assert_eq!(response.email, "test@example.com");
         assert_eq!(response.name, "Test User");
         assert_eq!(response.role, "user");
@@ -202,7 +203,7 @@ mod tests {
     fn test_user_response_serialization() {
         let now = Utc::now();
         let response = UserResponse {
-            id: Uuid::new_v4(),
+            id: SnowflakeId::new(1002i64),
             email: "test@example.com".to_string(),
             name: "Test User".to_string(),
             role: "user".to_string(),

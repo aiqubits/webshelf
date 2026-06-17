@@ -2,7 +2,6 @@
 
 use client_api::{Client, ClientConfig, ClientError, LoginResponse, RegisterResponse};
 use dioxus::prelude::*;
-use uuid::Uuid;
 
 use crate::api::make_client;
 use crate::auth::JWT_EXPIRY_LEEWAY_SECS;
@@ -86,7 +85,7 @@ mod tests {
 /// 当前已登录用户。
 #[derive(Debug, Clone, PartialEq)]
 pub struct CurrentUser {
-    pub id: Uuid,
+    pub id: String,
     pub role: String,
     pub name: String,
     pub email: String,
@@ -95,9 +94,11 @@ pub struct CurrentUser {
 impl CurrentUser {
     /// 仅从 JWT 派生 id / role（name / email 占位，等待 /api/users/me 填充）。
     fn from_jwt(payload: &crate::auth::JwtPayload) -> Option<Self> {
-        let id = Uuid::parse_str(&payload.sub).ok()?;
+        if payload.sub.is_empty() {
+            return None;
+        }
         Some(Self {
-            id,
+            id: payload.sub.clone(),
             role: payload.role.clone(),
             name: String::new(),
             email: String::new(),

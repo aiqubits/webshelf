@@ -47,6 +47,11 @@ async fn create_test_app() -> Router {
         .await
         .expect("Failed to run migrations");
 
+    // Initialize Snowflake ID generator (idempotent — subsequent calls are no-ops)
+    webshelf_server::snowflake::init(&db)
+        .await
+        .expect("Failed to initialize Snowflake generator");
+
     // Create Redis client (optional)
     let redis = RedisClient::open(config.redis_url.as_str()).ok();
 
@@ -200,7 +205,11 @@ async fn create_admin_and_login(app: &Router, email: &str) -> String {
     )
     .expect("Failed to decode token");
 
-    let user_id = uuid::Uuid::parse_str(&token_data.claims.sub).expect("Invalid user ID");
+    let user_id: i64 = token_data
+        .claims
+        .sub
+        .parse()
+        .expect("Invalid user ID in token");
 
     // Get a DB connection to update the role.
     // NOTE: This test helper directly manipulates the database to promote a user
@@ -995,7 +1004,7 @@ async fn test_old_token_invalidated_after_role_change() {
     // Only system-role actors can change roles via the API per RBAC design.
     // This test focuses on verifying token invalidation — we bypass the API
     // and use direct DB access (same pattern as create_admin_and_login).
-    let user_uuid = uuid::Uuid::parse_str(&user_id).expect("Invalid user ID");
+    let user_id_int: i64 = user_id.parse().expect("Invalid user ID");
     let db = {
         let config = webshelf_server::utils::load_config("config.toml", "development")
             .expect("Failed to load config");
@@ -1008,7 +1017,7 @@ async fn test_old_token_invalidated_after_role_change() {
     use webshelf_server::repositories::user::{ActiveModel, Column, Entity as UserEntity};
 
     let user = UserEntity::find()
-        .filter(Column::Id.eq(user_uuid))
+        .filter(Column::Id.eq(user_id_int))
         .one(&db)
         .await
         .expect("Failed to find user")

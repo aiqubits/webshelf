@@ -3,7 +3,6 @@ use axum::{
     extract::{Extension, Path, Query, State},
 };
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 use validator::{Validate, ValidationError};
 
 use crate::AppState;
@@ -197,8 +196,10 @@ pub async fn get_me(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
 ) -> Result<Json<UserResponse>, ApiError> {
-    let user_id = uuid::Uuid::parse_str(&auth_user.user_id)
-        .expect("auth middleware guarantees valid UUID in token");
+    let user_id: i64 = auth_user.user_id.parse().map_err(|_| {
+        tracing::error!("Invalid user ID in auth token: {}", auth_user.user_id);
+        ApiError::Internal("An unexpected error occurred".to_string())
+    })?;
 
     let service = UserService::new(state.db.clone());
     let result = service
@@ -238,8 +239,10 @@ pub async fn change_my_password(
 
     check_password_strength(&payload.new_password)?;
 
-    let user_id = Uuid::parse_str(&auth_user.user_id)
-        .expect("auth middleware guarantees valid UUID in token");
+    let user_id: i64 = auth_user.user_id.parse().map_err(|_| {
+        tracing::error!("Invalid user ID in auth token: {}", auth_user.user_id);
+        ApiError::Internal("An unexpected error occurred".to_string())
+    })?;
 
     if payload.current_password == payload.new_password {
         return Err(ApiError::BadRequest(
@@ -274,7 +277,7 @@ pub async fn change_my_password(
 pub async fn get_user(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<i64>,
 ) -> Result<Json<UserResponse>, ApiError> {
     let service = UserService::new(state.db.clone());
     let result = service
@@ -320,7 +323,7 @@ fn validate_role(role: &str) -> Result<(), ValidationError> {
 pub async fn update_user(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<i64>,
     JsonOrForm(payload): JsonOrForm<UpdateUserRequest>,
 ) -> Result<Json<UserResponse>, ApiError> {
     // Validate request payload
@@ -362,10 +365,10 @@ pub async fn update_user(
 pub async fn delete_user(
     State(state): State<AppState>,
     Extension(auth_user): Extension<AuthUser>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<i64>,
 ) -> Result<Json<serde_json::Value>, ApiError> {
-    let actor_id = Uuid::parse_str(&auth_user.user_id).map_err(|_| {
-        tracing::error!("Invalid UUID in auth token for user: {}", auth_user.user_id);
+    let actor_id: i64 = auth_user.user_id.parse().map_err(|_| {
+        tracing::error!("Invalid user ID in auth token: {}", auth_user.user_id);
         ApiError::Internal("An unexpected error occurred".to_string())
     })?;
     let service = UserService::new(state.db.clone());

@@ -13,8 +13,6 @@ use ui::{
     Align, Badge, BadgeVariant, Button, ButtonType, Column, DataTable, InputType, Modal, TextInput,
 };
 
-use uuid::Uuid;
-
 use crate::api::{ErrorContext, humanize_error};
 use crate::auth::AuthState;
 use crate::components::{HttpMethod, LogBus, SearchSignal, push_log_err, push_log_ok};
@@ -202,7 +200,7 @@ fn render_table(
     list_snapshot: ListState,
     search_text: String,
     signals: UsersSignals,
-    current_user_id: Uuid,
+    current_user_id: String,
     actor_is_system: bool,
     actor_is_admin: bool,
 ) -> Element {
@@ -235,7 +233,15 @@ fn render_table(
             let columns = build_columns();
             let rows: Vec<Element> = filtered
                 .into_iter()
-                .map(|u| row_element(u, signals, actor_is_system, actor_is_admin, current_user_id))
+                .map(|u| {
+                    row_element(
+                        u,
+                        signals,
+                        actor_is_system,
+                        actor_is_admin,
+                        current_user_id.clone(),
+                    )
+                })
                 .collect();
             rsx! {
                 DataTable {
@@ -253,10 +259,10 @@ fn row_element(
     signals: UsersSignals,
     actor_is_system: bool,
     actor_is_admin: bool,
-    current_user_id: Uuid,
+    current_user_id: String,
 ) -> Element {
     // 直接从原结构上提取展示字段，避免先 clone 再逐字段 clone 的冗余。
-    let id_for_key = u.id;
+    let id_for_key = u.id.clone();
     let name = u.name.clone();
     let email = u.email.clone();
     let role = u.role.clone();
@@ -441,7 +447,7 @@ fn render_delete_modal(
                 .set(Some("权限不足：管理员只能删除普通用户".into()));
             return;
         }
-        let target_id = u.id;
+        let target_id = u.id.clone();
         signals_for_submit.submitting.set(true);
         signals_for_submit.form_error.set(None);
         let client_async = client.clone();
@@ -449,7 +455,7 @@ fn render_delete_modal(
         let mut s_async = signals_for_submit;
         let auth_async = auth.clone();
         spawn(async move {
-            let res = client_async.delete_user(target_id).await;
+            let res = client_async.delete_user(target_id.clone()).await;
             if res.is_ok() {
                 push_log_ok(
                     bus_async,
@@ -574,7 +580,7 @@ fn render_form_modal(
         let email = signals_for_submit.form_email.cloned().to_lowercase();
         let password = signals_for_submit.form_password.cloned();
         let role = signals_for_submit.form_role.cloned();
-        let editing_id = editing_for_submit.as_ref().map(|u| u.id);
+        let editing_id = editing_for_submit.as_ref().map(|u| u.id.clone());
         let kind_now = kind;
         // 防御性检查：系统用户不可编辑（后端同样保护，UI 按钮已隐藏）
         if kind_now == ModalKind::Edit
@@ -631,7 +637,7 @@ fn render_form_modal(
                     r.map(|_| ())
                 }
                 ModalKind::Edit => {
-                    let Some(id) = editing_id else {
+                    let Some(ref id) = editing_id else {
                         s_async.form_error.set(Some("缺少用户 ID".into()));
                         s_async.submitting.set(false);
                         return;
@@ -642,10 +648,15 @@ fn render_form_modal(
                         None
                     };
                     let r = client_async
-                        .update_user(id, Some(email.clone()), Some(name.clone()), edit_role)
+                        .update_user(
+                            id.clone(),
+                            Some(email.clone()),
+                            Some(name.clone()),
+                            edit_role,
+                        )
                         .await;
                     if r.is_ok() {
-                        push_log_ok(bus_async, HttpMethod::Put, &format!("/api/users/{id}"));
+                        push_log_ok(bus_async, HttpMethod::Put, &format!("/api/users/{}", id));
                     }
                     r.map(|_| ())
                 }

@@ -59,6 +59,7 @@ pub struct CliArgs {
 pub struct BootstrapResult {
     pub app: Router,
     pub bind_addr: String,
+    pub _worker_handle: crate::snowflake::WorkerHandle,
 }
 
 /// Initialize application logger
@@ -326,6 +327,11 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
 
     let db = init_database(&app_config).await?;
     run_database_migrations(&db).await?;
+
+    // Initialize Snowflake ID generator (must happen before seed_system_admin
+    // which uses generate_id() to create the system admin user's ID).
+    let _worker_handle = crate::snowflake::init(&db).await?;
+
     seed_system_admin(&db, &app_config).await?;
 
     let redis_client = init_redis(&app_config).await?;
@@ -335,7 +341,11 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
 
     let bind_addr = format!("{}:{}", host, port);
 
-    Ok(BootstrapResult { app, bind_addr })
+    Ok(BootstrapResult {
+        app,
+        bind_addr,
+        _worker_handle,
+    })
 }
 
 /// Seed system admin account on first boot.
@@ -388,7 +398,7 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
 
     let now = chrono::Utc::now();
     let user = ActiveModel {
-        id: Set(uuid::Uuid::new_v4()),
+        id: Set(crate::snowflake::generate_id()),
         email: Set(email.clone()),
         password_hash: Set(password_hash),
         name: Set("System Administrator".to_string()),
@@ -432,7 +442,11 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
 
 /// Start HTTP server with graceful shutdown
 pub async fn start_server(bootstrap_result: BootstrapResult) -> Result<()> {
-    let BootstrapResult { app, bind_addr } = bootstrap_result;
+    let BootstrapResult {
+        app,
+        bind_addr,
+        _worker_handle,
+    } = bootstrap_result;
 
     tracing::info!("Starting server on {}", bind_addr);
 

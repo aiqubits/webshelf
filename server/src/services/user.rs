@@ -10,7 +10,6 @@ use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
     EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set, Statement, TransactionTrait,
 };
-use uuid::Uuid;
 /// Typed errors for user service operations
 #[derive(Debug, thiserror::Error)]
 pub enum UserError {
@@ -104,7 +103,7 @@ impl UserService {
 
         let now = Utc::now();
         let user = ActiveModel {
-            id: Set(Uuid::new_v4()),
+            id: Set(crate::snowflake::generate_id()),
             // Email is already normalized to lowercase by the handler (the
             // caller's responsibility). The .to_lowercase() here is idempotent
             // and serves as defense-in-depth.
@@ -147,7 +146,7 @@ impl UserService {
     ///
     /// This is used internally (e.g., `get_me`) where the actor is fetching their
     /// own data. No role-based filtering is applied.
-    pub async fn get_user(&self, id: Uuid) -> Result<Option<UserResponse>, UserError> {
+    pub async fn get_user(&self, id: i64) -> Result<Option<UserResponse>, UserError> {
         let user = UserEntity::find_by_id(id)
             .one(&self.db)
             .await
@@ -165,7 +164,7 @@ impl UserService {
     /// not a regular user".
     pub async fn get_user_scoped(
         &self,
-        id: Uuid,
+        id: i64,
         actor_role: &str,
     ) -> Result<Option<UserResponse>, UserError> {
         let mut query = UserEntity::find_by_id(id);
@@ -181,7 +180,7 @@ impl UserService {
     }
 
     /// Get user by ID including the password hash (for internal auth flows).
-    pub async fn get_user_with_hash(&self, id: Uuid) -> Result<Option<UserModel>, UserError> {
+    pub async fn get_user_with_hash(&self, id: i64) -> Result<Option<UserModel>, UserError> {
         let user = UserEntity::find_by_id(id)
             .one(&self.db)
             .await
@@ -205,7 +204,7 @@ impl UserService {
     /// Update user
     pub async fn update_user(
         &self,
-        id: Uuid,
+        id: i64,
         input: UpdateUserInput,
         actor_role: &str,
     ) -> Result<UserResponse, UserError> {
@@ -355,7 +354,7 @@ impl UserService {
     /// so the caller can issue a fresh JWT.
     pub async fn change_password(
         &self,
-        id: Uuid,
+        id: i64,
         current_password: &str,
         new_password: &str,
     ) -> Result<(UserResponse, i32), UserError> {
@@ -441,9 +440,9 @@ impl UserService {
     /// Delete user
     pub async fn delete_user(
         &self,
-        id: Uuid,
+        id: i64,
         actor_role: &str,
-        actor_id: Uuid,
+        actor_id: i64,
     ) -> Result<(), UserError> {
         // Fetch target first so non-existent users always get NotFound
         // regardless of actor_id or role checks (anti-enumeration).
@@ -547,6 +546,8 @@ impl UserService {
 
 #[cfg(test)]
 mod tests {
+    use crate::snowflake::SnowflakeId;
+
     use super::*;
 
     #[test]
@@ -613,10 +614,9 @@ mod tests {
     fn test_paginated_response_with_items() {
         use crate::repositories::user::UserResponse;
         use chrono::Utc;
-        use uuid::Uuid;
 
         let user = UserResponse {
-            id: Uuid::new_v4(),
+            id: SnowflakeId::new(1001),
             email: "test@example.com".to_string(),
             name: "Test User".to_string(),
             role: "user".to_string(),

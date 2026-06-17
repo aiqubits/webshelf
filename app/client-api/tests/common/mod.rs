@@ -22,7 +22,7 @@ pub async fn create_test_client() -> (Client, MockServer) {
 #[allow(dead_code)]
 pub mod fixtures {
     pub const TEST_TOKEN: &str = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.test_token.signature";
-    pub const TEST_USER_ID: &str = "550e8400-e29b-41d4-a716-446655440000";
+    pub const TEST_USER_ID: &str = "1903487293645824000";
     pub const TEST_EMAIL: &str = "test@example.com";
     pub const TEST_PASSWORD: &str = "SecurePass123!";
     pub const TEST_NAME: &str = "Test User";

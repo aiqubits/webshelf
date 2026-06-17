@@ -3,6 +3,7 @@ pub mod error;
 pub mod extractor;
 pub mod logger;
 pub mod password;
+pub mod snowflake;
 pub mod validator;
 
 pub use config::{AppConfig, load_config};

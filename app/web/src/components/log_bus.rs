@@ -4,7 +4,7 @@
 //! 写入与读取都通过 `Signal<Vec<LogEntry>>` 完成，自动驱动所有订阅者重渲染。
 
 use dioxus::prelude::*;
-use uuid::Uuid;
+use std::cell::Cell;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HttpMethod {
@@ -44,9 +44,20 @@ pub enum LogKind {
     Important,
 }
 
+fn next_log_id() -> u64 {
+    thread_local! {
+        static COUNTER: Cell<u64> = const { Cell::new(1) };
+    }
+    COUNTER.with(|c| {
+        let id = c.get();
+        c.set(id + 1);
+        id
+    })
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct LogEntry {
-    pub id: Uuid,
+    pub id: u64,
     pub method: HttpMethod,
     pub path: String,
     pub status: String,
@@ -62,7 +73,7 @@ impl LogEntry {
         kind: LogKind,
     ) -> Self {
         Self {
-            id: Uuid::new_v4(),
+            id: next_log_id(),
             method,
             path: path.into(),
             status: status.into(),
@@ -105,7 +116,7 @@ impl LogBus {
 
     /// 移除指定 id 的日志。
     #[allow(dead_code)]
-    pub fn remove(&mut self, id: Uuid) {
+    pub fn remove(&mut self, id: u64) {
         self.entries.write().retain(|e| e.id != id);
     }
 

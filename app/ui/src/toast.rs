@@ -9,7 +9,7 @@ use dioxus_icons::lucide::X;
 #[derive(Debug, Clone, PartialEq)]
 pub struct ToastEntry {
     /// 唯一 id，用于动画与 dismiss。
-    pub id: u128,
+    pub id: u64,
     /// 决定 badge 颜色与显示文字；显示文字通过 `ToastMethod::as_str()` 获取。
     pub method_variant: ToastMethod,
     /// API 路径，如 `/api/users`。
@@ -83,7 +83,7 @@ impl ToastKind {
 pub fn ToastStack(
     entries: ReadSignal<Vec<ToastEntry>>,
     #[props(default = 3500)] auto_dismiss_ms: u64,
-    on_dismiss: EventHandler<u128>,
+    on_dismiss: EventHandler<u64>,
 ) -> Element {
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/styling/toast.css") }
@@ -101,7 +101,7 @@ pub fn ToastStack(
 }
 
 #[component]
-fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u128>) -> Element {
+fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u64>) -> Element {
     let id = entry.id;
     let mut exiting = use_signal(|| false);
 

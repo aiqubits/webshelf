@@ -469,11 +469,10 @@ fn is_admin_or_system(user: Option<&CurrentUser>) -> bool {
 mod tests {
     use super::is_admin_or_system;
     use crate::auth::CurrentUser;
-    use uuid::Uuid;
 
     fn make_user(role: &str) -> CurrentUser {
         CurrentUser {
-            id: Uuid::nil(),
+            id: String::new(),
             role: role.to_string(),
             name: String::new(),
             email: String::new(),

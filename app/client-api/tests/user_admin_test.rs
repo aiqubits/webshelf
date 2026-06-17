@@ -8,9 +8,9 @@ use wiremock::{Mock, ResponseTemplate};
 mod common;
 use common::{create_test_client, fixtures};
 
-const ID1: &str = "11111111-1111-4111-8111-111111111111";
-const ID2: &str = "22222222-2222-4222-8222-222222222222";
-const ID3: &str = "33333333-3333-4333-8333-333333333333";
+const ID1: &str = "1903487293645824000";
+const ID2: &str = "1903487293645824001";
+const ID3: &str = "1903487293645824002";
 const BASE_TS: &str = "2024-01-15T08:00:00Z";
 const UPDATED_TS: &str = "2024-06-09T12:00:00Z";
 
@@ -164,7 +164,7 @@ async fn test_get_user_success() {
     let (client, mock_server) = create_test_client().await;
     setup_admin_client(&client);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("GET"))
         .and(path(format!("/api/users/{}", id)))
@@ -191,7 +191,7 @@ async fn test_get_user_not_found() {
     let (client, mock_server) = create_test_client().await;
     setup_admin_client(&client);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("GET"))
         .and(path(format!("/api/users/{}", id)))
@@ -215,7 +215,7 @@ async fn test_update_user_success() {
     let (client, mock_server) = create_test_client().await;
     setup_admin_client(&client);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("PUT"))
         .and(path(format!("/api/users/{}", id)))
@@ -255,7 +255,7 @@ async fn test_update_user_role_only() {
     let (client, mock_server) = create_test_client().await;
     setup_admin_client(&client);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("PUT"))
         .and(path(format!("/api/users/{}", id)))
@@ -288,7 +288,7 @@ async fn test_update_user_not_found() {
     let (client, mock_server) = create_test_client().await;
     setup_admin_client(&client);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("PUT"))
         .and(path(format!("/api/users/{}", id)))
@@ -312,7 +312,7 @@ async fn test_delete_user_success() {
     let (client, mock_server) = create_test_client().await;
     setup_admin_client(&client);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("DELETE"))
         .and(path(format!("/api/users/{}", id)))
@@ -331,7 +331,7 @@ async fn test_delete_user_not_found() {
     let (client, mock_server) = create_test_client().await;
     setup_admin_client(&client);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("DELETE"))
         .and(path(format!("/api/users/{}", id)))

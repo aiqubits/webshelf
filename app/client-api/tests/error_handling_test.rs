@@ -44,7 +44,7 @@ async fn test_404_not_found() {
     let (client, mock_server) = create_test_client().await;
     client.set_token(fixtures::TEST_TOKEN);
 
-    let id = uuid::Uuid::parse_str(fixtures::TEST_USER_ID).unwrap();
+    let id = fixtures::TEST_USER_ID.to_string();
 
     Mock::given(method("GET"))
         .and(path(format!("/api/users/{}", id)))

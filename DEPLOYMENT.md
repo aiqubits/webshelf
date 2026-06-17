@@ -46,6 +46,7 @@ docker run --name webshelf-postgres-dev \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=devpassword \
   -e POSTGRES_DB=webshelf \
+  -v webshelf-postgres-data:/var/lib/postgresql/data \
   -p 5432:5432 \
   --restart unless-stopped \
   -d postgres:16-alpine
@@ -53,6 +54,7 @@ docker run --name webshelf-postgres-dev \
 # 4. 启动 Redis
 docker run --name webshelf-redis-dev \
   --network webshelf-net \
+  -v webshelf-redis-data:/data \
   -p 6379:6379 \
   --restart unless-stopped \
   -d redis:7-alpine
@@ -149,12 +151,14 @@ docker run --name webshelf-postgres-dev \
   -e POSTGRES_USER=postgres \
   -e POSTGRES_PASSWORD=devpassword \
   -e POSTGRES_DB=webshelf \
+  -v webshelf-postgres-data:/var/lib/postgresql/data \
   -p 5432:5432 \
   -d postgres:16-alpine
 
 # 启动 Redis
 docker run --name webshelf-redis-dev \
   --network webshelf-net \
+  -v webshelf-redis-data:/data \
   -p 6379:6379 \
   -d redis:7-alpine
 
@@ -466,7 +470,7 @@ Docker Compose 使用命名卷存储数据：
 docker volume ls | grep webshelf
 
 # 查看卷详细信息
-docker volume inspect webshelf_postgres-data
+docker volume inspect webshelf-postgres-data
 
 # 备份 PostgreSQL
 docker compose exec -T postgres pg_dump -U postgres -d webshelf > backup.sql

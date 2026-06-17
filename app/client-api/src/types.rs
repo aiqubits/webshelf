@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 // ──────────────────────────────────────────────
 //  Auth types
@@ -128,7 +127,7 @@ pub struct ResetPasswordResponse {
 /// User response (mirrors server's `UserResponse`)
 #[derive(Debug, Clone, Deserialize)]
 pub struct UserResponse {
-    pub id: Uuid,
+    pub id: String,
     pub email: String,
     pub name: String,
     pub role: String,

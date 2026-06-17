@@ -2,7 +2,6 @@ use std::sync::{Arc, RwLock};
 
 use reqwest::Method;
 use serde::{Serialize, de::DeserializeOwned};
-use uuid::Uuid;
 
 use crate::config::ClientConfig;
 use crate::error::ClientError;
@@ -253,7 +252,7 @@ impl Client {
     }
 
     /// 获取单个用户 — `GET /api/users/{id}`（需要 admin 角色）
-    pub async fn get_user(&self, id: Uuid) -> Result<UserResponse, ClientError> {
+    pub async fn get_user(&self, id: String) -> Result<UserResponse, ClientError> {
         self.get_json(&format!("/api/users/{}", id), None).await
     }
 
@@ -299,7 +298,7 @@ impl Client {
     /// 仅传入的字段会被更新；`None` 字段保持原值不变。
     pub async fn update_user(
         &self,
-        id: Uuid,
+        id: String,
         email: Option<String>,
         name: Option<String>,
         role: Option<String>,
@@ -310,7 +309,7 @@ impl Client {
     }
 
     /// 删除用户 — `DELETE /api/users/{id}`（需要 admin 角色）
-    pub async fn delete_user(&self, id: Uuid) -> Result<DeleteResponse, ClientError> {
+    pub async fn delete_user(&self, id: String) -> Result<DeleteResponse, ClientError> {
         self.delete_json(&format!("/api/users/{}", id), None).await
     }
 

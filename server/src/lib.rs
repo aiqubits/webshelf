@@ -6,6 +6,7 @@ pub mod repositories;
 pub mod routes;
 pub mod services;
 pub mod utils;
+pub use utils::snowflake;
 
 use redis::Client as RedisClient;
 use sea_orm::DatabaseConnection;

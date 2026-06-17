@@ -307,7 +307,7 @@ impl VerificationService {
         // the threshold.  This is the only place the counter is mutated
         // by verify_email, and the threshold check is part of the same
         // SQL statement, so concurrent requests cannot all run Argon2.
-        self.increment_failed_attempts(&user.id).await?;
+        self.increment_failed_attempts(user.id).await?;
 
         // Verify code against stored hash
         if !Self::verify_code(code, code_hash)? {
@@ -341,16 +341,13 @@ impl VerificationService {
     /// Increment the failed-attempts counter atomically, enforcing the brute-force
     /// threshold.  Uses a single `UPDATE … WHERE failed_attempts < MAX` statement
     /// to eliminate the TOCTOU gap between the read check and the write increment.
-    async fn increment_failed_attempts(
-        &self,
-        user_id: &uuid::Uuid,
-    ) -> Result<(), VerificationError> {
+    async fn increment_failed_attempts(&self, user_id: i64) -> Result<(), VerificationError> {
         let result = UserEntity::update_many()
             .col_expr(
                 Column::VerificationFailedAttempts,
                 sea_orm::sea_query::Expr::col(Column::VerificationFailedAttempts).add(1),
             )
-            .filter(Column::Id.eq(*user_id))
+            .filter(Column::Id.eq(user_id))
             .filter(Column::VerificationFailedAttempts.lt(MAX_FAILED_ATTEMPTS))
             .exec(&self.db)
             .await

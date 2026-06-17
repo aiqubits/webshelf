@@ -10,7 +10,6 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter,
     Statement, TransactionTrait, sea_query::Expr,
 };
-use uuid::Uuid;
 
 const CODE_EXPIRY_MINUTES: i64 = 10;
 const RESEND_COOLDOWN_SECONDS: i64 = 60;
@@ -43,7 +42,7 @@ pub enum PasswordResetError {
 /// Outcome of a successful password reset, used by the handler to issue a
 /// fresh JWT so the caller is auto-logged-in after resetting.
 pub struct PasswordResetOutcome {
-    pub user_id: Uuid,
+    pub user_id: i64,
     pub role: String,
     pub token_version: i32,
 }
@@ -238,7 +237,7 @@ impl PasswordResetService {
         // Atomic claim: increment the counter only if the user is below
         // the threshold. Runs OUTSIDE the transaction so that the counter
         // persists even on wrong-code or concurrent-consumption detection.
-        self.increment_failed_attempts(&user.id).await?;
+        self.increment_failed_attempts(user.id).await?;
 
         // Verify code against stored hash
         if !verify_code(code, &stored_hash)? {
@@ -311,13 +310,13 @@ impl PasswordResetService {
 
     /// Atomically increment the failed-attempts counter, enforcing the
     /// brute-force threshold via `UPDATE … WHERE failed_attempts < MAX`.
-    async fn increment_failed_attempts(&self, user_id: &Uuid) -> Result<(), PasswordResetError> {
+    async fn increment_failed_attempts(&self, user_id: i64) -> Result<(), PasswordResetError> {
         let result = UserEntity::update_many()
             .col_expr(
                 Column::PasswordResetFailedAttempts,
                 sea_orm::sea_query::Expr::col(Column::PasswordResetFailedAttempts).add(1),
             )
-            .filter(Column::Id.eq(*user_id))
+            .filter(Column::Id.eq(user_id))
             .filter(Column::PasswordResetFailedAttempts.lt(MAX_FAILED_ATTEMPTS))
             .exec(&self.db)
             .await
