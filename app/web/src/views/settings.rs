@@ -8,6 +8,7 @@ use ui::{Button, ButtonType, InputType, TextInput};
 use crate::Route;
 use crate::api::{ErrorContext, handle_unauth, humanize_error};
 use crate::auth::AuthState;
+use crate::balance::format_balance;
 use crate::components::{HttpMethod, LogBus, push_log_result};
 
 #[component]
@@ -218,6 +219,10 @@ fn render_identity(auth: AuthState) -> Element {
             div { class: "ws-settings__identity-row",
                 span { class: "ws-settings__identity-label", "角色" }
                 span { class: "ws-settings__identity-value", "{user.role}" }
+            }
+            div { class: "ws-settings__identity-row",
+                span { class: "ws-settings__identity-label", "余额" }
+                span { class: "ws-settings__identity-value", "{format_balance(user.balance)}" }
             }
         },
         None => rsx! {

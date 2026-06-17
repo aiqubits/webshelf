@@ -89,6 +89,8 @@ pub struct CurrentUser {
     pub role: String,
     pub name: String,
     pub email: String,
+    /// User balance (stored as big value)
+    pub balance: i64,
 }
 
 impl CurrentUser {
@@ -102,6 +104,7 @@ impl CurrentUser {
             role: payload.role.clone(),
             name: String::new(),
             email: String::new(),
+            balance: 0,
         })
     }
 
@@ -109,6 +112,7 @@ impl CurrentUser {
     fn with_profile(mut self, profile: &client_api::UserResponse) -> Self {
         self.name = profile.name.clone();
         self.email = profile.email.clone();
+        self.balance = profile.balance;
         self
     }
 

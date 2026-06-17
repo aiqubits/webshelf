@@ -8,7 +8,7 @@ use validator::{Validate, ValidationError};
 use crate::AppState;
 use crate::middlewares::auth::AuthUser;
 use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
-use crate::services::user::{PaginatedResponse, PaginationParams, UserService};
+use crate::services::user::{BALANCE_SCALE, PaginatedResponse, PaginationParams, UserService};
 use crate::services::verification::{VerificationError, VerificationService};
 use crate::utils::JsonOrForm;
 use crate::utils::error::ApiError;
@@ -377,4 +377,78 @@ pub async fn delete_user(
     Ok(Json(serde_json::json!({
         "message": "User deleted successfully"
     })))
+}
+
+/// Set balance request body
+#[derive(Debug, Deserialize)]
+pub struct SetBalanceRequest {
+    /// Balance value in stored units (1 display unit = 10^10 stored units).
+    /// e.g., to set display value of 1.00, send 10_000_000_000.
+    pub balance: i64,
+}
+
+/// Set balance response
+#[derive(Serialize)]
+pub struct SetBalanceResponse {
+    pub balance: i64,
+    pub display_balance: f64,
+    pub message: String,
+}
+
+/// Set a user's balance — `PUT /api/users/{id}/balance` (admin/system only).
+pub async fn set_balance(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(id): Path<i64>,
+    JsonOrForm(payload): JsonOrForm<SetBalanceRequest>,
+) -> Result<Json<SetBalanceResponse>, ApiError> {
+    let service = UserService::new(state.db.clone());
+    let result = service
+        .set_balance(id, payload.balance, &auth_user.role)
+        .await?;
+
+    let display_balance = result.balance as f64 / BALANCE_SCALE as f64;
+
+    Ok(Json(SetBalanceResponse {
+        balance: result.balance,
+        display_balance,
+        message: "Balance updated successfully".to_string(),
+    }))
+}
+
+/// Adjust balance request body (delta amount, positive = increase, negative = decrease)
+#[derive(Debug, Deserialize)]
+pub struct AdjustBalanceRequest {
+    /// Amount in stored units (positive = increase, negative = decrease).
+    /// e.g., +10_000_000_000 = +1.00 display unit, -5_000_000_000 = -0.50 display unit.
+    pub amount: i64,
+}
+
+/// Adjust balance response
+#[derive(Serialize)]
+pub struct AdjustBalanceResponse {
+    pub balance: i64,
+    pub display_balance: f64,
+    pub message: String,
+}
+
+/// Adjust a user's balance — `POST /api/users/{id}/balance/adjust` (admin/system only).
+pub async fn adjust_balance(
+    State(state): State<AppState>,
+    Extension(auth_user): Extension<AuthUser>,
+    Path(id): Path<i64>,
+    JsonOrForm(payload): JsonOrForm<AdjustBalanceRequest>,
+) -> Result<Json<AdjustBalanceResponse>, ApiError> {
+    let service = UserService::new(state.db.clone());
+    let result = service
+        .adjust_balance(id, payload.amount, &auth_user.role)
+        .await?;
+
+    let display_balance = result.balance as f64 / BALANCE_SCALE as f64;
+
+    Ok(Json(AdjustBalanceResponse {
+        balance: result.balance,
+        display_balance,
+        message: "Balance adjusted successfully".to_string(),
+    }))
 }

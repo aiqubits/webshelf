@@ -476,6 +476,7 @@ mod tests {
             role: role.to_string(),
             name: String::new(),
             email: String::new(),
+            balance: 0,
         }
     }
 

@@ -415,6 +415,7 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
         password_reset_expires_at: Set(None),
         password_reset_sent_at: Set(None),
         password_reset_failed_attempts: Set(0),
+        balance: Set(0),
     };
 
     match user.insert(db).await {

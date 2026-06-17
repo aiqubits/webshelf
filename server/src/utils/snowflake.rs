@@ -363,9 +363,23 @@ pub async fn init(db: &DatabaseConnection) -> Result<WorkerHandle, SnowflakeErro
     let record = register_worker(db).await?;
     let generator = SnowflakeGenerator::new(record.worker_id as u64);
 
-    GLOBAL_GENERATOR
-        .set(generator)
-        .map_err(|_| SnowflakeError::Db("Snowflake already initialized".to_string()))?;
+    // 使用 OnceLock::set() 的返回值来检测竞态条件。
+    // 如果在 register_worker 的 await 期间另一个任务已经完成了初始化，
+    // set() 会返回 Err，此时只需注销当前 worker 并返回无操作句柄。
+    if GLOBAL_GENERATOR.set(generator).is_err() {
+        tracing::warn!(
+            "Snowflake already initialized by another task, deregistering worker {}",
+            record.worker_id
+        );
+        // 注销这个多余的 worker，因为它不会被使用
+        if let Err(e) = deregister_worker(db, record.worker_id).await {
+            tracing::warn!("Failed to deregister redundant worker: {e}");
+        }
+        return Ok(WorkerHandle {
+            worker_id: 0,
+            stop_tx: None,
+        });
+    }
 
     tracing::info!(
         "Snowflake generator initialized with worker_id={}",

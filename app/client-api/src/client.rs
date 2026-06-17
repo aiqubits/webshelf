@@ -313,6 +313,30 @@ impl Client {
         self.delete_json(&format!("/api/users/{}", id), None).await
     }
 
+    /// 设置用户余额 — `PUT /api/users/{id}/balance`（需要 admin/system 角色）
+    pub async fn set_balance(
+        &self,
+        id: String,
+        balance: i64,
+    ) -> Result<SetBalanceResponse, ClientError> {
+        let body = SetBalanceRequest { balance };
+        self.put_json(&format!("/api/users/{}/balance", id), &body, None)
+            .await
+    }
+
+    /// 调整用户余额（增加/减少）— `POST /api/users/{id}/balance/adjust`（需要 admin/system 角色）
+    ///
+    /// `amount` 为正数则增加，为负数则减少。
+    pub async fn adjust_balance(
+        &self,
+        id: String,
+        amount: i64,
+    ) -> Result<AdjustBalanceResponse, ClientError> {
+        let body = AdjustBalanceRequest { amount };
+        self.post_json(&format!("/api/users/{}/balance/adjust", id), &body, None)
+            .await
+    }
+
     // ──────────────────────────────────────────
     //  Internal HTTP helpers
     // ──────────────────────────────────────────

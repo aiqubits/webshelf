@@ -42,6 +42,7 @@
 .ws-table__table .w-24 { width: 6rem; }
 .ws-table__table .w-32 { width: 8rem; }
 .ws-table__table .w-40 { width: 10rem; }
+.ws-table__table .w-44 { width: 11rem; }
 
 .ws-table__body {
   font-size: 12px;

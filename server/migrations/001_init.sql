@@ -19,8 +19,12 @@ CREATE TABLE IF NOT EXISTS users (
     password_reset_sent_at TIMESTAMPTZ,
     password_reset_failed_attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    balance BIGINT NOT NULL DEFAULT 0
 );
+
+-- Add balance column for existing dev databases that pre-date this column
+ALTER TABLE users ADD COLUMN IF NOT EXISTS balance BIGINT NOT NULL DEFAULT 0;
 
 -- Idempotent ALTERs for existing dev databases that pre-date the password-reset columns.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR(255);

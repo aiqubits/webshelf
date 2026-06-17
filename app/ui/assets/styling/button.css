@@ -49,6 +49,16 @@
   animation: ws-spin 1s linear infinite;
 }
 
+/* Pill-sized variant: same gradient as ws-btn--primary, same size as ws-form-pill */
+.ws-btn--pill {
+  flex: 1;
+  min-width: 100px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
 @keyframes ws-spin {
   to { transform: rotate(360deg); }
 }

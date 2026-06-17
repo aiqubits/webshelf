@@ -8,8 +8,13 @@ use anyhow::Context;
 use chrono::Utc;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, Set, Statement, TransactionTrait,
+    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
+    TransactionTrait,
 };
+
+/// Balance scale factor: 1 display unit = 10^10 stored units (1 × 10^10).
+pub const BALANCE_SCALE: i64 = 10_000_000_000;
+
 /// Typed errors for user service operations
 #[derive(Debug, thiserror::Error)]
 pub enum UserError {
@@ -29,6 +34,46 @@ pub enum UserError {
     NotAllowed(String),
     #[error(transparent)]
     Internal(#[from] anyhow::Error),
+}
+
+/// Check RBAC rules for balance modification operations on a loaded user.
+fn check_balance_rbac(target: &UserModel, actor_role: &str) -> Result<(), UserError> {
+    // Protect system accounts
+    if target.role == "system" {
+        tracing::warn!(
+            target_user_id = %target.id,
+            "Attempt to modify system account balance — returning NotFound"
+        );
+        return Err(UserError::NotFound);
+    }
+
+    // Admin scope: can only modify user accounts
+    if actor_role == "admin" && target.role != "user" {
+        tracing::warn!(
+            target_user_id = %target.id,
+            actor_role = %actor_role,
+            target_role = %target.role,
+            "Admin attempted to modify non-user account balance — returning NotFound"
+        );
+        return Err(UserError::NotFound);
+    }
+
+    // Regular users cannot modify any balance
+    if actor_role == "user" {
+        return Err(UserError::NotAllowed(
+            "Users cannot modify balance".to_string(),
+        ));
+    }
+
+    // Defensive catch-all: unrecognized roles are not permitted.
+    // Only "system" or "admin" should reach this point.
+    if actor_role != "system" && actor_role != "admin" {
+        return Err(UserError::NotAllowed(format!(
+            "Role '{actor_role}' is not allowed to modify balance"
+        )));
+    }
+
+    Ok(())
 }
 
 /// User service for CRUD operations
@@ -123,6 +168,7 @@ impl UserService {
             password_reset_expires_at: Set(None),
             password_reset_sent_at: Set(None),
             password_reset_failed_attempts: Set(0),
+            balance: Set(0),
         };
 
         tracing::debug!("Inserting user into database");
@@ -542,6 +588,126 @@ impl UserService {
             total_pages,
         })
     }
+
+    /// Set user balance (direct set, follows RBAC rules).
+    ///
+    /// Uses a transaction with `SELECT ... FOR UPDATE` to prevent concurrent
+    /// modifications (TOCTOU protection), same as `adjust_balance`.
+    ///
+    /// - `system` role: can modify any user's balance
+    /// - `admin` role: can only modify `user` role accounts' balance
+    /// - `user` role: cannot modify any balance
+    pub async fn set_balance(
+        &self,
+        target_id: i64,
+        balance: i64,
+        actor_role: &str,
+    ) -> Result<UserResponse, UserError> {
+        let txn = self
+            .db
+            .begin()
+            .await
+            .context("Failed to start transaction")?;
+
+        // Lock the row exclusively to prevent concurrent modifications
+        let target = UserEntity::find_by_id(target_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await
+            .context("Failed to query user")?
+            .ok_or(UserError::NotFound)?;
+
+        // RBAC checks
+        check_balance_rbac(&target, actor_role)?;
+
+        // Reject negative balance
+        if balance < 0 {
+            return Err(UserError::NotAllowed(
+                "Balance cannot be negative".to_string(),
+            ));
+        }
+
+        let mut active_model: ActiveModel = target.into();
+        active_model.balance = Set(balance);
+        active_model.updated_at = Set(Utc::now());
+
+        let result = active_model.update(&txn).await.map_err(|e| {
+            UserError::Internal(anyhow::Error::from(e).context("Failed to set balance"))
+        })?;
+
+        txn.commit().await.context("Failed to commit transaction")?;
+
+        tracing::info!(
+            "Balance set for user {}: {} (by {})",
+            target_id,
+            balance,
+            actor_role
+        );
+        Ok(UserResponse::from(result))
+    }
+
+    /// Adjust user balance by a delta (increase or decrease).
+    ///
+    /// Uses a transaction with `SELECT ... FOR UPDATE` to prevent concurrent
+    /// modifications (TOCTOU protection). The balance column is atomically
+    /// updated within the locked row to guarantee consistency.
+    ///
+    /// - Positive `amount` = increase, negative `amount` = decrease.
+    /// - Final balance must be >= 0.
+    /// - RBAC rules follow the same pattern as `set_balance`.
+    pub async fn adjust_balance(
+        &self,
+        target_id: i64,
+        amount: i64,
+        actor_role: &str,
+    ) -> Result<UserResponse, UserError> {
+        let txn = self
+            .db
+            .begin()
+            .await
+            .context("Failed to start transaction")?;
+
+        // Lock the row exclusively to prevent concurrent balance modifications
+        let target = UserEntity::find_by_id(target_id)
+            .lock_exclusive()
+            .one(&txn)
+            .await
+            .context("Failed to query user")?
+            .ok_or(UserError::NotFound)?;
+
+        // RBAC checks
+        check_balance_rbac(&target, actor_role)?;
+
+        // Atomic balance adjustment with overflow protection
+        let new_balance = target
+            .balance
+            .checked_add(amount)
+            .ok_or_else(|| UserError::NotAllowed("Balance overflow".to_string()))?;
+
+        // Reject negative balance
+        if new_balance < 0 {
+            return Err(UserError::NotAllowed("Insufficient balance".to_string()));
+        }
+
+        let mut active_model: ActiveModel = target.into();
+        active_model.balance = Set(new_balance);
+        active_model.updated_at = Set(Utc::now());
+
+        let result = active_model.update(&txn).await.map_err(|e| {
+            UserError::Internal(anyhow::Error::from(e).context("Failed to adjust balance"))
+        })?;
+
+        txn.commit().await.context("Failed to commit transaction")?;
+
+        tracing::info!(
+            "Balance adjusted for user {}: {} (amount: {}, by {})",
+            target_id,
+            new_balance,
+            amount,
+            actor_role
+        );
+        Ok(UserResponse::from(result))
+    }
 }
 
 #[cfg(test)]
@@ -624,6 +790,7 @@ mod tests {
             created_at: Utc::now(),
             updated_at: Utc::now(),
             token_version: 1,
+            balance: 0,
         };
 
         let response = PaginatedResponse {
@@ -707,5 +874,135 @@ mod tests {
             response.total_pages,
             response.total.div_ceil(response.per_page)
         );
+    }
+
+    #[test]
+    fn test_check_balance_rbac_system_account() {
+        let target = UserModel {
+            id: 1,
+            email: "admin@test.com".to_string(),
+            password_hash: String::new(),
+            name: "System Admin".to_string(),
+            role: "system".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            token_version: 1,
+            email_verified: true,
+            verification_code_hash: None,
+            verification_code_expires_at: None,
+            verification_code_sent_at: None,
+            verification_failed_attempts: 0,
+            password_reset_token_hash: None,
+            password_reset_expires_at: None,
+            password_reset_sent_at: None,
+            password_reset_failed_attempts: 0,
+            balance: 0,
+        };
+        let result = check_balance_rbac(&target, "admin");
+        assert!(matches!(result, Err(UserError::NotFound)));
+    }
+
+    #[test]
+    fn test_check_balance_rbac_admin_on_admin_account() {
+        let target = UserModel {
+            id: 2,
+            email: "admin@test.com".to_string(),
+            password_hash: String::new(),
+            name: "Admin".to_string(),
+            role: "admin".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            token_version: 1,
+            email_verified: true,
+            verification_code_hash: None,
+            verification_code_expires_at: None,
+            verification_code_sent_at: None,
+            verification_failed_attempts: 0,
+            password_reset_token_hash: None,
+            password_reset_expires_at: None,
+            password_reset_sent_at: None,
+            password_reset_failed_attempts: 0,
+            balance: 0,
+        };
+        let result = check_balance_rbac(&target, "admin");
+        assert!(matches!(result, Err(UserError::NotFound)));
+    }
+
+    #[test]
+    fn test_check_balance_rbac_user_actor() {
+        let target = UserModel {
+            id: 3,
+            email: "user@test.com".to_string(),
+            password_hash: String::new(),
+            name: "User".to_string(),
+            role: "user".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            token_version: 1,
+            email_verified: false,
+            verification_code_hash: None,
+            verification_code_expires_at: None,
+            verification_code_sent_at: None,
+            verification_failed_attempts: 0,
+            password_reset_token_hash: None,
+            password_reset_expires_at: None,
+            password_reset_sent_at: None,
+            password_reset_failed_attempts: 0,
+            balance: 0,
+        };
+        let result = check_balance_rbac(&target, "user");
+        assert!(matches!(result, Err(UserError::NotAllowed(_))));
+    }
+
+    #[test]
+    fn test_check_balance_rbac_system_actor_allowed() {
+        let target = UserModel {
+            id: 4,
+            email: "some@test.com".to_string(),
+            password_hash: String::new(),
+            name: "Some User".to_string(),
+            role: "user".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            token_version: 1,
+            email_verified: false,
+            verification_code_hash: None,
+            verification_code_expires_at: None,
+            verification_code_sent_at: None,
+            verification_failed_attempts: 0,
+            password_reset_token_hash: None,
+            password_reset_expires_at: None,
+            password_reset_sent_at: None,
+            password_reset_failed_attempts: 0,
+            balance: 0,
+        };
+        let result = check_balance_rbac(&target, "system");
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_check_balance_rbac_admin_on_user_allowed() {
+        let target = UserModel {
+            id: 5,
+            email: "regular@test.com".to_string(),
+            password_hash: String::new(),
+            name: "Regular User".to_string(),
+            role: "user".to_string(),
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+            token_version: 1,
+            email_verified: false,
+            verification_code_hash: None,
+            verification_code_expires_at: None,
+            verification_code_sent_at: None,
+            verification_failed_attempts: 0,
+            password_reset_token_hash: None,
+            password_reset_expires_at: None,
+            password_reset_sent_at: None,
+            password_reset_failed_attempts: 0,
+            balance: 0,
+        };
+        let result = check_balance_rbac(&target, "admin");
+        assert!(result.is_ok());
     }
 }

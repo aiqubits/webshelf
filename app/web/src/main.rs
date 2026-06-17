@@ -8,6 +8,7 @@ use views::{
 
 mod api;
 mod auth;
+mod balance;
 mod components;
 mod views;
 #[derive(Debug, Clone, Routable, PartialEq)]

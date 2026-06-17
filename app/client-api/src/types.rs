@@ -133,6 +133,9 @@ pub struct UserResponse {
     pub role: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+    /// User balance (stored as big value, 1 display unit = 10^10 stored units)
+    #[serde(default)]
+    pub balance: i64,
 }
 
 /// Create user request body (admin)
@@ -203,4 +206,38 @@ pub struct ChangePasswordRequest {
 pub struct ChangePasswordResponse {
     pub message: String,
     pub new_token: String,
+}
+
+// ──────────────────────────────────────────────
+//  Balance types
+// ──────────────────────────────────────────────
+
+/// Set balance request body (admin/system only)
+#[derive(Debug, Serialize)]
+pub struct SetBalanceRequest {
+    /// Balance in stored units (1 display unit = 10^10 stored units)
+    pub balance: i64,
+}
+
+/// Set balance response
+#[derive(Debug, Deserialize)]
+pub struct SetBalanceResponse {
+    pub balance: i64,
+    pub display_balance: f64,
+    pub message: String,
+}
+
+/// Adjust balance request body (delta amount, positive = increase, negative = decrease)
+#[derive(Debug, Serialize)]
+pub struct AdjustBalanceRequest {
+    /// Amount in stored units (positive = increase, negative = decrease)
+    pub amount: i64,
+}
+
+/// Adjust balance response
+#[derive(Debug, Deserialize)]
+pub struct AdjustBalanceResponse {
+    pub balance: i64,
+    pub display_balance: f64,
+    pub message: String,
 }

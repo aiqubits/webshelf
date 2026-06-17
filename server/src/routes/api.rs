@@ -5,8 +5,8 @@ use axum::{
 
 use crate::AppState;
 use crate::handlers::api::{
-    change_my_password, create_user, delete_user, get_me, get_user, health_check, list_users,
-    update_user,
+    adjust_balance, change_my_password, create_user, delete_user, get_me, get_user, health_check,
+    list_users, set_balance, update_user,
 };
 use crate::middlewares::require_admin;
 
@@ -18,6 +18,8 @@ pub fn api_routes() -> Router<AppState> {
         .route("/users/{id}", get(get_user))
         .route("/users/{id}", put(update_user))
         .route("/users/{id}", delete(delete_user))
+        .route("/users/{id}/balance", put(set_balance))
+        .route("/users/{id}/balance/adjust", post(adjust_balance))
         .route_layer(axum_middleware::from_fn(require_admin));
 
     // Self-service routes for any authenticated user (no admin role required).

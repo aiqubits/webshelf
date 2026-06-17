@@ -15,6 +15,7 @@ use ui::{
 
 use crate::api::{ErrorContext, humanize_error};
 use crate::auth::AuthState;
+use crate::balance::{BALANCE_SCALE, format_balance};
 use crate::components::{HttpMethod, LogBus, SearchSignal, push_log_err, push_log_ok};
 
 #[derive(Debug, Clone)]
@@ -41,6 +42,7 @@ struct UsersSignals {
     form_email: Signal<String>,
     form_password: Signal<String>,
     form_role: Signal<String>,
+    form_balance: Signal<String>,
     submitting: Signal<bool>,
     form_error: Signal<Option<String>>,
     list_version: Signal<u64>,
@@ -64,6 +66,7 @@ pub fn Users() -> Element {
         form_email: use_signal(String::new),
         form_password: use_signal(String::new),
         form_role: use_signal(|| "user".to_string()),
+        form_balance: use_signal(String::new),
         submitting: use_signal(|| false),
         form_error: use_signal(|| Option::<String>::None),
         list_version,
@@ -267,6 +270,7 @@ fn row_element(
     let email = u.email.clone();
     let role = u.role.clone();
     let created = u.created_at;
+    let balance = u.balance;
 
     let is_system = role == "system";
     let is_self = u.id == current_user_id;
@@ -277,7 +281,7 @@ fn row_element(
     let can_delete = can_edit && !is_self;
 
     let u_for_edit = u.clone();
-    let u_for_delete = u;
+    let u_for_delete = u.clone();
     let mut s_edit = signals;
     let mut s_delete = signals;
     let edit_handler = move |_: MouseEvent| {
@@ -285,6 +289,7 @@ fn row_element(
         s_edit.form_email.set(u_for_edit.email.clone());
         s_edit.form_password.set(String::new());
         s_edit.form_role.set(u_for_edit.role.clone());
+        s_edit.form_balance.set(String::new());
         s_edit.form_error.set(None);
         s_edit.editing_user.set(Some(u_for_edit.clone()));
         s_edit.modal_kind.set(ModalKind::Edit);
@@ -308,6 +313,7 @@ fn row_element(
                     Badge { variant: BadgeVariant::User, "普通用户" }
                 }
             }
+            td { class: "ws-table__mono ws-table__align--right", "{format_balance(balance)}" }
             td { class: "ws-table__mono", "{format_dt(&created)}" }
             td {
                 if is_system {
@@ -357,8 +363,102 @@ fn close_all(mut signals: UsersSignals) {
     signals.form_email.set(String::new());
     signals.form_password.set(String::new());
     signals.form_role.set("user".to_string());
+    signals.form_balance.set(String::new());
     signals.submitting.set(false);
     signals.form_error.set(None);
+}
+
+/// Create a balance adjustment handler closure.
+///
+/// `multiplier` controls direction: `1` = increase, `-1` = decrease.
+fn make_adjust_handler(
+    mut signals: UsersSignals,
+    client: client_api::Client,
+    log_bus: LogBus,
+    auth: AuthState,
+    nav: Navigator,
+    multiplier: i64,
+) -> impl FnMut(MouseEvent) {
+    move |_: MouseEvent| {
+        if *signals.submitting.read() {
+            return;
+        }
+        let Some(u) = signals.editing_user.cloned() else {
+            return;
+        };
+        let target_id = u.id.clone();
+        let text = signals.form_balance.cloned();
+        if text.trim().is_empty() {
+            signals.form_error.set(Some("请输入调整金额".into()));
+            return;
+        }
+        let display: f64 = match text.parse() {
+            Ok(v) => v,
+            Err(_) => {
+                signals
+                    .form_error
+                    .set(Some("金额格式无效，请输入数字 (如 0.50)".into()));
+                return;
+            }
+        };
+        if display <= 0.0 {
+            signals.form_error.set(Some("金额必须大于 0".into()));
+            return;
+        }
+        // Reject non-finite values (NaN, infinity) that can bypass the >0 check
+        if !display.is_finite() {
+            signals
+                .form_error
+                .set(Some("金额格式无效，请输入数字 (如 0.50)".into()));
+            return;
+        }
+        // Protect against i64 overflow: display * BALANCE_SCALE must fit in i64
+        if display > 1_000_000.0 {
+            signals
+                .form_error
+                .set(Some("金额超出允许范围，最大 1,000,000".into()));
+            return;
+        }
+        let stored = (display * BALANCE_SCALE as f64).round() as i64 * multiplier;
+        signals.submitting.set(true);
+        signals.form_error.set(None);
+        let mut s_async = signals;
+        let c_async = client.clone();
+        let b_async = log_bus;
+        let a_async = auth.clone();
+        spawn(async move {
+            let res = c_async.adjust_balance(target_id.clone(), stored).await;
+            s_async.submitting.set(false);
+            match res {
+                Ok(resp) => {
+                    push_log_ok(
+                        b_async,
+                        HttpMethod::Post,
+                        &format!("/api/users/{}/balance/adjust", target_id),
+                    );
+                    if let Some(ref mut u) = *s_async.editing_user.write() {
+                        u.balance = resp.balance;
+                    }
+                    s_async.form_balance.set(String::new());
+                    s_async.list_version.with_mut(|v| *v += 1);
+                }
+                Err(err) => {
+                    if crate::api::handle_unauth(&err, a_async, nav, b_async) {
+                        return;
+                    }
+                    push_log_err(
+                        b_async,
+                        HttpMethod::Post,
+                        &format!("/api/users/{}/balance/adjust", target_id),
+                        &err,
+                    );
+                    s_async
+                        .form_error
+                        .set(Some(humanize_error(&err, ErrorContext::UserManagement)));
+                }
+            }
+        });
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -571,6 +671,9 @@ fn render_form_modal(
     let mut signals_for_submit = signals;
     // Admin 不能修改 role，clone 一份供闭包使用（current_role 在之后 JSX 中还有引用）
     let current_role_for_submit = current_role.clone();
+    // Clone auth and client before on_submit moves them; originals used by balance adjustment closures
+    let auth_for_submit = auth.clone();
+    let client_for_submit = client.clone();
     let on_submit = move |_: MouseEvent| {
         // 防止快速双击触发两次 spawn
         if *signals_for_submit.submitting.read() {
@@ -611,10 +714,10 @@ fn render_form_modal(
                 .set(Some("密码不能为空".into()));
             return;
         }
-        let client_async = client.clone();
+        let client_async = client_for_submit.clone();
         let bus_async = log_bus;
         let mut s_async = signals_for_submit;
-        let auth_async = auth.clone();
+        let auth_async = auth_for_submit.clone();
         signals_for_submit.submitting.set(true);
         signals_for_submit.form_error.set(None);
         // Admin 不能修改 role，不发送该字段；仅 system 可以
@@ -702,6 +805,18 @@ fn render_form_modal(
     };
 
     let role_now = signals.form_role.cloned();
+
+    // Balance adjustment: visible in Edit mode when the actor has permission
+    let can_adjust = editing
+        .as_ref()
+        .map(|u| {
+            (current_role == "system" && u.role != "system")
+                || (current_role == "admin" && u.role == "user")
+        })
+        .unwrap_or(false);
+
+    let on_increase = make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, 1);
+    let on_decrease = make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, -1);
 
     rsx! {
         Modal {
@@ -792,6 +907,43 @@ fn render_form_modal(
                     onclick: on_submit,
                     "{submit_label}"
                 }
+                // 余额调整：编辑模式且当前用户有权限时显示
+                if kind == ModalKind::Edit && can_adjust {
+                    if let Some(u) = editing.as_ref() {
+                        div { class: "ws-form-field",
+                            hr {}
+                            div { class: "ws-form-label", "余额调整" }
+                            p { class: "ws-form-description",
+                                "当前余额: "
+                                strong { "{format_balance(u.balance)}" }
+                            }
+                            TextInput {
+                                label: "调整金额".to_string(),
+                                placeholder: Some("例如 0.50".to_string()),
+                                value: signals.form_balance,
+                                input_type: InputType::Text,
+                                required: false,
+                                disabled: submitting,
+                            }
+                            div { class: "ws-form-pill-group",
+                                button {
+                                    class: "ws-btn ws-btn--primary ws-btn--pill",
+                                    r#type: "button",
+                                    disabled: submitting,
+                                    onclick: on_increase,
+                                    "增加余额"
+                                }
+                                button {
+                                    class: "ws-btn ws-btn--primary ws-btn--pill",
+                                    r#type: "button",
+                                    disabled: submitting,
+                                    onclick: on_decrease,
+                                    "减少余额"
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
     }
@@ -803,8 +955,9 @@ fn build_columns() -> Vec<Column> {
         Column::new("账户身份").align(Align::Left),
         Column::new("安全邮箱").align(Align::Left),
         Column::new("授权标签").align(Align::Left),
+        Column::new("余额").width("w-24").align(Align::Right),
         Column::new("实例孵化时间").width("w-40").align(Align::Left),
-        Column::new("操作").width("w-32").align(Align::Center),
+        Column::new("操作").width("w-44").align(Align::Center),
     ]
 }
 

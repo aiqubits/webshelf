@@ -63,6 +63,10 @@ pub struct Model {
     /// Failed password-reset attempts counter (brute-force protection)
     #[sea_orm(default_value = 0)]
     pub password_reset_failed_attempts: i32,
+
+    /// User balance (stored as big value, 1 display unit = 10^10 stored units)
+    #[sea_orm(default_value = 0)]
+    pub balance: i64,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -101,6 +105,8 @@ pub struct UserResponse {
     /// Internal token version counter — skipped in external API responses.
     #[serde(skip)]
     pub token_version: i32,
+    /// User balance (stored as big value)
+    pub balance: i64,
 }
 
 impl From<Model> for UserResponse {
@@ -114,6 +120,7 @@ impl From<Model> for UserResponse {
             created_at: model.created_at,
             updated_at: model.updated_at,
             token_version: model.token_version,
+            balance: model.balance,
         }
     }
 }
@@ -146,6 +153,7 @@ mod tests {
             password_reset_expires_at: None,
             password_reset_sent_at: None,
             password_reset_failed_attempts: 0,
+            balance: 0,
         };
 
         let response = UserResponse::from(model.clone());
@@ -211,6 +219,7 @@ mod tests {
             created_at: now,
             updated_at: now,
             token_version: 1,
+            balance: 500,
         };
 
         let json = serde_json::to_string(&response).unwrap();
@@ -219,5 +228,7 @@ mod tests {
         assert!(json.contains("user"));
         // token_version is intentionally skipped from external API responses
         assert!(!json.contains("token_version"));
+        // balance should be present in API responses
+        assert!(json.contains("balance"));
     }
 }
