@@ -147,8 +147,7 @@
   gap: 4px;
 }
 
-.ws-sidebar__group-caption,
-.ws-sidebar__group-caption-row > .ws-sidebar__group-caption {
+.ws-sidebar__group-caption {
   font-family: var(--font-family);
   font-size: 11px;
   font-weight: 700;
@@ -158,6 +157,11 @@
   color: var(--color-text-muted);
   padding: 0 12px;
   margin-bottom: 8px;
+}
+
+.ws-sidebar__group-caption-row > .ws-sidebar__group-caption {
+  padding: 0;
+  margin-bottom: 0;
 }
 
 .ws-sidebar__group-caption-row {

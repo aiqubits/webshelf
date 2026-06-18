@@ -10,7 +10,7 @@ pub struct SearchSignal(pub Signal<String>);
 
 use crate::Route;
 use crate::auth::AuthState;
-use crate::components::TokenExpiryGuard;
+use crate::components::{ConfirmDialog, TokenExpiryGuard};
 
 /// 将 `AppShell` + `Sidebar` + `TopHeader` + `Outlet<Route>` 装配在一起的 web 专用布局。
 ///
@@ -23,6 +23,9 @@ pub fn AppShellLayout() -> Element {
     use_context_provider(|| SearchSignal(search_value));
     let nav = use_navigator();
     let auth = use_context::<AuthState>();
+
+    // 登出确认弹窗状态
+    let mut show_logout_confirm = use_signal(|| false);
 
     let route = use_route::<Route>();
     let active_nav = match route {
@@ -65,21 +68,34 @@ pub fn AppShellLayout() -> Element {
                     search_value,
                     user_name,
                     user_email,
-                    on_user_click: move |_| {
+                    on_settings_click: move |_| {
                         nav.push(Route::Settings {});
                     },
                     on_logout: move |_| {
-                        let mut auth_async = auth.clone();
-                        let nav_async = nav;
-                        spawn(async move {
-                            auth_async.logout_async().await;
-                            nav_async.replace(Route::Auth {});
-                        });
+                        show_logout_confirm.set(true);
                     },
                 }
             },
             Outlet::<Route> {}
             TokenExpiryGuard {}
+
+            // 登出确认弹窗
+            ConfirmDialog {
+                open: *show_logout_confirm.read(),
+                title: "确认登出".to_string(),
+                message: "确定要退出当前账号吗？".to_string(),
+                danger: true,
+                on_confirm: move |_| {
+                    let mut auth_async = auth.clone();
+                    let nav_async = nav;
+                    spawn(async move {
+                        auth_async.logout_async().await;
+                        nav_async.replace(Route::LoginLanding {});
+                    });
+                    show_logout_confirm.set(false);
+                },
+                on_cancel: move |_| show_logout_confirm.set(false),
+            }
         }
     }
 }

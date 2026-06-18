@@ -25,7 +25,7 @@ pub fn RequireAdmin() -> Element {
         let user = auth.user.cloned();
         match user {
             None => {
-                let _ = nav.replace(Route::Auth {});
+                let _ = nav.replace(Route::LoginLanding {});
             }
             Some(u) if !u.is_admin() => {
                 let _ = nav.replace(Route::Dashboard {});
@@ -35,7 +35,9 @@ pub fn RequireAdmin() -> Element {
     });
 
     if authorized {
-        rsx! { Outlet::<Route> {} }
+        rsx! {
+            Outlet::<Route> {}
+        }
     } else {
         rsx! {}
     }

@@ -1,196 +1,41 @@
-//! Auth 视图 —— 登录 / 注册。
+//! Auth 视图 —— 兼容旧路由 `/auth`。
 //!
-//! 接入 `AuthState::login` / `AuthState::register`，
-//! 成功后写入 LogBus + 跳转 `/`。
+//! 直接重定向到 `LoginLanding`（`/`），不再包含冗余的登录/注册表单逻辑。
+//! 登录功能已统一由 `LoginLanding` 提供。
 
 use dioxus::prelude::*;
-use ui::{AuthForm, AuthMode, AuthPayload};
 
 use crate::Route;
-use crate::api::{ErrorContext, humanize_error};
-use crate::auth::{AuthState, RegisterOutcome};
-use crate::components::{HttpMethod, LogBus, push_log_result};
+use crate::auth::AuthState;
 
-/// 提交表单后的导航动作。Login 成功与 Register 且 `email_verified=true`
-/// 都走"无动作"路径（依赖 `auth.user` 变化的 use_effect 跳 `/`）。
-enum SubmitAction {
-    Nothing,
-    NavigateToVerify { email: String },
-}
-
+/// Auth 视图 —— 兼容旧路由 `/auth`。
+///
+/// 直接重定向到 `LoginLanding`（`/`），不再包含冗余的登录/注册表单逻辑。
+/// 登录功能已统一由 `LoginLanding` 提供。
 #[component]
 pub fn Auth() -> Element {
-    let auth = use_context::<AuthState>();
-    let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
+    let auth = use_context::<AuthState>();
 
-    // 进入登录/注册页时清空 pending 残留：
-    // 1. 避免 /verify-email 与 /auth 双向跳转时密码错位
-    // 2. 用户主动放弃验证流程时立即清空
-    let mut auth_for_clear = auth.clone();
-    use_effect(move || {
-        auth_for_clear.clear_pending_registration();
-    });
-
-    // 会话恢复已上移至 App 组件 (main.rs)，此处不再重复触发——
-    // 避免“记住登录”后直接访问受保护路由 (e.g. /users) 表现未登录的 BUG。
-    // 此处仅检查初始化状态以避免闪现登录表单。
+    // 等待 AuthState 初始化完成，避免记住登录用户首屏被误判为未登录
     if !*auth.initialized.read() {
         return rsx! {
             Fragment {}
         };
     }
 
-    // 已登录则直接跳到 dashboard
-    let authenticated_at_render = auth.is_authenticated();
-    let auth_for_effect = auth.clone();
+    let authenticated = auth.is_authenticated();
+
     use_effect(move || {
-        if auth_for_effect.is_authenticated() {
+        if authenticated {
             nav.replace(Route::Dashboard {});
+        } else {
+            nav.replace(Route::LoginLanding {});
         }
-    });
-
-    // 渲染时前置判断：已登录时不渲染表单，消除首帧闪现
-    if authenticated_at_render {
-        return rsx! {
-            Fragment {}
-        };
-    }
-
-    let mode = use_signal(AuthMode::default);
-    let mut name = use_signal(String::new);
-    let mut email = use_signal(String::new);
-    let mut password = use_signal(String::new);
-    let mut password_confirm = use_signal(String::new);
-    let remember = use_signal(|| false);
-    let mut loading = use_signal(|| false);
-    let mut error_msg = use_signal(|| Option::<String>::None);
-
-    // 每次切换登录 / 注册模式时清空表单与状态，避免跨模式残留。
-    // mode() 调用建立信号追踪，仅 mode 变化时触发 effect；
-    // .set() 不产生订阅，因此不会意外清空用户输入。
-    use_effect(move || {
-        let _ = mode();
-        name.set(String::new());
-        email.set(String::new());
-        password.set(String::new());
-        password_confirm.set(String::new());
-        error_msg.set(None);
-        // 中断前一个模式可能尚在执行中的异步请求，
-        // 避免用户在 Register 页面看到 Login 的错误信息。
-        loading.set(false);
     });
 
     rsx! {
-        div { class: "ws-auth-view",
-            AuthForm {
-                mode,
-                name,
-                email,
-                password,
-                password_confirm,
-                remember: Some(remember),
-                loading: *loading.read(),
-                error: error_msg.read().clone(),
-                on_forgot: move |_: MouseEvent| {
-                    nav.push(Route::ForgotPassword {});
-                },
-                on_submit: move |payload: AuthPayload| {
-                    if *loading.read() {
-                        return;
-                    }
-                    // 前端表单校验 —— 避免空字段浪费网络请求和服务器资源。
-                    if payload.email.trim().is_empty() {
-                        error_msg.set(Some("邮箱地址不能为空".into()));
-                        return;
-                    }
-                    if payload.password.is_empty() {
-                        error_msg.set(Some("密码不能为空".into()));
-                        return;
-                    }
-                    if payload.mode == AuthMode::Register {
-                        if payload.name.trim().is_empty() {
-                            error_msg.set(Some("用户名不能为空".into()));
-                            return;
-                        }
-                        if payload.password != payload.password_confirm {
-                            error_msg.set(Some("两次输入的密码不一致".into()));
-                            return;
-                        }
-                    }
-                    let payload_email = payload.email.clone();
-                    let payload_password = payload.password.clone();
-                    let payload_name = payload.name.clone();
-                    let payload_mode = payload.mode;
-                    let payload_remember = payload.remember;
+        Fragment {}
 
-                    // 复制 Context 句柄供 async 块使用（EventHandler 闭包必须是 FnMut）。
-                    let mut auth_async = auth.clone();
-                    let bus_async = log_bus;
-                    let nav_async = nav;
-
-                    loading.set(true);
-                    error_msg.set(None);
-
-                    let mode_check = mode;
-
-                    spawn(async move {
-                        let result: Result<SubmitAction, client_api::ClientError> = match payload_mode {
-                            AuthMode::Login => {
-                                let path = "/api/public/auth/login".to_string();
-                                let res = auth_async
-                                    .login(&payload_email, &payload_password, payload_remember)
-                                    .await;
-                                // 仅当表单模式未切换时才记录日志，避免过期请求污染 Toast/Console
-                                if *mode_check.read() == AuthMode::Login {
-                                    push_log_result(bus_async, HttpMethod::Post, &path, &res);
-                                }
-                                res.map(|_| SubmitAction::Nothing)
-                            }
-                            AuthMode::Register => {
-                                let path = "/api/public/auth/register".to_string();
-                                let res = auth_async
-                                    .register(
-                                        &payload_email,
-                                        &payload_password,
-                                        &payload_name,
-                                        payload_remember,
-                                    )
-                                    .await;
-                                if *mode_check.read() == AuthMode::Register {
-                                    push_log_result(bus_async, HttpMethod::Post, &path, &res);
-                                }
-                                // 将 RegisterOutcome 翻译为视图层的导航动作
-                                res.map(|outcome| match outcome {
-                                    RegisterOutcome::LoggedIn => SubmitAction::Nothing,
-                                    RegisterOutcome::NeedsVerification { email } => {
-                                        SubmitAction::NavigateToVerify { email }
-                                    }
-                                })
-                            }
-                        };
-
-                        loading.set(false);
-
-                        match result {
-                            Ok(SubmitAction::Nothing) => {
-                                // 导航由 auth.user 变化触发的 use_effect 统一处理，避免双重导航
-                            }
-                            Ok(SubmitAction::NavigateToVerify { email }) => {
-                                // 跳转到验证码页面；密码已在 AuthState::register 中暂存
-                                nav_async.push(Route::VerifyEmail { email });
-                            }
-                            Err(err) => {
-                                // 仅当表单模式未切换时才展示错误信息，
-                                // 避免 Login 的报错污染已切换到 Register 的页面。
-                                if *mode_check.read() == payload_mode {
-                                    error_msg.set(Some(humanize_error(&err, ErrorContext::Auth)));
-                                }
-                            }
-                        }
-                    });
-                },
-            }
-        }
     }
 }

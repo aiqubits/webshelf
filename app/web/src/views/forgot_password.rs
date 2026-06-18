@@ -124,7 +124,7 @@ pub fn ForgotPassword() -> Element {
                         href: "#",
                         onclick: move |e| {
                             e.prevent_default();
-                            nav.push(Route::Auth {});
+                            nav.push(Route::LoginLanding {});
                         },
                         "← 返回登录"
                     }

@@ -1,9 +1,10 @@
 use dioxus::prelude::*;
 
 use auth::AuthState;
-use components::{AppShellLayout, LogBus};
+use components::{AppShellLayout, LogBus, RequireAuth};
 use views::{
-    Auth, Dashboard, ForgotPassword, NotFound, ResetPassword, Settings, Users, VerifyEmail,
+    Auth, Dashboard, ForgotPassword, LoginLanding, NotFound, ResetPassword, Settings, Users,
+    VerifyEmail,
 };
 
 mod api;
@@ -14,24 +15,34 @@ mod views;
 #[derive(Debug, Clone, Routable, PartialEq)]
 #[rustfmt::skip]
 enum Route {
-    #[layout(AppShellLayout)]
-        #[route("/")]
-        Dashboard {},
-        #[route("/settings")]
-        Settings {},
-        #[layout(crate::components::RequireAdmin)]
-            #[route("/users")]
-            Users {},
-        #[end_layout]
+    // ─ 公开路由（无需认证）──
+    #[route("/")]
+    LoginLanding {},
     #[route("/auth")]
     Auth {},
-    #[route("/verify-email/:email")]
-    VerifyEmail { email: String },
     #[route("/forgot-password")]
     ForgotPassword {},
     #[route("/reset-password")]
     #[route("/reset-password/:email")]
     ResetPassword { email: Option<String> },
+    #[route("/verify-email/:email")]
+    VerifyEmail { email: String },
+
+    // ── 受保护路由（需登录）──
+    #[layout(RequireAuth)]
+        #[layout(AppShellLayout)]
+            #[route("/dashboard")]
+            Dashboard {},
+            #[route("/settings")]
+            Settings {},
+            #[layout(crate::components::RequireAdmin)]
+                #[route("/users")]
+                Users {},
+            #[end_layout]
+        #[end_layout]
+    #[end_layout]
+
+    // ── 404 兜底 ──
     #[route("/:..route")]
     NotFound { route: Vec<String> },
 }

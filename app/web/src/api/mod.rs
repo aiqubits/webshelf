@@ -127,7 +127,7 @@ pub async fn handle_unauth(
         // 401 意味着 JWT 已被服务端拒绝 —— 通过 logout 端点同步撤销
         // refresh token，避免 refresh cookie 仍可用来换发新 JWT 的悬空会话。
         auth.logout_async().await;
-        nav.replace(Route::Auth {});
+        nav.replace(Route::LoginLanding {});
         true
     } else if matches!(err, ClientError::Other(403, _)) {
         log_bus.push(

@@ -215,10 +215,10 @@ pub fn Dashboard() -> Element {
                 div { class: "ws-hero__body",
                     div { class: "ws-hero__text",
                         h1 { class: "ws-hero__title",
-                            "欢迎来到 WebShelf Rust 全栈脚手架系统 🚀"
+                            "欢迎来到 WebShelf Rust 全栈管理系统 🚀"
                         }
                         p { class: "ws-hero__subtitle",
-                            "你好 {user_name}！本控制台演示 axum + sea-orm + Dioxus 全栈链路，"
+                            "你好 {user_name}！"
                             "点击右侧按钮发起一次真实的健康检查请求。"
                         }
                     }

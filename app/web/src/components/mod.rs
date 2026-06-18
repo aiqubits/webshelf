@@ -9,6 +9,7 @@ mod app_shell_layout;
 mod confirm_dialog;
 mod log_bus;
 mod require_admin;
+mod require_auth;
 mod token_expiry_guard;
 
 pub use app_shell_layout::{AppShellLayout, SearchSignal};
@@ -18,4 +19,5 @@ pub use log_bus::{
     push_log_result,
 };
 pub use require_admin::RequireAdmin;
+pub use require_auth::RequireAuth;
 pub use token_expiry_guard::TokenExpiryGuard;

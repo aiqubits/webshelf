@@ -73,7 +73,7 @@ pub fn VerifyEmail(email: String) -> Element {
         if !matches {
             let mut auth_clone = auth_for_dirty_guard.clone();
             auth_clone.clear_pending_registration();
-            nav.replace(Route::Auth {});
+            nav.replace(Route::LoginLanding {});
         }
     });
 
@@ -103,7 +103,9 @@ pub fn VerifyEmail(email: String) -> Element {
         .unwrap_or(false);
 
     if authenticated_at_render || !pending_email_matches {
-        return rsx! { Fragment {} };
+        return rsx! {
+            Fragment {}
+        };
     }
 
     // ── 提交验证码 ────────────────────────────────────────────────
@@ -232,7 +234,7 @@ pub fn VerifyEmail(email: String) -> Element {
     let mut auth_for_back = auth.clone();
     let mut on_back = move || {
         auth_for_back.clear_pending_registration();
-        nav.replace(Route::Auth {});
+        nav.replace(Route::LoginLanding {});
     };
 
     let resend_label = if *countdown.read() > 0 {

@@ -38,7 +38,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
     let auth_for_auth_guard = auth.clone();
     use_effect(move || {
         if *auth_for_auth_guard.initialized.read() && auth_for_auth_guard.is_authenticated() {
-            nav.replace(Route::Settings {});
+            nav.replace(Route::Dashboard {});
         }
     });
 
@@ -184,7 +184,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         href: "#",
                         onclick: move |e| {
                             e.prevent_default();
-                            nav.push(Route::Auth {});
+                            nav.push(Route::LoginLanding {});
                         },
                         "← 返回登录"
                     }

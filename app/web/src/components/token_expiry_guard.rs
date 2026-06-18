@@ -80,7 +80,7 @@ async fn fire_expiry(mut auth: AuthState, nav: Navigator, mut log_bus: LogBus) {
 
     // 刷新失败，执行登出（撤销 refresh token + 清理本地状态）
     auth.logout_async().await;
-    nav.replace(Route::Auth {});
+    nav.replace(Route::LoginLanding {});
     log_bus.push(
         HttpMethod::Post,
         "/auth/logout (token expired, refresh failed)".to_string(),

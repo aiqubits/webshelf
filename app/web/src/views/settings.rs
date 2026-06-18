@@ -34,7 +34,7 @@ pub fn Settings() -> Element {
     let auth_for_guard = auth.clone();
     use_effect(move || {
         if *auth_for_guard.initialized.read() && !auth_for_guard.is_authenticated() {
-            nav.replace(Route::Auth {});
+            nav.replace(Route::LoginLanding {});
         }
         // 未初始化时不跳转，等待 restore 完成
     });
@@ -249,7 +249,7 @@ pub fn Settings() -> Element {
                                 "200".to_string(),
                                 LogKind::Important,
                             );
-                            nav_async.replace(Route::Auth {});
+                            nav_async.replace(Route::LoginLanding {});
                         });
                     },
                     on_cancel: move |_| show_logout_confirm.set(false),

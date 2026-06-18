@@ -1,0 +1,210 @@
+/* WebShelf — LoginLanding 登录入口页 */
+
+.ws-landing {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* ── 左侧：表单区域 ── */
+.ws-landing__left {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 32px;
+  position: relative;
+}
+
+.ws-landing__brand {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.ws-landing__brand-title {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 32px;
+  font-weight: 700;
+  line-height: 40px;
+  background: var(--color-brand-gradient);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  letter-spacing: -0.02em;
+}
+
+.ws-landing__brand-subtitle {
+  margin: 8px 0 0;
+  font-family: var(--font-family);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  color: var(--color-text-muted);
+}
+
+/* ── 右侧：信息卡片 ── */
+.ws-landing__right {
+  width: 520px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 48px 40px;
+  background: linear-gradient(135deg, rgba(99, 102, 241, 0.03) 0%, rgba(168, 85, 247, 0.03) 100%);
+  border-left: 1px solid var(--color-border-subtle);
+}
+
+.ws-landing__info-card {
+  width: 100%;
+  max-width: 400px;
+  display: flex;
+  flex-direction: column;
+  gap: 32px;
+}
+
+/* ── 二维码区域 ── */
+.ws-landing__qr-section {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.ws-landing__qr-placeholder {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 20px;
+  padding: 40px 32px;
+  background: var(--glass-panel-bg);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-3xl);
+  box-shadow: var(--shadow-sm);
+  text-align: center;
+}
+
+.ws-landing__qr-img {
+  width: 180px;
+  height: 180px;
+  object-fit: contain;
+  border-radius: var(--radius-2xl);
+  box-shadow: var(--shadow-sm);
+  background: #fff;
+  padding: 8px;
+}
+
+.ws-landing__qr-label {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 24px;
+  color: var(--color-text-primary);
+}
+
+.ws-landing__qr-hint {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  color: var(--color-text-muted);
+}
+
+/* ── 分隔线 ── */
+.ws-landing__divider {
+  height: 1px;
+  background: var(--color-border-subtle);
+  margin: 0 8px;
+}
+
+/* ── GitHub 链接 ── */
+.ws-landing__github {
+  display: flex;
+  justify-content: center;
+}
+
+.ws-landing__github-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 20px;
+  background: var(--glass-panel-bg);
+  backdrop-filter: var(--glass-panel-blur);
+  -webkit-backdrop-filter: var(--glass-panel-blur);
+  border: 1px solid var(--color-border-soft);
+  border-radius: var(--radius-xl);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: none;
+  transition: all 200ms ease;
+}
+
+.ws-landing__github-link:hover {
+  color: var(--color-text-primary);
+  border-color: rgba(99, 102, 241, 0.3);
+  background: rgba(255, 255, 255, 0.85);
+  box-shadow: var(--shadow-sm);
+}
+
+.ws-landing__github-link svg {
+  width: 20px;
+  height: 20px;
+  color: var(--color-text-primary);
+}
+
+/* ── 版权声明 ── */
+.ws-landing__copyright {
+  text-align: center;
+  padding-top: 12px;
+}
+
+.ws-landing__copyright-text {
+  margin: 0;
+  font-family: var(--font-family);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 18px;
+  color: var(--color-text-muted);
+}
+
+.ws-landing__copyright-sub {
+  margin: 6px 0 0;
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+  color: var(--color-text-muted-soft);
+}
+
+/* ── 响应式：窄屏时右侧隐藏 ── */
+@media (max-width: 900px) {
+  .ws-landing__right {
+    display: none;
+  }
+
+  .ws-landing__left {
+    padding: 32px 24px;
+  }
+}
+
+@media (max-width: 480px) {
+  .ws-landing__left {
+    padding: 24px 16px;
+  }
+
+  .ws-landing__brand-title {
+    font-size: 24px;
+    line-height: 32px;
+  }
+
+  .ws-landing__brand-subtitle {
+    font-size: 12px;
+  }
+}
