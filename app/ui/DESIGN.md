@@ -737,14 +737,14 @@ pub fn AppShell(sidebar: Element, children: Element) -> Element
 - Logo 区域：高 80px（`h-20`），`px-6`，底部 `border-b border-slate-100`
   - 图标容器：`w-9 h-9 rounded-xl bg-gradient-to-tr from-indigo-500 to-purple-500`，内含 Font Awesome `fa-layer-group` 白色图标，`shadow-md shadow-indigo-200`
   - 标题：`{typography.heading-lg}`，`bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent`（渐变色文字），文字 "WebShelf Admin"
-  - 副标题：`{typography.fine-print}`，`{colors.text-muted}`，`tracking-wider uppercase`，文字 "Rust Fullstack Scaffold Framework"
+  - 副标题：`{typography.fine-print}`，`{colors.text-muted}`，`tracking-wider uppercase`，文字 "Rust Fullstack"
 - 导航分组标签：`{typography.caption}`，`{colors.text-muted}`，`px-3 mb-2`
 - 导航项：
   - 默认态：`{typography.nav-item}`，`{colors.text-secondary}`，`px-3 py-2.5 rounded-xl`，`hover:bg-slate-50 hover:text-slate-900`
   - 激活态：`bg-indigo-50/60` + `{colors.brand-indigo-deep}`（不要全背景反色）
 - 导航结构（对齐 prototype.html）：
   ```
-  [核心系统监控]              ← caption (uppercase)
+  [系统监控]              ← caption (uppercase)
     · 控制中心 (/health)      ← nav-item
   [数据管理]  [admin_layer]   ← caption + amber-compact badge
     · 用户管理 (/users)       ← nav-item

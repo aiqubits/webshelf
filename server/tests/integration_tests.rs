@@ -169,8 +169,12 @@ async fn register_and_login(app: &Router, email: &str) -> String {
         .await
         .unwrap();
 
-    assert_eq!(login_response.status(), StatusCode::OK);
+    let status = login_response.status();
     let login_body = body_to_json(login_response.into_body()).await;
+    if status != StatusCode::OK {
+        eprintln!("Login failed with status {}: {:?}", status, login_body);
+    }
+    assert_eq!(status, StatusCode::OK);
     login_body["token"].as_str().unwrap().to_string()
 }
 
@@ -1590,8 +1594,12 @@ async fn test_auto_verified_user_can_login() {
         .await
         .unwrap();
 
-    assert_eq!(response.status(), StatusCode::OK);
+    let status = response.status();
     let body = body_to_json(response.into_body()).await;
+    if status != StatusCode::OK {
+        eprintln!("Login failed with status {}: {:?}", status, body);
+    }
+    assert_eq!(status, StatusCode::OK);
     assert!(body["token"].is_string());
     assert_eq!(body["token_type"], "Bearer");
 }

@@ -1,4 +1,15 @@
 //! Auth 状态管理 —— 持有 `Client` 与当前用户信号，对外暴露 login / register / logout。
+//!
+//! ## Token 存储策略
+//!
+//! JWT 和 refresh token 由后端通过 httpOnly cookie 下发（`webshelf_jwt`、
+//! `webshelf_refresh`），浏览器自动管理，前端 JS 无法读取。
+//!
+//! 前端仅维护一个可读的 `webshelf_exp` cookie（存储 JWT 过期时间 Unix 秒），
+//! 用于 UI 层的过期检测和自动刷新决策。
+//!
+//! Client 的 `auth_token` 仍保留用于 Authorization 头（非浏览器场景兼容），
+//! 但浏览器请求主要通过 httpOnly cookie 认证。
 
 use client_api::{Client, ClientConfig, ClientError, LoginResponse, RegisterResponse};
 use dioxus::prelude::*;
@@ -9,15 +20,6 @@ use crate::auth::decode_payload;
 use crate::components::now_unix_secs;
 
 /// 注册流程的结果。
-///
-/// 服务端的 `POST /register` 会返回 `email_verified: bool`：
-/// - `true`（SMTP 未配置 / 发送失败兜底）→ 用户已具备登录条件，前端自动 login 即可。
-/// - `false`（SMTP 已配置）→ 用户必须先通过邮件验证才能登录，
-///   前端需跳转验证页并暂存密码以便验证后自动登录。
-///
-/// `LoggedIn` 是单元变体而非携带 `LoginResponse` 的元组变体：
-/// 实际的 `LoginResponse` 已被 `AuthState::login()` 内部消费（设置 token、
-/// 拉取用户资料），视图层只需知道"已登录"这一个信号即可触发 `use_effect` 跳 `/`。
 #[derive(Debug, Clone)]
 pub enum RegisterOutcome {
     /// 服务端已自动验证，注册完毕即可登录。
@@ -26,17 +28,7 @@ pub enum RegisterOutcome {
     NeedsVerification { email: String },
 }
 
-/// 注册期间的临时会话状态 —— 仅内存，不写 localStorage。
-///
-/// 用于在 `/auth` → `/verify-email/{email}` → 自动登录之间安全地
-/// 暂存密码以完成"注册成功自动跳转到登录状态"的体验。
-/// 密码在内存中存活约 1-2 分钟（用户输入验证码的时间），随后
-/// verify-email 成功时立即被消费（调用 `login`），不会持久化到磁盘。
-///
-/// **安全警告**：明文密码驻留在 WASM 线性内存中，**同源 JS、DevTools、
-/// heap dump 均可读取**。这是不可跳过的 UX 桥接代价——切勿将本结构
-/// 复用于"记住我"等需要持久化的场景，也勿在任何 `console.log` /
-/// `serde_json::to_string` 中暴露实例。
+/// 注册期间的临时会话状态 —— 仅内存，不写 cookie。
 #[derive(Debug, Clone)]
 pub struct PendingRegistration {
     pub email: String,
@@ -45,9 +37,6 @@ pub struct PendingRegistration {
 }
 
 /// 判定一个 `ClientError` 是否为鉴权失败（401/403）。
-///
-/// 用于会话恢复：`/api/users/me` 收到 401/403 时清空会话而不是接受 JWT payload
-/// 构造占位用户，避免“假登录” UI 状态（Issue #2）。
 fn is_auth_failure(err: &ClientError) -> bool {
     matches!(err, ClientError::Other(401, _) | ClientError::Other(403, _))
 }
@@ -89,12 +78,10 @@ pub struct CurrentUser {
     pub role: String,
     pub name: String,
     pub email: String,
-    /// User balance (stored as big value)
     pub balance: i64,
 }
 
 impl CurrentUser {
-    /// 仅从 JWT 派生 id / role（name / email 占位，等待 /api/users/me 填充）。
     fn from_jwt(payload: &crate::auth::JwtPayload) -> Option<Self> {
         if payload.sub.is_empty() {
             return None;
@@ -108,7 +95,6 @@ impl CurrentUser {
         })
     }
 
-    /// 用真实用户资料填充 name / email。
     fn with_profile(mut self, profile: &client_api::UserResponse) -> Self {
         self.name = profile.name.clone();
         self.email = profile.email.clone();
@@ -135,24 +121,17 @@ fn parse_token(token: &str) -> Option<(crate::auth::JwtPayload, CurrentUser)> {
 /// Auth 全局状态。应在 `App` 组件中创建一次并通过 `use_context_provider` 注入。
 #[derive(Clone)]
 pub struct AuthState {
-    /// 共享的 API 客户端（已登录时携带 token）。
     pub client: Client,
-    /// 当前用户；未登录时为 `None`。
     pub user: Signal<Option<CurrentUser>>,
-    /// token 过期时间（Unix 秒）。`None` 表示未登录。
+    /// JWT 过期时间（Unix 秒）。`None` 表示未登录。
     pub token_expires_at: Signal<Option<u64>>,
-    /// 初始化完成标志：restore_from_storage_async 结束后置 true。
     pub initialized: Signal<bool>,
-    /// 注册期间的临时状态：仅内存，用于在 verify-email 成功后自动登录。
-    /// 不写入 `localStorage` / `sessionStorage`。
     pub pending_registration: Signal<Option<PendingRegistration>>,
+    /// 静默刷新进行中标志——防止并发 refresh 请求。
+    refreshing: Signal<bool>,
 }
 
 impl AuthState {
-    /// 创建新的 `AuthState`（未登录状态）。
-    ///
-    /// 注意：不再在构造时同步恢复 localStorage；改为在 Auth 组件中通过
-    /// `use_effect` 异步调用 `restore_from_storage_async()`，以便获取真实用户资料。
     pub fn new() -> Self {
         let client = make_client().unwrap_or_else(|_| {
             Client::new(ClientConfig::default())
@@ -164,109 +143,218 @@ impl AuthState {
             token_expires_at: Signal::new(None),
             initialized: Signal::new(false),
             pending_registration: Signal::new(None),
+            refreshing: Signal::new(false),
         }
     }
 
-    /// 设置注册临时状态（仅内存）。
     pub fn set_pending_registration(&mut self, pending: PendingRegistration) {
         self.pending_registration.set(Some(pending));
     }
 
-    /// 取出并清空注册临时状态。
-    ///
-    /// 在 verify-email 成功后调用，取出密码用于自动登录。
-    /// `take` 语义保证密码被消费一次后从内存中消失。
     pub fn take_pending_registration(&mut self) -> Option<PendingRegistration> {
         self.pending_registration.write().take()
     }
 
-    /// 仅查看当前 pending 状态（不清空）。
     #[allow(dead_code)]
     pub fn peek_pending_registration(&self) -> Option<PendingRegistration> {
         self.pending_registration.read().clone()
     }
 
-    /// 主动清空注册临时状态。
-    ///
-    /// 调用场景：用户刷新 `/verify-email/{email}` 但密码已不在内存中；
-    /// 用户从 `/auth` 进入新的注册流程以避免脏状态。
     pub fn clear_pending_registration(&mut self) {
         self.pending_registration.set(None);
     }
 
-    /// 从 localStorage 恢复 token 并获取真实用户资料。
+    /// 从 cookie 恢复会话并获取真实用户资料。
     ///
-    /// 流程：读取 token → JWT 解码验证 → 设置 token → 调用 GET /api/users/me → 更新 user。
-    /// 若任一步骤失败（token 缺失/过期/解码失败/API 错误），均视为未登录。
+    /// 流程：读取 `webshelf_exp` cookie 获取过期时间 → 检查是否过期
+    /// → 调用 GET /api/users/me（浏览器自动发送 httpOnly JWT cookie）
+    /// → 更新 user。
+    ///
+    /// 如果 JWT 已过期但 refresh token 有效，尝试静默刷新。
     pub async fn restore_from_storage_async(&mut self) {
-        let Some(token) = crate::auth::load_token() else {
+        let Some(expires_at) = crate::auth::load_token() else {
             self.initialized.set(true);
             return;
         };
-        let Some((payload, _user_placeholder)) = parse_token(&token) else {
-            crate::auth::clear_token();
-            self.initialized.set(true);
-            return;
-        };
-        if now_unix_secs() + JWT_EXPIRY_LEEWAY_SECS >= payload.exp {
-            crate::auth::clear_token();
-            self.initialized.set(true);
-            return;
+
+        let now = now_unix_secs();
+
+        if now + JWT_EXPIRY_LEEWAY_SECS >= expires_at {
+            // Token 已过期，尝试静默刷新
+            if self.try_refresh_async().await {
+                // 刷新成功，try_refresh_async 已更新 token_expires_at 为新值，
+                // 不要再用旧的 expires_at 覆盖它
+            } else {
+                // 刷新失败，清除会话
+                crate::auth::clear_token();
+                self.initialized.set(true);
+                return;
+            }
+        } else {
+            // Token 尚未过期，直接用 cookie 中的过期时间
+            self.token_expires_at.set(Some(expires_at));
         }
-        // Token 有效，先设置 token 使 client 可认证
-        self.client.set_token(token.clone());
-        self.token_expires_at.set(Some(payload.exp));
 
         // 调用 /api/users/me 获取真实用户资料
+        // 浏览器会自动发送 httpOnly JWT cookie，无需手动设置 Authorization 头
         match self.client.get_me().await {
             Ok(profile) => {
-                let user = CurrentUser::from_jwt(&payload).map(|u| u.with_profile(&profile));
+                // 从 cookie 中读取 JWT 来解码 payload 获取 user_id/role
+                // 由于 httpOnly cookie 无法从 JS 读取，我们用 get_me 的响应构造用户
+                let user = Some(CurrentUser {
+                    id: profile.id.to_string(),
+                    role: profile.role.clone(),
+                    name: profile.name.clone(),
+                    email: profile.email.clone(),
+                    balance: profile.balance,
+                });
                 self.user.set(user);
             }
             Err(err) => {
-                // 鉴权失败（401/403）→ 清空会话，强制回到未登录态，
-                // 避免"假登录"：用未通过服务端验证的 JWT payload 构造用户，
-                // 让 UI 误以为已登录但所有后端调用都会被拒（Issue #2）。
                 if is_auth_failure(&err) {
-                    crate::auth::clear_token();
-                    self.client.clear_token();
-                    self.user.set(None);
-                    self.token_expires_at.set(None);
+                    // 尝试刷新
+                    if self.try_refresh_async().await {
+                        // 刷新成功后重试
+                        match self.client.get_me().await {
+                            Ok(profile) => {
+                                let user = Some(CurrentUser {
+                                    id: profile.id.to_string(),
+                                    role: profile.role.clone(),
+                                    name: profile.name.clone(),
+                                    email: profile.email.clone(),
+                                    balance: profile.balance,
+                                });
+                                self.user.set(user);
+                            }
+                            Err(retry_err) => {
+                                if is_auth_failure(&retry_err) {
+                                    // 重试仍然鉴权失败 → 会话真正死亡
+                                    crate::auth::clear_token();
+                                    self.client.clear_token();
+                                    self.user.set(None);
+                                    self.token_expires_at.set(None);
+                                } else {
+                                    // 网络层错误：JWT 已刷新成功，用本地 token 兜底构造用户
+                                    if let Some(token) = self.client.token()
+                                        && let Some((_payload, user)) = parse_token(&token)
+                                    {
+                                        self.user.set(Some(user));
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        crate::auth::clear_token();
+                        self.client.clear_token();
+                        self.user.set(None);
+                        self.token_expires_at.set(None);
+                    }
                 } else {
-                    // 网络/解析/其他错误：保留 JWT 派生的占位用户，
-                    // 至少 id / role 可用，UI 不至于完全空白。
-                    let user = CurrentUser::from_jwt(&payload);
-                    self.user.set(user);
+                    // 网络错误：保留过期时间，UI 至少知道曾经登录过
+                    self.token_expires_at.set(Some(expires_at));
                 }
             }
         }
         self.initialized.set(true);
     }
 
+    /// 尝试静默刷新 JWT。
+    ///
+    /// 调用 `POST /api/public/auth/refresh`，依赖浏览器自动发送
+    /// `webshelf_refresh` httpOnly cookie。
+    ///
+    /// 成功时更新 `token_expires_at` 和 client token。
+    /// 失败时返回 false，调用方应清除会话。
+    ///
+    /// 并发安全：当检测到已有刷新在进行中时，等待其完成并检查结果，
+    /// 而非立即返回 true（避免调用方在 JWT 尚未更新时发出 API 请求）。
+    pub async fn try_refresh_async(&mut self) -> bool {
+        if *self.refreshing.read() {
+            // 另一个刷新正在进行中 —— 等待其完成，避免在 JWT 尚未更新的
+            // 窗口期内向调用方返回 true（会导致调用方发出 401 请求）。
+            // WASM 单线程环境下，sleep 让出执行权给进行中的刷新任务。
+            for _ in 0..60 {
+                client_api::Client::sleep_ms(200).await;
+                if !*self.refreshing.read() {
+                    return self
+                        .token_expires_at
+                        .cloned()
+                        .is_some_and(|exp| now_unix_secs() + JWT_EXPIRY_LEEWAY_SECS < exp);
+                }
+            }
+            // 刷新卡住（超过 12 秒）—— 返回 false 触发登出
+            return false;
+        }
+        self.refreshing.set(true);
+        let result = match self.client.refresh().await {
+            Ok(resp) => {
+                let expires_at = now_unix_secs() + resp.expires_in;
+                self.client.set_token(&resp.token);
+                self.token_expires_at.set(Some(expires_at));
+                crate::auth::save_token(expires_at, resp.refresh_expires_in.max(resp.expires_in));
+                true
+            }
+            Err(err) => {
+                #[cfg(target_arch = "wasm32")]
+                web_sys::console::warn_1(&format!("Silent token refresh failed: {:?}", err).into());
+                let _ = err;
+                false
+            }
+        };
+        self.refreshing.set(false);
+        result
+    }
+
     /// 登录。
     ///
-    /// `remember = true` 时 token 写入 localStorage，下次启动自动恢复；
-    /// `remember = false` 时 token 仅在内存中，刷新即丢。
-    /// 登录成功后调用 GET /api/users/me 获取真实用户资料。
+    /// `remember = true` 时后端签发 30 天 JWT + 90 天 refresh token，
+    /// 均通过 httpOnly cookie 下发；`remember = false` 时签发 1 小时 JWT。
+    /// 前端保存 JWT 过期时间到可读 cookie。
     pub async fn login(
         &mut self,
         email: &str,
         password: &str,
         remember: bool,
     ) -> Result<LoginResponse, ClientError> {
-        let resp = self.client.login(email, password).await?;
-        self.persist_session_async(&resp.token, remember).await;
+        let resp = self.client.login(email, password, remember).await?;
+        let expires_at = now_unix_secs() + resp.expires_in;
+        self.client.set_token(&resp.token);
+        self.token_expires_at.set(Some(expires_at));
+
+        // 保存过期时间到可读 cookie（JWT 本身在 httpOnly cookie 中）
+        // 使用 refresh_expires_in 作为 Max-Age，确保 webshelf_exp 在 refresh token
+        // 有效期内一直存在，前端在 JWT 过期后仍能触发静默刷新。
+        crate::auth::save_token(
+            expires_at,
+            resp.refresh_expires_in.unwrap_or(0).max(resp.expires_in),
+        );
+
+        // 获取真实用户资料
+        match self.client.get_me().await {
+            Ok(profile) => {
+                let user = Some(CurrentUser {
+                    id: profile.id.to_string(),
+                    role: profile.role.clone(),
+                    name: profile.name.clone(),
+                    email: profile.email.clone(),
+                    balance: profile.balance,
+                });
+                self.user.set(user);
+            }
+            Err(err) => {
+                if is_auth_failure(&err) {
+                    self.client.clear_token();
+                    self.user.set(None);
+                    self.token_expires_at.set(None);
+                    crate::auth::clear_token();
+                    return Err(err);
+                }
+            }
+        }
         Ok(resp)
     }
 
     /// 注册。
-    ///
-    /// 根据服务端的 `email_verified` 字段分两条路径：
-    /// - `true`（SMTP 未配置 / 发送失败兜底）：自动调用 `login` 写入会话。
-    /// - `false`（SMTP 已配置）：返回 `NeedsVerification`，由视图层跳转验证页。
-    ///
-    /// 与旧实现的本质差异：旧实现在两种情况下都强制 login，导致 SMTP 已配置时
-    /// 用户卡在"邮箱或密码错误"（`server/src/services/auth.rs:96-102` 拒绝未验证登录）。
     pub async fn register(
         &mut self,
         email: &str,
@@ -274,15 +362,15 @@ impl AuthState {
         name: &str,
         remember: bool,
     ) -> Result<RegisterOutcome, ClientError> {
-        let resp: RegisterResponse = self.client.register(email, password, name).await?;
+        let resp: RegisterResponse = self
+            .client
+            .register(email, password, name, remember)
+            .await?;
 
         if resp.email_verified {
-            // 服务端已自动验证：直接登录复用 login 的 token 持久化逻辑。
-            // LoginResponse 已被 self.login() 内部消费，外部只关心"已登录"信号。
             self.login(email, password, remember).await?;
             Ok(RegisterOutcome::LoggedIn)
         } else {
-            // 需要邮件验证：将密码暂存内存中，验证成功后再自动登录。
             self.set_pending_registration(PendingRegistration {
                 email: email.to_string(),
                 password: password.to_string(),
@@ -296,38 +384,33 @@ impl AuthState {
 
     /// 仅轮转 JWT，不重新拉取用户资料。
     ///
-    /// 用于 `change_password` / `reset_password` 这类「服务端在事务内
-    /// `token_version += 1` 后下发 `new_token`」的场景。`id`/`role` 等用户
-    /// 字段没有变化（密码不算用户字段），因此不需要再次 `GET /api/users/me`，
-    /// 直接原地替换 token 即可。
-    ///
-    /// 如果新 token 解码失败或已过期，视为会话失效并清空——保守起见宁可让
-    /// 用户重新登录，也不要保留一个永远 401 的"假登录"状态。
+    /// 用于 `change_password` / `reset_password` 场景。
     pub fn swap_token(&mut self, new_token: impl Into<String>) {
         let new_token = new_token.into();
         let Some((payload, _user_placeholder)) = parse_token(&new_token) else {
-            // 新 token 格式异常：保守起见，清空会话让用户重新登录。
             self.logout();
             return;
         };
         if now_unix_secs() + JWT_EXPIRY_LEEWAY_SECS >= payload.exp {
-            // 新 token 已过期（不可能但兜底）：同样清空。
             self.logout();
             return;
         }
-        self.client.set_token(new_token.clone());
+        self.client.set_token(new_token);
         self.token_expires_at.set(Some(payload.exp));
-        // 复用 login 的持久化策略：有 remember 就写 localStorage，否则清掉。
-        // 这里的意图是"用户既然主动改了密码，明确处于活跃会话中"，新会话
-        // 沿用旧会话的持久化偏好。
+        // 沿用旧会话的持久化偏好
         if crate::auth::load_token().is_some() {
-            crate::auth::save_token(&new_token);
+            crate::auth::save_token(payload.exp, payload.exp.saturating_sub(now_unix_secs()));
         } else {
             crate::auth::clear_token();
         }
     }
 
-    /// 登出。清除 token、user、localStorage。
+    /// 登出。清除 token、user、cookie。
+    ///
+    /// 同步、纯本地状态清理 —— 不发后端请求。适用于被同步代码路径调用
+    /// 的"防御性登出"场景（如 `swap_token` 检测到新 token 异常）。
+    /// 真正要撤销 refresh token 的"用户主动登出"或"会话过期"场景应使用
+    /// `logout_async`，它会调用后端 `/logout` 删除 refresh token 行。
     pub fn logout(&mut self) {
         self.client.clear_token();
         self.user.set(None);
@@ -335,21 +418,60 @@ impl AuthState {
         crate::auth::clear_token();
     }
 
+    /// 登出（异步）—— 调用后端 `POST /api/public/auth/logout` 撤销
+    /// refresh token，再清除本地状态。
+    ///
+    /// 后端错误一律吞掉 —— 因为即使请求失败，本地状态
+    /// 仍然需要清空，否则会出现"本地已登出但后端 refresh 仍然有效"
+    /// 的悬空会话。
+    pub async fn logout_async(&mut self) {
+        if let Err(ref e) = self.client.logout().await {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::warn_1(
+                &format!(
+                    "Logout API call failed (local state cleared anyway): {:?}",
+                    e
+                )
+                .into(),
+            );
+            let _ = e;
+        }
+        self.logout();
+    }
+
+    /// 登出所有设备（异步）—— 调用后端 `POST /api/users/me/logout-all`
+    /// 撤销所有 refresh token + 递增 token_version，再清除本地状态。
+    ///
+    /// 与 `logout_async` 的差异：
+    /// - 后端会递增 `token_version` 使所有设备的 JWT 立即失效
+    /// - 删除所有 refresh token（包括当前设备）
+    /// - 不应在会话过期或被动登出时调用，仅用于用户主动点击"登出所有设备"
+    pub async fn logout_all_async(&mut self) {
+        if let Err(ref e) = self.client.logout_all().await {
+            #[cfg(target_arch = "wasm32")]
+            web_sys::console::warn_1(
+                &format!(
+                    "Logout-all API call failed (local state cleared anyway): {:?}",
+                    e
+                )
+                .into(),
+            );
+            let _ = e;
+        }
+        self.logout();
+    }
+
     /// 持久化会话：设置 token + 调用 GET /api/users/me 获取真实用户资料。
     ///
-    /// 由 `login` / `reset_password` 视图复用 —— 后者消费 reset token
-    /// 后会拿到一个完整的新 JWT，等价于登录成功。
+    /// 由 `reset_password` 视图复用。
     pub async fn persist_session_async(&mut self, token: &str, remember: bool) {
         if let Some((payload, _user_placeholder)) = parse_token(token) {
             self.client.set_token(token.to_string());
             self.token_expires_at.set(Some(payload.exp));
 
-            // 尝试获取真实用户资料
             let user = match self.client.get_me().await {
                 Ok(profile) => CurrentUser::from_jwt(&payload).map(|u| u.with_profile(&profile)),
                 Err(err) => {
-                    // 鉴权失败 → 拒绝持久化新会话，强制返回 Err 让上游走错误处理
-                    // （Issue #2：与 restore 逻辑对齐，避免"假登录"）。
                     if is_auth_failure(&err) {
                         self.client.clear_token();
                         self.user.set(None);
@@ -357,19 +479,18 @@ impl AuthState {
                         crate::auth::clear_token();
                         return;
                     }
-                    // 其他错误（网络/解析）：回退到 JWT 派生的占位用户
                     CurrentUser::from_jwt(&payload)
                 }
             };
             self.user.set(user);
 
             if remember {
-                crate::auth::save_token(token);
+                let now = now_unix_secs();
+                crate::auth::save_token(payload.exp, payload.exp.saturating_sub(now));
             } else {
                 crate::auth::clear_token();
             }
         } else {
-            // Token 格式异常（JWT 解码失败），放弃持久化以防不一致状态。
             crate::auth::clear_token();
         }
     }

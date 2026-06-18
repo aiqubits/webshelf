@@ -385,7 +385,7 @@ async fn run_user_count(
         }
         Err(err) => {
             total_users.set(None);
-            if crate::api::handle_unauth(&err, auth, nav, bus) {
+            if crate::api::handle_unauth(&err, auth, nav, bus).await {
                 return;
             }
             push_log_err(bus, HttpMethod::Get, "/api/users", &err);

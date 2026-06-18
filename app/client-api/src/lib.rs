@@ -13,7 +13,7 @@
 //! // 原生平台（桌面/移动端）必须使用完整的 http:// 或 https:// URL。
 //!
 //! // 登录
-//! let login = client.login("admin@example.com", "password123").await?;
+//! let login = client.login("admin@example.com", "password123", false).await?;
 //! client.set_token(login.token);
 //!
 //! // 列出用户（admin 权限）

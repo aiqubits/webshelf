@@ -22,6 +22,7 @@ pub fn Button(
     let type_attr = match button_type {
         ButtonType::Button => "button",
         ButtonType::Submit => "submit",
+        ButtonType::Danger => "button",
     };
 
     rsx! {
@@ -48,4 +49,7 @@ pub enum ButtonType {
     #[default]
     Button,
     Submit,
+    /// Danger-style button for destructive actions (e.g., "log out all devices").
+    /// Renders as a regular HTML button; visual styling is applied via CSS.
+    Danger,
 }

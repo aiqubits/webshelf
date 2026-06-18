@@ -31,7 +31,7 @@ async fn test_login_success() {
         .await;
 
     let result = client
-        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD)
+        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD, false)
         .await;
 
     assert!(result.is_ok());
@@ -52,6 +52,7 @@ async fn test_login_admin_role() {
         .and(body_json(serde_json::json!({
             "email": "admin@example.com",
             "password": "admin123!@#",
+            "remember": false,
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "token": fixtures::TEST_TOKEN,
@@ -63,7 +64,9 @@ async fn test_login_admin_role() {
         .mount(&mock_server)
         .await;
 
-    let result = client.login("admin@example.com", "admin123!@#").await;
+    let result = client
+        .login("admin@example.com", "admin123!@#", false)
+        .await;
 
     assert!(result.is_ok());
     let resp = result.unwrap();
@@ -84,7 +87,9 @@ async fn test_login_invalid_credentials() {
         .mount(&mock_server)
         .await;
 
-    let result = client.login("wrong@example.com", "wrongpassword").await;
+    let result = client
+        .login("wrong@example.com", "wrongpassword", false)
+        .await;
 
     match result.unwrap_err() {
         ClientError::Other(401, msg) => {
@@ -104,6 +109,7 @@ async fn test_login_body_matches_request() {
         .and(body_json(serde_json::json!({
             "email": fixtures::TEST_EMAIL,
             "password": "my-password",
+            "remember": false,
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "token": fixtures::TEST_TOKEN,
@@ -115,7 +121,9 @@ async fn test_login_body_matches_request() {
         .mount(&mock_server)
         .await;
 
-    let result = client.login(fixtures::TEST_EMAIL, "my-password").await;
+    let result = client
+        .login(fixtures::TEST_EMAIL, "my-password", false)
+        .await;
     assert!(result.is_ok());
 }
 
@@ -133,6 +141,7 @@ async fn test_register_success() {
             "email": "newuser@example.com",
             "password": "SecurePass123!",
             "name": "New User",
+            "remember": false,
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "message": "User registered successfully",
@@ -142,7 +151,7 @@ async fn test_register_success() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User")
+        .register("newuser@example.com", "SecurePass123!", "New User", false)
         .await;
 
     assert!(result.is_ok());
@@ -165,7 +174,12 @@ async fn test_register_email_conflict() {
         .await;
 
     let result = client
-        .register(fixtures::TEST_EMAIL, "SecurePass123!", "Existing User")
+        .register(
+            fixtures::TEST_EMAIL,
+            "SecurePass123!",
+            "Existing User",
+            false,
+        )
         .await;
 
     match result.unwrap_err() {
@@ -190,7 +204,7 @@ async fn test_register_validation_error() {
         .await;
 
     let result = client
-        .register("test@example.com", "short", "Test User")
+        .register("test@example.com", "short", "Test User", false)
         .await;
 
     match result.unwrap_err() {
@@ -330,7 +344,7 @@ async fn test_register_response_parses_email_verified_false() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User")
+        .register("newuser@example.com", "SecurePass123!", "New User", false)
         .await;
 
     assert!(result.is_ok());
@@ -353,7 +367,7 @@ async fn test_register_response_parses_email_verified_true() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User")
+        .register("newuser@example.com", "SecurePass123!", "New User", false)
         .await;
 
     assert!(result.is_ok());
@@ -376,7 +390,7 @@ async fn test_register_response_missing_email_verified_defaults_to_false() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User")
+        .register("newuser@example.com", "SecurePass123!", "New User", false)
         .await;
 
     assert!(result.is_ok());
@@ -405,7 +419,7 @@ async fn test_login_and_use_token_for_authenticated_request() {
         .await;
 
     let login = client
-        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD)
+        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD, false)
         .await
         .unwrap();
     client.set_token(&login.token);

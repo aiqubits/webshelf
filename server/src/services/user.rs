@@ -443,9 +443,10 @@ impl UserService {
             [id.into()],
         );
 
-        // Wrap the token_version increment and the password update in a single
-        // transaction so that a partial failure does not leave token_version
-        // incremented while the password remains unchanged.
+        // Wrap the token_version increment, password update, and refresh token
+        // revocation in a single transaction so that a partial failure does not
+        // leave token_version incremented while the password or refresh tokens
+        // remain in an inconsistent state.
         let txn = self
             .db
             .begin()
@@ -466,6 +467,18 @@ impl UserService {
         active_model.update(&txn).await.map_err(|e| {
             UserError::Internal(anyhow::Error::from(e).context("Failed to update password"))
         })?;
+
+        // Revoke all refresh tokens so a stolen refresh cookie cannot mint a
+        // fresh JWT at the new token_version. Without this, the token_version
+        // bump alone is insufficient — the refresh endpoint reads the current
+        // user.token_version and would happily sign a new JWT for an attacker.
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "DELETE FROM refresh_tokens WHERE user_id = $1",
+            [id.into()],
+        ))
+        .await
+        .context("Failed to revoke refresh tokens during password change")?;
 
         txn.commit()
             .await

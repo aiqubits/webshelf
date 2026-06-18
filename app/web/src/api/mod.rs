@@ -99,7 +99,7 @@ pub fn is_unauth(err: &ClientError) -> bool {
 }
 
 /// 若 `err` 为 401 或 403，执行相应导航并返回 `true`：
-/// - 401：注销并跳 `/auth`（token 过期/无效）；
+/// - 401：调用 `auth.logout_async()` 撤销后端 refresh token，再跳 `/auth`；
 /// - 403：仅跳 `/`（已认证但权限不足，如 JWT role 被篡改）。
 ///
 /// 否则返回 `false`，让调用方继续处理业务错误。
@@ -107,11 +107,11 @@ pub fn is_unauth(err: &ClientError) -> bool {
 /// 视图层模式：
 /// ```ignore
 /// if let Err(e) = client.list_users(1, 20).await {
-///     if handle_unauth(&e, auth, nav, log_bus) { return; }
+///     if handle_unauth(&e, auth, nav, log_bus).await { return; }
 ///     // 处理业务错误...
 /// }
 /// ```
-pub fn handle_unauth(
+pub async fn handle_unauth(
     err: &ClientError,
     mut auth: AuthState,
     nav: Navigator,
@@ -124,7 +124,9 @@ pub fn handle_unauth(
             "401".to_string(),
             LogKind::Important,
         );
-        auth.logout();
+        // 401 意味着 JWT 已被服务端拒绝 —— 通过 logout 端点同步撤销
+        // refresh token，避免 refresh cookie 仍可用来换发新 JWT 的悬空会话。
+        auth.logout_async().await;
         nav.replace(Route::Auth {});
         true
     } else if matches!(err, ClientError::Other(403, _)) {

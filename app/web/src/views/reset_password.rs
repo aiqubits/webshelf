@@ -95,9 +95,8 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         }
                         let mut auth_async = auth.clone();
                         let bus_async = log_bus;
-                        // 沿用旧会话的持久化偏好：若 localStorage 中有旧 token，
-                        // 说明用户此前选择了「记住我」，重置后的新会话也应持久化，
-                        // 避免用户刷新页面后被意外登出。
+                        // 使用显式的 remember 信号：检查当前会话是否有持久化偏好。
+                        // 从 webshelf_exp cookie 判断——有值说明用户此前选择了「记住我」。
                         let was_remembered = crate::auth::load_token().is_some();
                         submitting.set(true);
                         error_msg.set(None);

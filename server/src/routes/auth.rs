@@ -2,7 +2,7 @@ use axum::{Router, middleware, routing::post};
 
 use crate::AppState;
 use crate::handlers::auth::{
-    forgot_password, login, register, resend_code, reset_password, verify_email,
+    forgot_password, login, logout, refresh, register, resend_code, reset_password, verify_email,
 };
 use crate::middlewares::{RateLimitGuard, rate_limit_middleware};
 use distributed_ratelimit::RedisRateLimiter;
@@ -72,6 +72,20 @@ pub fn auth_routes(rate_limiter: RedisRateLimiter) -> Router<AppState> {
             l,
             "reset-password",
             10,
+            None,
+        ))
+        .merge(with_rate_limit(
+            Router::new().route("/refresh", post(refresh)),
+            l,
+            "refresh",
+            30,
+            None,
+        ))
+        .merge(with_rate_limit(
+            Router::new().route("/logout", post(logout)),
+            l,
+            "logout",
+            30,
             None,
         ))
 }

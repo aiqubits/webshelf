@@ -28,7 +28,7 @@ pub fn Sidebar(
                 div { class: "ws-sidebar__logo-icon", Layers {} }
                 div { class: "ws-sidebar__logo-text",
                     span { class: "ws-sidebar__logo-title", "WebShelf Admin" }
-                    span { class: "ws-sidebar__logo-subtitle", "Rust Fullstack Scaffold Framework" }
+                    span { class: "ws-sidebar__logo-subtitle", "Rust Fullstack" }
                 }
                 // 移动端关闭按钮
                 button {
@@ -40,9 +40,9 @@ pub fn Sidebar(
 
             // 导航
             nav { class: "ws-sidebar__nav no-scrollbar",
-                // 核心系统监控
+                // 系统监控
                 div { class: "ws-sidebar__group",
-                    div { class: "ws-sidebar__group-caption", "核心系统监控" }
+                    div { class: "ws-sidebar__group-caption", "系统监控" }
                     SidebarItem {
                         icon: rsx! {
                             ChartPie {}
@@ -90,7 +90,7 @@ pub fn Sidebar(
                     ExternalLink { class: "ws-sidebar__github-arrow" }
                 }
                 div { class: "ws-sidebar__copyright",
-                    div { "© 2026 WebShelf Scaffold Framework." }
+                    div { "© 2026 WebShelf Fullstack Framework." }
                     div { "Powered by WebShelf" }
                 }
             }

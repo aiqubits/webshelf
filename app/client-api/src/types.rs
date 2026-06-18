@@ -10,6 +10,8 @@ use serde::{Deserialize, Serialize};
 pub struct LoginRequest {
     pub email: String,
     pub password: String,
+    #[serde(default)]
+    pub remember: bool,
 }
 
 /// Login response
@@ -20,6 +22,10 @@ pub struct LoginResponse {
     pub expires_in: u64,
     pub user_id: String,
     pub role: String,
+    /// Non-zero when the server issued a refresh token ("remember me" login).
+    /// Zero / absent when the login was non-persistent.
+    #[serde(default)]
+    pub refresh_expires_in: Option<u64>,
 }
 
 /// Register request body
@@ -28,6 +34,8 @@ pub struct RegisterRequest {
     pub email: String,
     pub password: String,
     pub name: String,
+    #[serde(default)]
+    pub remember: bool,
 }
 
 /// Register response
@@ -118,6 +126,29 @@ pub struct ResetPasswordResponse {
     pub expires_in: u64,
     pub user_id: String,
     pub role: String,
+}
+
+/// Refresh token response
+#[derive(Debug, Deserialize)]
+pub struct RefreshResponse {
+    pub token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub user_id: String,
+    pub role: String,
+    pub refresh_expires_in: u64,
+}
+
+/// Logout response
+///
+/// The body is informational only — the actual session termination happens
+/// via the `Set-Cookie` headers (which are invisible to JS) and the
+/// server-side deletion of the refresh-token row. Clients should still
+/// clear their own in-memory JWT state and the readable `webshelf_exp`
+/// cookie after calling this endpoint.
+#[derive(Debug, Deserialize)]
+pub struct LogoutResponse {
+    pub message: String,
 }
 
 // ──────────────────────────────────────────────

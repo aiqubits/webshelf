@@ -258,27 +258,6 @@ input, textarea, select {
   color: #4f46e5;
 }
 
-/* ─── 删除确认 ────────────────────────────── */
-.ws-delete-msg {
-  margin: 0;
-  font-family: var(--font-family);
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 20px;
-  color: var(--color-text-secondary);
-}
-
-.ws-delete-actions {
-  display: flex;
-  gap: 10px;
-  justify-content: flex-end;
-  flex-wrap: wrap;
-}
-
-.ws-delete-actions .ws-btn:not(.ws-btn--block) {
-  flex: 0 0 auto;
-}
-
 /* ─── Dashboard 视图 ─────────────────────── */
 .ws-dashboard {
   display: flex;

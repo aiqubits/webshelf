@@ -44,7 +44,7 @@ pub fn TopHeader(
             div { class: "ws-top-header__right",
                 span { class: "ws-top-header__status",
                     span { class: "ws-top-header__status-dot" }
-                    span { class: "ws-top-header__status-text", "Axum Node Online" }
+                    span { class: "ws-top-header__status-text", "Node Online" }
                 }
                 span { class: "ws-top-header__divider" }
                 div {

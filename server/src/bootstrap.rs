@@ -328,6 +328,16 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
     let db = init_database(&app_config).await?;
     run_database_migrations(&db).await?;
 
+    // Clean up expired refresh tokens to prevent stale row accumulation.
+    // This is a best-effort maintenance operation — a failure is not fatal
+    // because expired rows are already filtered out at query time.
+    if let Err(e) = crate::services::auth::cleanup_expired_refresh_tokens(&db).await {
+        tracing::warn!(
+            "Failed to cleanup expired refresh tokens (non-fatal): {:?}",
+            e
+        );
+    }
+
     // Initialize Snowflake ID generator (must happen before seed_system_admin
     // which uses generate_id() to create the system admin user's ID).
     let _worker_handle = crate::snowflake::init(&db).await?;

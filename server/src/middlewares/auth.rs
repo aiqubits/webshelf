@@ -15,6 +15,11 @@ use crate::AppState;
 use crate::repositories::user::Entity as UserEntity;
 use crate::utils::error::ErrorResponse;
 
+/// Cookie names for token delivery — shared with handlers.
+pub(crate) const JWT_COOKIE: &str = "webshelf_jwt";
+pub(crate) const REFRESH_COOKIE: &str = "webshelf_refresh";
+pub(crate) const EXPIRY_COOKIE: &str = "webshelf_exp";
+
 /// Authenticated user information extracted from JWT
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
@@ -28,6 +33,8 @@ pub struct AuthUser {
     pub iat: u64,
     /// Token version for invalidation (matches user.token_version in DB)
     pub token_version: i32,
+    /// Whether the original login had "remember me" enabled
+    pub remember: bool,
 }
 
 /// JWT Claims structure
@@ -47,6 +54,9 @@ pub struct Claims {
     pub role: String,
     /// Token version for invalidation (matches user.token_version in DB)
     pub token_version: i32,
+    /// Whether the original login had "remember me" enabled
+    #[serde(default)]
+    pub remember: bool,
 }
 
 impl From<Claims> for AuthUser {
@@ -57,6 +67,7 @@ impl From<Claims> for AuthUser {
             exp: claims.exp,
             iat: claims.iat,
             token_version: claims.token_version,
+            remember: claims.remember,
         }
     }
 }
@@ -84,12 +95,15 @@ pub async fn auth_middleware(
     // Use JWT secret from app state (injected via from_fn_with_state)
     let jwt_secret = &state.config.jwt_secret;
 
-    // Extract token from Authorization header
+    // Extract token from Authorization header or webshelf_jwt cookie
     let token = match extract_bearer_token(&request) {
         Some(token) => token,
-        None => {
-            return unauthorized_response("Missing or invalid Authorization header");
-        }
+        None => match extract_jwt_cookie(&request) {
+            Some(token) => token,
+            None => {
+                return unauthorized_response("Missing or invalid Authorization header");
+            }
+        },
     };
 
     // Validate token with strict checks
@@ -177,6 +191,23 @@ fn extract_bearer_token(request: &Request) -> Option<String> {
     Some(auth_value[BEARER_PREFIX.len()..].to_string())
 }
 
+/// Extract JWT from the `webshelf_jwt` httpOnly cookie.
+///
+/// The cookie is set by the login/refresh handlers with `HttpOnly; SameSite=Strict`.
+/// The browser automatically includes it in same-origin requests, so the frontend
+/// does not need to manually attach it to the Authorization header.
+fn extract_jwt_cookie(request: &Request) -> Option<String> {
+    let cookie_header = request.headers().get(axum::http::header::COOKIE)?;
+    let cookie_str = cookie_header.to_str().ok()?;
+
+    cookie_str
+        .split(';')
+        .map(str::trim)
+        .filter_map(|s| cookie::Cookie::parse(s).ok())
+        .find(|c| c.name() == JWT_COOKIE)
+        .map(|c| c.value().to_string())
+}
+
 /// Validate JWT token with strict signature, algorithm, expiration, issuer, and audience validation
 fn validate_token(token: &str, secret: &str) -> Result<Claims, jsonwebtoken::errors::Error> {
     let mut validation = Validation::new(Algorithm::HS256);
@@ -235,6 +266,7 @@ pub fn generate_token(
     role: &str,
     secret: &str,
     expiry_seconds: u64,
+    remember: bool,
     token_version: i32,
 ) -> anyhow::Result<String> {
     use anyhow::Context;
@@ -252,6 +284,7 @@ pub fn generate_token(
         aud: "webshelf".to_string(),
         role: role.to_string(),
         token_version,
+        remember,
     };
 
     encode(
@@ -272,14 +305,14 @@ mod tests {
 
     #[test]
     fn test_generate_token_success() {
-        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, 1).unwrap();
+        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, false, 1).unwrap();
         assert!(!token.is_empty());
         assert!(token.split('.').count() == 3); // JWT has 3 parts
     }
 
     #[test]
     fn test_validate_token_success() {
-        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, 1).unwrap();
+        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, false, 1).unwrap();
         let claims = validate_token(&token, TEST_SECRET).unwrap();
 
         assert_eq!(claims.sub, TEST_USER_ID);
@@ -290,7 +323,7 @@ mod tests {
 
     #[test]
     fn test_validate_token_wrong_secret() {
-        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, 1).unwrap();
+        let token = generate_token(TEST_USER_ID, TEST_ROLE, TEST_SECRET, 3600, false, 1).unwrap();
         let result = validate_token(&token, "wrong-secret");
 
         assert!(result.is_err());
@@ -317,6 +350,7 @@ mod tests {
             aud: "webshelf".to_string(),
             role: TEST_ROLE.to_string(),
             token_version: 2,
+            remember: true,
         };
 
         let auth_user = AuthUser::from(claims);
@@ -326,6 +360,7 @@ mod tests {
         assert_eq!(auth_user.exp, now + 3600);
         assert_eq!(auth_user.iat, now);
         assert_eq!(auth_user.token_version, 2);
+        assert!(auth_user.remember);
     }
 
     #[test]
@@ -471,6 +506,7 @@ mod tests {
             aud: "webshelf".to_string(),
             role: TEST_ROLE.to_string(),
             token_version: 1,
+            remember: false,
         };
 
         let token = encode(
@@ -508,6 +544,7 @@ mod tests {
             aud: "webshelf".to_string(),
             role: TEST_ROLE.to_string(),
             token_version: 1,
+            remember: false,
         };
         claims.iss = "evil-server".to_string(); // wrong issuer
 
@@ -546,6 +583,7 @@ mod tests {
             aud: "webshelf".to_string(),
             role: TEST_ROLE.to_string(),
             token_version: 1,
+            remember: false,
         };
         claims.aud = "other-service".to_string(); // wrong audience
 

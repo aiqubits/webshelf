@@ -6,11 +6,13 @@
 //! - `LogBus`：toast + console 共享事件总线。
 
 mod app_shell_layout;
+mod confirm_dialog;
 mod log_bus;
 mod require_admin;
 mod token_expiry_guard;
 
 pub use app_shell_layout::{AppShellLayout, SearchSignal};
+pub use confirm_dialog::ConfirmDialog;
 pub use log_bus::{
     HttpMethod, LogBus, LogEntry, LogKind, now_unix_ms, now_unix_secs, push_log_err, push_log_ok,
     push_log_result,

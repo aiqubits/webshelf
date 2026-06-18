@@ -21,6 +21,19 @@ pub struct AppConfig {
     #[serde(default = "default_jwt_expiry")]
     pub jwt_expiry_seconds: u64,
 
+    /// JWT expiration when "remember me" is enabled (default: 2592000 = 30 days)
+    #[serde(default = "default_jwt_remember_expiry")]
+    pub jwt_remember_expiry_seconds: u64,
+
+    /// Refresh token expiration time in seconds (default: 7776000 = 90 days)
+    #[serde(default = "default_refresh_token_expiry")]
+    pub refresh_token_expiry_seconds: u64,
+
+    /// Whether to set the Secure flag on auth cookies (default: true).
+    /// Set to false for local development over plain HTTP.
+    #[serde(default = "default_cookie_secure")]
+    pub cookie_secure: bool,
+
     /// System admin account email (auto-seeded on first boot)
     #[serde(default = "default_system_admin_email")]
     pub system_admin_email: String,
@@ -111,6 +124,18 @@ fn default_system_admin_password() -> String {
 // Default value functions
 fn default_jwt_expiry() -> u64 {
     3600
+}
+
+fn default_jwt_remember_expiry() -> u64 {
+    2_592_000
+}
+
+fn default_refresh_token_expiry() -> u64 {
+    7_776_000
+}
+
+fn default_cookie_secure() -> bool {
+    true
 }
 
 fn default_host() -> String {
@@ -216,6 +241,9 @@ mod tests {
             redis_url: "redis://127.0.0.1".to_string(),
             jwt_secret: "secret".to_string(),
             jwt_expiry_seconds: 7200,
+            jwt_remember_expiry_seconds: 2592000,
+            refresh_token_expiry_seconds: 7776000,
+            cookie_secure: true,
             system_admin_email: "admin@webshelf.local".to_string(),
             system_admin_password: "change-me-admin-password".to_string(),
             server: ServerConfig::default(),

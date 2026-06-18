@@ -9,7 +9,7 @@ use crate::Route;
 use crate::api::{ErrorContext, handle_unauth, humanize_error};
 use crate::auth::AuthState;
 use crate::balance::format_balance;
-use crate::components::{HttpMethod, LogBus, push_log_result};
+use crate::components::{ConfirmDialog, HttpMethod, LogBus, LogKind, push_log_result};
 
 #[component]
 pub fn Settings() -> Element {
@@ -21,6 +21,8 @@ pub fn Settings() -> Element {
     let mut new_password = use_signal(String::new);
     let mut confirm_password = use_signal(String::new);
     let mut submitting = use_signal(|| false);
+    let mut logging_out_all = use_signal(|| false);
+    let mut show_logout_confirm = use_signal(|| false);
     let mut form_error = use_signal(|| Option::<String>::None);
     let mut success_msg = use_signal(|| Option::<String>::None);
 
@@ -58,6 +60,12 @@ pub fn Settings() -> Element {
             sm.set(None);
         });
     }
+
+    // Pre-clone for the onclick closure (logout-all) since `auth` and `nav`
+    // are moved into the onsubmit closure (change-password).
+    let auth_for_logout = auth.clone();
+    let nav_for_logout = nav;
+    let bus_for_logout = log_bus;
 
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/settings.css") }
@@ -125,7 +133,7 @@ pub fn Settings() -> Element {
                             // 传入 clone：handle_unauth 会 move auth_async，
                             // 后面 swap_token 还要再用一次。
                             if let Err(err) = &res
-                                && handle_unauth(err, auth_async.clone(), nav_async, bus)
+                                && handle_unauth(err, auth_async.clone(), nav_async, bus).await
                             {
                                 submitting.set(false);
                                 return;
@@ -198,6 +206,53 @@ pub fn Settings() -> Element {
                         loading: *submitting.read(),
                         "更新密码 [POST /api/users/me/password]"
                     }
+                }
+            }
+
+            section { class: "ws-settings__section",
+                h2 { class: "ws-settings__section-title", "会话管理" }
+                p { class: "ws-settings__desc",
+                    "登出所有设备将使当前账户在所有浏览器和设备上的会话立即失效。"
+                }
+                Button {
+                    button_type: ButtonType::Danger,
+                    full_width: true,
+                    disabled: *logging_out_all.read(),
+                    loading: *logging_out_all.read(),
+                    onclick: move |_| {
+                        if *logging_out_all.read() {
+                            return;
+                        }
+                        show_logout_confirm.set(true);
+                    },
+                    "登出所有设备 [POST /api/users/me/logout-all]"
+                }
+
+                ConfirmDialog {
+                    open: *show_logout_confirm.read(),
+                    title: "确认登出所有设备".to_string(),
+                    message: "此操作将使当前账户在所有浏览器和设备上的会话立即失效，包括当前设备。你需要重新登录才能继续使用。"
+                        .to_string(),
+                    danger: true,
+                    loading: *logging_out_all.read(),
+                    on_confirm: move |_| {
+                        let mut auth_async = auth_for_logout.clone();
+                        let nav_async = nav_for_logout;
+                        let mut bus = bus_for_logout;
+                        logging_out_all.set(true);
+                        show_logout_confirm.set(false);
+                        spawn(async move {
+                            auth_async.logout_all_async().await;
+                            bus.push(
+                                HttpMethod::Post,
+                                "/api/users/me/logout-all".to_string(),
+                                "200".to_string(),
+                                LogKind::Important,
+                            );
+                            nav_async.replace(Route::Auth {});
+                        });
+                    },
+                    on_cancel: move |_| show_logout_confirm.set(false),
                 }
             }
         }

@@ -38,6 +38,24 @@ CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
 -- Create index on created_at for pagination
 CREATE INDEX IF NOT EXISTS idx_users_created_at ON users(created_at DESC);
 
+-- Refresh tokens for silent session recovery.
+-- The unique token_hash index prevents duplicate token values.
+-- Application code enforces "at most one active refresh token per user"
+-- by deleting old tokens before inserting new ones during login.
+-- Tokens are rotated on each refresh call (old deleted, new created in
+-- a transaction) to limit replay windows.
+-- CASCADE delete ensures orphaned tokens are cleaned when a user is removed.
+CREATE TABLE IF NOT EXISTS refresh_tokens (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash VARCHAR(255) NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_user_id ON refresh_tokens(user_id);
+CREATE INDEX IF NOT EXISTS idx_refresh_tokens_token_hash ON refresh_tokens(token_hash);
+
 -- Snowflake worker ID registry for automatic worker coordination.
 -- Each server instance registers here on startup to get a unique worker_id (0-1023).
 -- Stale entries (heartbeat older than 30s) are cleaned up during registration.

@@ -22,7 +22,7 @@ pub fn AppShellLayout() -> Element {
     let search_value = use_signal(String::new);
     use_context_provider(|| SearchSignal(search_value));
     let nav = use_navigator();
-    let mut auth = use_context::<AuthState>();
+    let auth = use_context::<AuthState>();
 
     let route = use_route::<Route>();
     let active_nav = match route {
@@ -69,8 +69,12 @@ pub fn AppShellLayout() -> Element {
                         nav.push(Route::Settings {});
                     },
                     on_logout: move |_| {
-                        auth.logout();
-                        nav.replace(Route::Auth {});
+                        let mut auth_async = auth.clone();
+                        let nav_async = nav;
+                        spawn(async move {
+                            auth_async.logout_async().await;
+                            nav_async.replace(Route::Auth {});
+                        });
                     },
                 }
             },

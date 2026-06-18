@@ -16,7 +16,9 @@ use ui::{
 use crate::api::{ErrorContext, humanize_error};
 use crate::auth::AuthState;
 use crate::balance::{BALANCE_SCALE, format_balance};
-use crate::components::{HttpMethod, LogBus, SearchSignal, push_log_err, push_log_ok};
+use crate::components::{
+    ConfirmDialog, HttpMethod, LogBus, SearchSignal, push_log_err, push_log_ok,
+};
 
 #[derive(Debug, Clone)]
 enum ListState {
@@ -100,7 +102,7 @@ pub fn Users() -> Element {
                         list.set(ListState::Loaded(page.items));
                     }
                     Err(err) => {
-                        if crate::api::handle_unauth(&err, auth_inner, nav, bus) {
+                        if crate::api::handle_unauth(&err, auth_inner, nav, bus).await {
                             return;
                         }
                         push_log_err(bus, HttpMethod::Get, "/api/users", &err);
@@ -443,7 +445,7 @@ fn make_adjust_handler(
                     s_async.list_version.with_mut(|v| *v += 1);
                 }
                 Err(err) => {
-                    if crate::api::handle_unauth(&err, a_async, nav, b_async) {
+                    if crate::api::handle_unauth(&err, a_async, nav, b_async).await {
                         return;
                     }
                     push_log_err(
@@ -480,10 +482,10 @@ fn render_modal(
     }
 
     if kind == ModalKind::DeleteConfirm {
-        return render_delete_modal(
-            form_error,
-            submitting,
+        return render_delete_confirm(
+            kind,
             deleting,
+            submitting,
             signals,
             client,
             log_bus,
@@ -508,10 +510,10 @@ fn render_modal(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn render_delete_modal(
-    form_error: Option<String>,
-    submitting: bool,
+fn render_delete_confirm(
+    kind: ModalKind,
     deleting: Option<UserResponse>,
+    submitting: bool,
     signals: UsersSignals,
     client: client_api::Client,
     log_bus: LogBus,
@@ -519,41 +521,39 @@ fn render_delete_modal(
     nav: Navigator,
     current_role: String,
 ) -> Element {
-    let on_close = move |_: MouseEvent| close_all(signals);
+    let open = kind == ModalKind::DeleteConfirm;
+    let message = deleting
+        .as_ref()
+        .map(|u| format!("确定要删除用户 {} ({}) 吗？此操作不可撤销。", u.name, u.id))
+        .unwrap_or_else(|| "未选择目标用户".to_string());
+
     let on_cancel = move |_: MouseEvent| close_all(signals);
-    let mut signals_for_submit = signals;
+    let mut s_async = signals;
+    let c_async = client;
+    let b_async = log_bus;
+    let a_async = auth;
+    let role = current_role;
     let on_confirm = move |_: MouseEvent| {
-        // 防止快速双击触发两次 spawn
-        if *signals_for_submit.submitting.read() {
+        if *s_async.submitting.read() {
             return;
         }
-        let Some(u) = signals_for_submit.deleting_user.cloned() else {
-            signals_for_submit
-                .form_error
-                .set(Some("未选择目标用户".into()));
+        let Some(u) = s_async.deleting_user.cloned() else {
             return;
         };
         // 防御性检查：系统用户不可删除（后端同样保护）
         if u.role == "system" {
-            signals_for_submit
-                .form_error
-                .set(Some("系统管理员不可删除".into()));
             return;
         }
         // 防御性检查：admin 不能删除 admin 或 system（后端同样保护）
-        if current_role == "admin" && u.role != "user" {
-            signals_for_submit
-                .form_error
-                .set(Some("权限不足：管理员只能删除普通用户".into()));
+        if role == "admin" && u.role != "user" {
             return;
         }
         let target_id = u.id.clone();
-        signals_for_submit.submitting.set(true);
-        signals_for_submit.form_error.set(None);
-        let client_async = client.clone();
-        let bus_async = log_bus;
-        let mut s_async = signals_for_submit;
-        let auth_async = auth.clone();
+        s_async.submitting.set(true);
+        let client_async = c_async.clone();
+        let bus_async = b_async;
+        let mut s_inner = s_async;
+        let auth_async = a_async.clone();
         spawn(async move {
             let res = client_async.delete_user(target_id.clone()).await;
             if res.is_ok() {
@@ -563,19 +563,19 @@ fn render_delete_modal(
                     &format!("/api/users/{target_id}"),
                 );
             }
-            s_async.submitting.set(false);
+            s_inner.submitting.set(false);
             match res {
                 Ok(_) => {
                     // 仅当模态框仍为 DeleteConfirm 时才关闭，避免旧异步任务关闭新打开的模态框。
-                    if *s_async.modal_kind.read() == ModalKind::DeleteConfirm {
-                        s_async.modal_kind.set(ModalKind::None);
-                        s_async.deleting_user.set(None);
-                        s_async.form_error.set(None);
+                    if *s_inner.modal_kind.read() == ModalKind::DeleteConfirm {
+                        s_inner.modal_kind.set(ModalKind::None);
+                        s_inner.deleting_user.set(None);
+                        s_inner.form_error.set(None);
                     }
-                    s_async.list_version.with_mut(|v| *v += 1);
+                    s_inner.list_version.with_mut(|v| *v += 1);
                 }
                 Err(err) => {
-                    if crate::api::handle_unauth(&err, auth_async, nav, bus_async) {
+                    if crate::api::handle_unauth(&err, auth_async, nav, bus_async).await {
                         return;
                     }
                     push_log_err(
@@ -584,50 +584,21 @@ fn render_delete_modal(
                         &format!("/api/users/{target_id}"),
                         &err,
                     );
-                    s_async
-                        .form_error
-                        .set(Some(humanize_error(&err, ErrorContext::UserManagement)));
                 }
             }
         });
     };
+
     rsx! {
-        Modal {
-            title: "确认删除",
-            on_close,
-            open: true,
-            disable_backdrop: submitting,
-            div { class: "ws-form-stack",
-                if let Some(err) = form_error.as_ref() {
-                    p { class: "ws-form-error", "{err}" }
-                }
-                if let Some(u) = deleting {
-                    p { class: "ws-delete-msg",
-                        "确定要删除用户 "
-                        strong { "{u.name} " }
-                        "("
-                        span { class: "ws-table__mono", "{u.id}" }
-                        ") 吗？此操作不可撤销。"
-                    }
-                } else {
-                    p { class: "ws-delete-msg", "未选择目标用户" }
-                }
-                div { class: "ws-delete-actions",
-                    Button {
-                        button_type: ButtonType::Button,
-                        disabled: submitting,
-                        onclick: on_cancel,
-                        "取消"
-                    }
-                    Button {
-                        button_type: ButtonType::Submit,
-                        disabled: submitting,
-                        loading: submitting,
-                        onclick: on_confirm,
-                        "确认删除 (DELETE)"
-                    }
-                }
-            }
+        ConfirmDialog {
+            open,
+            title: "确认删除".to_string(),
+            message,
+            danger: true,
+            loading: submitting,
+            confirm_label: "确认删除 (DELETE)".to_string(),
+            on_confirm,
+            on_cancel,
         }
     }
 }
@@ -781,7 +752,7 @@ fn render_form_modal(
                     s_async.list_version.with_mut(|v| *v += 1);
                 }
                 Err(err) => {
-                    if crate::api::handle_unauth(&err, auth_async, nav, bus_async) {
+                    if crate::api::handle_unauth(&err, auth_async, nav, bus_async).await {
                         return;
                     }
                     // 根据操作类型重建日志路径，避免在 inner match 中提前写日志导致双 toast

@@ -24,7 +24,7 @@ use std::time::Duration;
 /// let client = Client::new(ClientConfig::new("http://127.0.0.1:8080"))?;
 ///
 /// // 登录
-/// let login = client.login("admin@example.com", "password123").await?;
+/// let login = client.login("admin@example.com", "password123", false).await?;
 /// client.set_token(login.token);
 ///
 /// // 列出用户
@@ -57,6 +57,7 @@ impl Client {
             {
                 reqwest::Client::builder()
                     .timeout(Duration::from_secs(config.timeout_secs))
+                    .cookie_store(true)
                     .build()
                     .map_err(|e| {
                         ClientError::Config(format!("Failed to create HTTP client: {}", e))
@@ -123,10 +124,12 @@ impl Client {
         &self,
         email: impl Into<String>,
         password: impl Into<String>,
+        remember: bool,
     ) -> Result<LoginResponse, ClientError> {
         let body = LoginRequest {
             email: email.into(),
             password: password.into(),
+            remember,
         };
         self.post_json_no_auth("/api/public/auth/login", &body)
             .await
@@ -138,11 +141,13 @@ impl Client {
         email: impl Into<String>,
         password: impl Into<String>,
         name: impl Into<String>,
+        remember: bool,
     ) -> Result<RegisterResponse, ClientError> {
         let body = RegisterRequest {
             email: email.into(),
             password: password.into(),
             name: name.into(),
+            remember,
         };
         self.post_json_no_auth("/api/public/auth/register", &body)
             .await
@@ -220,6 +225,28 @@ impl Client {
             .await
     }
 
+    /// 刷新 JWT — `POST /api/public/auth/refresh`
+    ///
+    /// 依赖浏览器自动发送 `webshelf_refresh` httpOnly cookie，
+    /// 不需要手动设置 Authorization 头。成功时返回新 JWT + 新 refresh token。
+    pub async fn refresh(&self) -> Result<RefreshResponse, ClientError> {
+        self.post_json_no_auth("/api/public/auth/refresh", &serde_json::json!({}))
+            .await
+    }
+
+    /// 单端登出 — `POST /api/public/auth/logout`
+    ///
+    /// 服务端读取浏览器携带的 `webshelf_refresh` httpOnly cookie，从数据库
+    /// 删除对应 refresh token 行，并通过 `Set-Cookie` 头清除 JWT/refresh/exp
+    /// 三个 cookie。本地 JWT 状态由调用方负责清理（`clear_token`）。
+    ///
+    /// 端点不需要 JWT 鉴权 —— 仅依赖 refresh cookie 的存在来定位要撤销的
+    /// DB 行，因此即使本地 JWT 已过期，前端仍能完成登出。
+    pub async fn logout(&self) -> Result<LogoutResponse, ClientError> {
+        self.post_json_no_auth("/api/public/auth/logout", &serde_json::json!({}))
+            .await
+    }
+
     // ──────────────────────────────────────────
     //  Public endpoints
     // ──────────────────────────────────────────
@@ -272,6 +299,15 @@ impl Client {
             new_password: new_password.into(),
         };
         self.post_json("/api/users/me/password", &body, None).await
+    }
+
+    /// 登出所有设备 — `POST /api/users/me/logout-all`（任意已认证用户）
+    ///
+    /// 递增 token_version 使所有现有 JWT 失效，删除所有 refresh token，
+    /// 并清除 auth cookies。
+    pub async fn logout_all(&self) -> Result<serde_json::Value, ClientError> {
+        self.post_json("/api/users/me/logout-all", &serde_json::json!({}), None)
+            .await
     }
 
     /// 创建用户 — `POST /api/users`（需要 admin 角色）

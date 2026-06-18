@@ -296,6 +296,19 @@ impl PasswordResetService {
             .context("Failed to re-fetch user after password reset")?
             .ok_or_else(|| anyhow::anyhow!("User vanished after password-reset UPDATE"))?;
 
+        // Revoke all refresh tokens so a stolen refresh cookie cannot mint
+        // a fresh JWT at the new token_version. Without this, the
+        // token_version bump alone is insufficient — the refresh endpoint
+        // reads the current user.token_version and would happily sign a new
+        // JWT for an attacker holding a still-valid refresh cookie.
+        txn.execute(Statement::from_sql_and_values(
+            DatabaseBackend::Postgres,
+            "DELETE FROM refresh_tokens WHERE user_id = $1",
+            [updated.id.into()],
+        ))
+        .await
+        .context("Failed to revoke refresh tokens during password reset")?;
+
         txn.commit()
             .await
             .context("Failed to commit password-reset transaction")?;

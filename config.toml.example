@@ -31,6 +31,21 @@ jwt_secret = "REPLACE_ME_WITH_A_STRONG_SECRET"
 # Can be overridden by environment variable: WEBSHELF_JWT_EXPIRY_SECONDS
 jwt_expiry_seconds = 3600
 
+# JWT expiration when "remember me" is enabled (default: 30 days)
+# Can be overridden by environment variable: WEBSHELF_JWT_REMEMBER_EXPIRY_SECONDS
+jwt_remember_expiry_seconds = 2592000
+
+# Refresh token expiration time in seconds (default: 90 days)
+# Refresh tokens are used for silent JWT renewal when the JWT expires.
+# Can be overridden by environment variable: WEBSHELF_REFRESH_TOKEN_EXPIRY_SECONDS
+refresh_token_expiry_seconds = 7776000
+
+# Whether to set the Secure flag on auth cookies (default: true)
+# Set to false for local development over plain HTTP.
+# MUST be true in production (requires HTTPS).
+# Can be overridden by environment variable: WEBSHELF_COOKIE_SECURE
+cookie_secure = true
+
 # System admin account (auto-seeded on first boot, only one can exist)
 # The system admin has super-admin privileges (bypasses all admin-only restrictions)
 # ⚠️  SECURITY: MUST override these in staging/production environments!

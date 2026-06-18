@@ -1,0 +1,84 @@
+/* ConfirmDialog —— 通用确认弹窗组件 */
+@import url("/assets/styling/button.css");
+
+/* ── 确认弹窗专用：弹窗卡片使用纯白不透明背景，覆盖 ui modal 的毛玻璃效果 ── */
+.ws-confirm-dialog .ws-modal__card {
+  background: #ffffff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ── 消息文案 ── */
+.ws-confirm-dialog__msg {
+  margin: 0;
+  font-size: 13px;
+  line-height: 20px;
+  color: var(--color-text-secondary);
+}
+
+/* ── 按钮容器 ── */
+.ws-confirm-dialog__actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.ws-confirm-dialog__actions button {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── 次要按钮（取消） ── */
+.ws-btn--secondary {
+  background: transparent;
+  color: var(--color-text-secondary);
+  box-shadow: none;
+  border: 1px solid rgba(148, 163, 184, 0.3);
+}
+
+.ws-btn--secondary:hover:not(:disabled) {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--color-text-primary);
+  border-color: rgba(148, 163, 184, 0.5);
+  transform: translateY(-2px);
+  box-shadow: none;
+  filter: none;
+}
+
+.ws-btn--secondary:active:not(:disabled) {
+  transform: translateY(0);
+  background: rgba(148, 163, 184, 0.12);
+}
+
+/* ── 危险按钮（确认破坏性操作，仅覆写 .ws-btn 的差异属性） ── */
+.ws-btn--danger {
+  color: #ffffff;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  box-shadow: 0 4px 12px rgba(239, 68, 68, 0.3);
+}
+
+.ws-btn--danger:hover:not(:disabled) {
+  box-shadow: 0 6px 16px rgba(239, 68, 68, 0.4);
+  filter: brightness(1.08);
+}
+
+.ws-btn--danger:active:not(:disabled) {
+  filter: brightness(0.95);
+}
+
+.ws-btn--danger:disabled {
+  box-shadow: none;
+}
+
+/* ── Danger 按钮加载中的 spinner 与 ws-btn 共用 ── */
+.ws-btn--danger .ws-btn__spinner {
+  width: 14px;
+  height: 14px;
+  animation: ws-spin 1s linear infinite;
+}
+
+/* @keyframes 回退定义：确保 button.css 未加载时 spinner 仍可旋转 */
+@keyframes ws-spin {
+  to { transform: rotate(360deg); }
+}

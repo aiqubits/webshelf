@@ -28,7 +28,10 @@ async fn test_401_unauthorized() {
         .mount(&mock_server)
         .await;
 
-    let err = client.login("test@example.com", "wrong").await.unwrap_err();
+    let err = client
+        .login("test@example.com", "wrong", false)
+        .await
+        .unwrap_err();
 
     match err {
         ClientError::Other(status, msg) => {
@@ -163,7 +166,7 @@ async fn test_429_rate_limited() {
         .await;
 
     let err = client
-        .login("test@example.com", "password")
+        .login("test@example.com", "password", false)
         .await
         .unwrap_err();
 
@@ -242,7 +245,7 @@ async fn test_structured_error_body_raw_json() {
         .await;
 
     let err = client
-        .login("not-an-email", "password123")
+        .login("not-an-email", "password123", false)
         .await
         .unwrap_err();
 

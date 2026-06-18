@@ -1,19 +1,12 @@
-//! TokenExpiryGuard —— JWT 过期自动登出。
+//! TokenExpiryGuard —— JWT 过期自动登出（带静默刷新）。
 //!
 //! 监听 `AuthState::token_expires_at` 信号；当到达 `exp` 时间时，
-//! 自动调用 `auth.logout()`、推送 `/auth`，并向 `LogBus` 写入一条
-//! `LogKind::Important` 提示，让 toast 通知用户。
+//! 先尝试静默刷新（`try_refresh_async`）；刷新失败才调用 `auth.logout()`、
+//! 推送 `/auth`，并向 `LogBus` 写入一条 `LogKind::Important` 提示。
 //!
 //! 这是 401 拦截器之外的第二道防线：
 //! - 401 拦截器在「下一次 API 调用」时被动触发；
-//! - 本组件主动在 `exp` 到达时立即把用户赶回登录页，
-//!   避免用户在过期 token 下静默操作而引发混淆的错误。
-//!
-//! ## 实现说明
-//!
-//! 使用 `use_resource` 而非 `use_effect + spawn`，确保
-//! `token_expires_at` 变化或组件卸载时**旧计时器自动取消**，
-//! 避免多个 timer 并行运行的资源浪费。
+//! - 本组件主动在 `exp` 到达时尝试刷新，刷新失败才把用户赶回登录页。
 
 use dioxus::prelude::dioxus_router::Navigator;
 use dioxus::prelude::*;
@@ -31,10 +24,6 @@ pub fn TokenExpiryGuard() -> Element {
 
     let expires_at = auth.token_expires_at;
 
-    // use_resource 在 expires_at 变化或组件卸载时自动取消旧异步任务，
-    // 避免旧 timer 与新 timer 并存（use_effect + spawn 无法取消旧任务）。
-    //
-    // 闭包同步读取 `expires_at` 以建立信号追踪；异步块内执行计时与登出。
     use_resource(move || {
         let exp = expires_at.cloned();
         let auth_async = auth.clone();
@@ -48,7 +37,7 @@ pub fn TokenExpiryGuard() -> Element {
             let now = crate::components::now_unix_secs();
 
             if now + JWT_EXPIRY_LEEWAY_SECS >= exp_secs {
-                fire_expiry(auth_async, nav_async, bus_async);
+                fire_expiry(auth_async, nav_async, bus_async).await;
                 return;
             }
 
@@ -63,19 +52,17 @@ pub fn TokenExpiryGuard() -> Element {
                 tokio::time::sleep(std::time::Duration::from_millis(delay_ms)).await;
             }
 
-            fire_expiry(auth_async, nav_async, bus_async);
+            fire_expiry(auth_async, nav_async, bus_async).await;
         }
     });
 
     rsx! {
         Fragment {}
-
     }
 }
 
-/// 触发过期登出。再次读取 `token_expires_at` 以避免 sleep 期间用户重新登录
-/// 导致的误杀（新 token 尚未过期时直接返回）。
-fn fire_expiry(mut auth: AuthState, nav: Navigator, mut log_bus: LogBus) {
+/// 触发过期处理：先尝试静默刷新，失败才登出。
+async fn fire_expiry(mut auth: AuthState, nav: Navigator, mut log_bus: LogBus) {
     let now = crate::components::now_unix_secs();
     let still_expired = match auth.token_expires_at.cloned() {
         Some(exp) => now + JWT_EXPIRY_LEEWAY_SECS >= exp,
@@ -84,11 +71,19 @@ fn fire_expiry(mut auth: AuthState, nav: Navigator, mut log_bus: LogBus) {
     if !still_expired {
         return;
     }
-    auth.logout();
+
+    // 尝试静默刷新
+    if auth.try_refresh_async().await {
+        // 刷新成功，用户会话已续期，无需登出
+        return;
+    }
+
+    // 刷新失败，执行登出（撤销 refresh token + 清理本地状态）
+    auth.logout_async().await;
     nav.replace(Route::Auth {});
     log_bus.push(
         HttpMethod::Post,
-        "/auth/logout (token expired)".to_string(),
+        "/auth/logout (token expired, refresh failed)".to_string(),
         "401".to_string(),
         LogKind::Important,
     );
