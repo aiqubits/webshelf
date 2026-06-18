@@ -25,6 +25,16 @@ pub fn LoginLanding() -> Element {
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
 
+    // 等待 AuthState 初始化完成，避免「记住登录」用户首屏被误判为未登录
+    // 在 restore_from_storage_async 进行中（initialized=false），user 为 None，
+    // 如果不检查 initialized 会导致已登录用户短暂看到登录表单
+    let is_initialized = *auth.initialized.read();
+    if !is_initialized {
+        return rsx! {
+            Fragment {}
+        };
+    }
+
     // 进入登录页时清空 pending 残留
     let mut auth_for_clear = auth.clone();
     use_effect(move || {
@@ -35,6 +45,8 @@ pub fn LoginLanding() -> Element {
     let authenticated_at_render = auth.is_authenticated();
     let auth_for_effect = auth.clone();
     use_effect(move || {
+        // 显式读取 auth.user 以建立响应式依赖
+        // 当登录成功后 auth.user 变化时，此 effect 会重新执行并触发导航
         if auth_for_effect.is_authenticated() {
             nav.replace(Route::Dashboard {});
         }

@@ -24,13 +24,14 @@ pub fn Auth() -> Element {
         };
     }
 
-    let authenticated = auth.is_authenticated();
-
     use_effect(move || {
-        if authenticated {
-            nav.replace(Route::Dashboard {});
-        } else {
-            nav.replace(Route::LoginLanding {});
+        // 在 effect 内部读取最新状态，确保 initialized 变化时能正确触发重定向
+        if *auth.initialized.read() {
+            if auth.is_authenticated() {
+                nav.replace(Route::Dashboard {});
+            } else {
+                nav.replace(Route::LoginLanding {});
+            }
         }
     });
 
