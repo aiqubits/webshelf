@@ -170,7 +170,7 @@ pub async fn release_lock(
 #[derive(Debug)]
 pub enum AcquireResult {
     /// Lock was successfully acquired and guard is returned
-    Acquired(LockGuard),
+    Acquired(Box<LockGuard>),
     /// Lock was not acquired due to contention (another holder has it)
     Contended,
 }
@@ -239,11 +239,11 @@ impl LockGuard {
         .await?;
 
         if acquired {
-            Ok(Some(AcquireResult::Acquired(Self::new(
+            Ok(Some(AcquireResult::Acquired(Box::new(Self::new(
                 redis_client.cloned(),
                 lock_key.to_string(),
                 lock_value,
-            ))))
+            )))))
         } else {
             Ok(Some(AcquireResult::Contended))
         }
