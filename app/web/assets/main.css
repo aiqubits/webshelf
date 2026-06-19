@@ -190,6 +190,112 @@ input, textarea, select {
   border-color: rgba(252, 165, 165, 0.5);
 }
 
+/* ─── 表格包装器（包含表 + 分页） ──────────── */
+.ws-users__table-wrapper {
+  display: flex;
+  flex-direction: column;
+}
+
+/* 表格嵌入包装器时去掉底部圆角，与分页控件无缝衔接 */
+.ws-users__table-wrapper .ws-table {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+/* ─── 分页控件 ──────────────────────────────── */
+.ws-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 14px 24px;
+  background: rgba(248, 250, 252, 0.6);
+  border: 1px solid var(--color-border-subtle);
+  border-top: none;
+  border-radius: 0 0 var(--radius-3xl) var(--radius-3xl);
+  font-family: var(--font-family);
+  font-size: 12px;
+  color: var(--color-text-muted);
+}
+
+.ws-pagination__info {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.ws-pagination__controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.ws-pagination__btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--color-border-subtle);
+  background: rgba(255, 255, 255, 0.7);
+  color: var(--color-text-secondary);
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 140ms ease;
+}
+
+.ws-pagination__btn:hover:not(:disabled) {
+  background: rgba(99, 102, 241, 0.08);
+  border-color: rgba(99, 102, 241, 0.3);
+  color: var(--color-text-primary);
+}
+
+.ws-pagination__btn:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.ws-pagination__btn:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.ws-pagination__per-page {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 8px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+}
+
+.ws-pagination__select {
+  appearance: none;
+  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid var(--color-border-subtle);
+  border-radius: 6px;
+  padding: 3px 22px 3px 8px;
+  font-family: var(--font-family);
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-secondary);
+  cursor: pointer;
+  transition: border-color 140ms ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath fill='%2394a3b8' d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+
+.ws-pagination__select:hover {
+  border-color: rgba(99, 102, 241, 0.4);
+}
+
+.ws-pagination__select:focus {
+  outline: 2px solid rgba(99, 102, 241, 0.4);
+  outline-offset: 1px;
+}
+
 /* ─── 表单堆叠（Modal 内） ────────────────────── */
 .ws-form-stack {
   display: flex;

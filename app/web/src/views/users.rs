@@ -3,6 +3,9 @@
 //! Phase 3 —— 完整接入 `client-api` 的 list / create / update / delete。
 //! 通过 `LogBus` 写入 toast + console。
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use chrono::{DateTime, Utc};
 use client_api::UserResponse;
 use dioxus::prelude::dioxus_router::Navigator;
@@ -48,6 +51,18 @@ struct UsersSignals {
     submitting: Signal<bool>,
     form_error: Signal<Option<String>>,
     list_version: Signal<u64>,
+    page: Signal<u64>,
+    per_page: Signal<u64>,
+}
+
+/// 分页状态（快照值 + 信号），用于 `render_table` 传参。
+#[derive(Clone, Copy)]
+struct PaginationState {
+    page: u64,
+    per_page: u64,
+    total: u64,
+    total_pages: u64,
+    page_signal: Signal<u64>,
 }
 
 #[component]
@@ -58,6 +73,10 @@ pub fn Users() -> Element {
 
     let list = use_signal(|| ListState::Loading);
     let list_version = use_signal(|| 0u64);
+    let page = use_signal(|| 1u64);
+    let per_page = use_signal(|| 20u64);
+    let total = use_signal(|| 0u64);
+    let total_pages = use_signal(|| 0u64);
     let SearchSignal(search_query) = use_context::<SearchSignal>();
 
     let signals = UsersSignals {
@@ -72,34 +91,60 @@ pub fn Users() -> Element {
         submitting: use_signal(|| false),
         form_error: use_signal(|| Option::<String>::None),
         list_version,
+        page,
+        per_page,
     };
+
+    // 搜索变更时自动重置到第 1 页，避免翻到后面的页码后搜索结果为空。
+    // 使用 use_hook + Rc<Cell<bool>> 持有非响应式的 "首次运行" 标记，
+    // 避免写入信号触发 effect 自身重入（原 search_reset_done 方案会导致多余的重执行）。
+    {
+        let search_for_reset = search_query;
+        let mut page_for_reset = page;
+        let first_run: Rc<Cell<bool>> = use_hook(|| Rc::new(Cell::new(true))).clone();
+        use_effect(move || {
+            let _ = search_for_reset.read();
+            if first_run.get() {
+                first_run.set(false);
+            } else {
+                page_for_reset.set(1);
+            }
+        });
+    }
 
     {
         let client = auth.client.clone();
         let bus = log_bus;
         let auth_for_effect = auth.clone();
         use_effect(move || {
-            // 读取 list_version 以注册为 use_effect 的响应式依赖。
-            // 值被主动丢弃，只有读取信号的副作用是必要的——
-            // 缺少此行会导致 effect 在列表变更后不会重新执行。
-            let _ = list_version.cloned();
+            // 读取响应式依赖：list_version / page / per_page 变更时重新拉取
+            let _ = list_version();
+            let current_page = page();
+            let current_per_page = per_page();
             let client = client.clone();
             let mut list = list;
             let bus = bus;
             let auth_inner = auth_for_effect.clone();
             let version_check = list_version;
+            let mut total_signal = total;
+            let mut total_pages_signal = total_pages;
             spawn(async move {
                 let version = version_check();
                 list.set(ListState::Loading);
-                let res = client.list_users(1, 20).await;
-                // 丢弃过期响应：若 list_version 已递增，说明另一次获取已启动
-                if version_check() != version {
+                let res = client.list_users(current_page, current_per_page).await;
+                // 丢弃过期响应：list_version / page / per_page 任一变化均视为过期
+                if version_check() != version
+                    || page() != current_page
+                    || per_page() != current_per_page
+                {
                     return;
                 }
                 match res {
-                    Ok(page) => {
+                    Ok(page_data) => {
                         push_log_ok(bus, HttpMethod::Get, "/api/users");
-                        list.set(ListState::Loaded(page.items));
+                        total_signal.set(page_data.total);
+                        total_pages_signal.set(page_data.total_pages);
+                        list.set(ListState::Loaded(page_data.items));
                     }
                     Err(err) => {
                         if crate::api::handle_unauth(&err, auth_inner, nav, bus).await {
@@ -118,6 +163,10 @@ pub fn Users() -> Element {
 
     let list_snapshot = list.cloned();
     let search_text = search_query.cloned();
+    let page_val = page();
+    let per_page_val = per_page();
+    let total_val = total();
+    let total_pages_val = total_pages();
     let kind_snapshot = *signals.modal_kind.read();
     let form_error_snapshot = signals.form_error.read().clone();
     let submitting_snapshot = *signals.submitting.read();
@@ -178,6 +227,13 @@ pub fn Users() -> Element {
                         current_user_id,
                         actor_is_system,
                         actor_is_admin,
+                        PaginationState {
+                            page: page_val,
+                            per_page: per_page_val,
+                            total: total_val,
+                            total_pages: total_pages_val,
+                            page_signal: page,
+                        },
                     )
                 }
             }
@@ -204,10 +260,11 @@ pub fn Users() -> Element {
 fn render_table(
     list_snapshot: ListState,
     search_text: String,
-    signals: UsersSignals,
+    mut signals: UsersSignals,
     current_user_id: String,
     actor_is_system: bool,
     actor_is_admin: bool,
+    pagination: PaginationState,
 ) -> Element {
     match list_snapshot {
         ListState::Loading => rsx! {
@@ -248,11 +305,73 @@ fn render_table(
                     )
                 })
                 .collect();
+
+            let PaginationState {
+                page,
+                per_page,
+                total,
+                total_pages,
+                page_signal,
+            } = pagination;
+            let has_prev = page > 1;
+            let has_next = page < total_pages;
+
+            let mut prev_sig = page_signal;
+            let on_prev = move |_: MouseEvent| {
+                prev_sig.set(page.saturating_sub(1).max(1));
+            };
+            let mut next_sig = page_signal;
+            let on_next = move |_: MouseEvent| {
+                next_sig.set((page + 1).min(total_pages));
+            };
+            let pagination_info = if total_pages == 0 {
+                format!("共 {total} 个用户")
+            } else {
+                format!("共 {total} 个用户，第 {page} / {total_pages} 页")
+            };
+
             rsx! {
-                DataTable {
-                    columns,
-                    rows,
-                    empty: Some(rsx! { "暂无用户" }),
+                div { class: "ws-users__table-wrapper",
+                    DataTable {
+                        columns,
+                        rows,
+                        empty: Some(rsx! { "暂无用户" }),
+                    }
+                    div { class: "ws-pagination",
+                        div { class: "ws-pagination__info", "{pagination_info}" }
+                        div { class: "ws-pagination__controls",
+                            button {
+                                class: "ws-pagination__btn",
+                                disabled: !has_prev,
+                                onclick: on_prev,
+                                "上一页"
+                            }
+                            button {
+                                class: "ws-pagination__btn",
+                                disabled: !has_next,
+                                onclick: on_next,
+                                "下一页"
+                            }
+                            div { class: "ws-pagination__per-page",
+                                span { "每页" }
+                                select {
+                                    class: "ws-pagination__select",
+                                    value: "{per_page}",
+                                    onchange: move |evt| {
+                                        if let Ok(v) = evt.value().parse::<u64>() {
+                                            let v = v.clamp(1, 100);
+                                            signals.per_page.set(v);
+                                            signals.page.set(1);
+                                        }
+                                    },
+                                    option { value: "20", "20" }
+                                    option { value: "50", "50" }
+                                    option { value: "100", "100" }
+                                }
+                                span { "条" }
+                            }
+                        }
+                    }
                 }
             }
         }
