@@ -7,7 +7,6 @@
   border: 1px solid var(--color-border-subtle);
   border-radius: var(--radius-3xl);
   box-shadow: var(--shadow-sm);
-  overflow: hidden;
 }
 
 .ws-table__table {
@@ -38,9 +37,7 @@
 .ws-table__align--right { text-align: right; }
 
 /* Tailwind 风格的固定宽度工具类，供 Column::width 使用 */
-.ws-table__table .w-16 { width: 4rem; }
 .ws-table__table .w-24 { width: 6rem; }
-.ws-table__table .w-32 { width: 8rem; }
 .ws-table__table .w-40 { width: 10rem; }
 .ws-table__table .w-44 { width: 11rem; }
 

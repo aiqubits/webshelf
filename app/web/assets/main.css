@@ -194,12 +194,55 @@ input, textarea, select {
 .ws-users__table-wrapper {
   display: flex;
   flex-direction: column;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
-/* 表格嵌入包装器时去掉底部圆角，与分页控件无缝衔接 */
+/* 表格嵌入包装器时：恢复 overflow:hidden 以裁切圆角，由 wrapper 提供滚动 */
 .ws-users__table-wrapper .ws-table {
+  overflow: hidden;
   border-bottom-left-radius: 0;
   border-bottom-right-radius: 0;
+  min-width: 42rem;
+}
+
+/* 用户名单元格 —— 悬停显示 Snowflake ID tooltip */
+.ws-table__name-cell {
+  cursor: help;
+  text-decoration: underline dotted rgba(148, 163, 184, 0.5) 1px;
+  text-underline-offset: 3px;
+  transition: text-decoration-color 150ms ease;
+  max-width: 10rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.ws-table__name-cell:hover {
+  text-decoration-color: var(--color-text-secondary);
+}
+
+/* 移动端：触屏设备无法触发 title tooltip，通过 CSS 显示 Snowflake ID */
+@media (hover: none) and (pointer: coarse) {
+  .ws-table__name-cell {
+    cursor: default;
+    text-decoration: none;
+    max-width: 8rem;
+  }
+
+  .ws-table__name-cell::after {
+    content: attr(data-id);
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--color-text-muted);
+    margin-top: 2px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
 }
 
 /* ─── 分页控件 ──────────────────────────────── */
@@ -215,6 +258,7 @@ input, textarea, select {
   border-top: none;
   border-radius: 0 0 var(--radius-3xl) var(--radius-3xl);
   font-family: var(--font-family);
+  min-width: 42rem;
   font-size: 12px;
   color: var(--color-text-muted);
 }

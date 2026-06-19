@@ -209,7 +209,7 @@ pub fn Users() -> Element {
                 div { class: "ws-users__header-actions",
                     span { class: "ws-users__guard-pill",
                         ShieldHalf {}
-                        "require_admin 中间件保护区域"
+                        "require_admin 保护"
                     }
                     Button { onclick: open_create,
                         Plus {}
@@ -422,8 +422,14 @@ fn row_element(
     };
     rsx! {
         tr { key: "{id_for_key}",
-            td { class: "ws-table__mono", "{id_for_key}" }
-            td { "{name}" }
+            td {
+                span {
+                    class: "ws-table__name-cell",
+                    title: "ID: {id_for_key}",
+                    "data-id": "{id_for_key}",
+                    "{name}"
+                }
+            }
             td { "{email}" }
             td {
                 if role == "admin" {
@@ -1041,12 +1047,11 @@ fn render_form_modal(
 
 fn build_columns() -> Vec<Column> {
     vec![
-        Column::new("ID").width("w-32").align(Align::Left),
-        Column::new("账户身份").align(Align::Left),
-        Column::new("安全邮箱").align(Align::Left),
-        Column::new("授权标签").align(Align::Left),
+        Column::new("用户名").align(Align::Left),
+        Column::new("邮箱").align(Align::Left),
+        Column::new("角色").align(Align::Left),
         Column::new("余额").width("w-24").align(Align::Right),
-        Column::new("实例孵化时间").width("w-40").align(Align::Left),
+        Column::new("注册时间").width("w-40").align(Align::Left),
         Column::new("操作").width("w-44").align(Align::Center),
     ]
 }

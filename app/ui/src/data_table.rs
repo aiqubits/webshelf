@@ -29,7 +29,7 @@ impl Align {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Column {
     pub header: String,
-    /// Tailwind 风格的宽度类，如 `"w-16"`、`"w-32"`、`"w-40"`。
+    /// Tailwind 风格的宽度类，如 `"w-24"`、`"w-40"`、`"w-44"`。
     pub width: Option<String>,
     pub align: Align,
 }
@@ -61,10 +61,7 @@ pub fn DataTable(
     #[props(default)] empty: Option<Element>,
 ) -> Element {
     rsx! {
-        document::Link {
-            rel: "stylesheet",
-            href: asset!("/assets/styling/data_table.css"),
-        }
+        document::Link { rel: "stylesheet", href: asset!("/assets/styling/data_table.css") }
         div { class: "ws-table",
             table { class: "ws-table__table",
                 thead { class: "ws-table__head",

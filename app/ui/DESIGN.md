@@ -1020,7 +1020,7 @@ API 日志流模拟终端。
 
 **规格**：
 - 标题：`{typography.heading-xl}` (20px / 700)，`{colors.text-primary}`
-- 管理员区域 tag：`text-xs font-semibold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full border border-indigo-100`，显示 "require_admin 中间件保护区域"
+- 管理员区域 tag：`text-xs font-semibold bg-indigo-50 text-indigo-600 px-2 py-0.5 rounded-full border border-indigo-100`，显示 "require_admin 保护"
 - "创建新用户"按钮：Button 组件
 - 表格：DataTable 组件
 - 时间列（实例孵化时间）：`{typography.caption-mono}`，`{colors.text-muted}`
