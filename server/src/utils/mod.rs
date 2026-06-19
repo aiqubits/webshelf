@@ -1,4 +1,5 @@
 pub mod config;
+pub mod db_router;
 pub mod error;
 pub mod extractor;
 pub mod logger;

@@ -1,5 +1,6 @@
 use crate::middlewares::auth::generate_token;
 use crate::repositories::user::Entity as UserEntity;
+use crate::utils::db_router::AutoRouter;
 use crate::utils::password::{hash_password, verify_password};
 use anyhow::Context;
 use rand::RngCore;
@@ -9,6 +10,7 @@ use sea_orm::{
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Typed errors for authentication operations
@@ -22,7 +24,7 @@ pub enum AuthError {
 
 /// Authentication service for user login and token management
 pub struct AuthService {
-    db: DatabaseConnection,
+    db: Arc<AutoRouter>,
     jwt_secret: String,
     jwt_expiry_seconds: u64,
     jwt_remember_expiry_seconds: u64,
@@ -54,7 +56,7 @@ pub struct LoginResponse {
 impl AuthService {
     /// Create a new authentication service
     pub fn new(
-        db: DatabaseConnection,
+        db: Arc<AutoRouter>,
         jwt_secret: String,
         jwt_expiry_seconds: u64,
         jwt_remember_expiry_seconds: u64,
@@ -82,7 +84,7 @@ impl AuthService {
         let email_normalized = request.email.to_lowercase();
         let user_result = UserEntity::find()
             .filter(crate::repositories::user::Column::Email.eq(&email_normalized))
-            .one(&self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to query user")?;
 

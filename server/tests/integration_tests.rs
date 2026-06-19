@@ -28,6 +28,7 @@ async fn create_test_app() -> Router {
     use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
     use redis::Client as RedisClient;
     use sea_orm::Database;
+    use webshelf_server::AutoRouter;
     use webshelf_server::utils::load_config;
     use webshelf_server::{
         AppState,
@@ -41,14 +42,15 @@ async fn create_test_app() -> Router {
     let db = Database::connect(&config.database_url)
         .await
         .expect("Failed to connect to database");
+    let db = AutoRouter::single(db);
 
     // Run migrations
-    webshelf_server::migrations::run_migrations(&db)
+    webshelf_server::migrations::run_migrations(db.write_conn())
         .await
         .expect("Failed to run migrations");
 
     // Initialize Snowflake ID generator (idempotent — subsequent calls are no-ops)
-    webshelf_server::snowflake::init(&db)
+    webshelf_server::snowflake::init(db.write_conn())
         .await
         .expect("Failed to initialize Snowflake generator");
 
@@ -107,7 +109,7 @@ async fn cleanup_test_users(state: &webshelf_server::AppState) {
 
     let result = UserEntity::delete_many()
         .filter(webshelf_server::repositories::user::Column::Email.contains("@example.com"))
-        .exec(&state.db)
+        .exec(&*state.db)
         .await;
 
     match result {

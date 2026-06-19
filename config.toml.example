@@ -21,6 +21,14 @@ database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@127.0.0.1:5432/w
 # Can be overridden by environment variable: WEBSHELF_REDIS_URL
 redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@127.0.0.1:6379"
 
+# Read replica database URLs (empty = disabled, backward compatible)
+# When configured, SELECT queries are automatically routed to read replicas
+# while INSERT/UPDATE/DELETE always go to the write database.
+# Can be overridden by environment variable: WEBSHELF_DATABASE_READ_URLS
+#   Environment variable format: comma-separated list
+#   Example: export WEBSHELF_DATABASE_READ_URLS="postgres://user:pass@replica1:5432/webshelf,postgres://user:pass@replica2:5432/webshelf"
+database_read_urls = []
+
 # ⚠️  SECURITY WARNING: MUST change this in production!
 # Generate a strong secret with: openssl rand -base64 64
 # The server will refuse to start with this placeholder in non-development mode.
@@ -78,6 +86,59 @@ max_connections = 10
 # Minimum number of idle connections to maintain
 # Can be overridden by environment variable: WEBSHELF_DATABASE__MIN_CONNECTIONS
 min_connections = 1
+# Connection timeout in seconds
+# Can be overridden by environment variable: WEBSHELF_DATABASE__CONNECT_TIMEOUT_SECS
+connect_timeout_secs = 8
+# Idle timeout in seconds
+# Can be overridden by environment variable: WEBSHELF_DATABASE__IDLE_TIMEOUT_SECS
+idle_timeout_secs = 600
+# Acquire timeout in seconds
+# Can be overridden by environment variable: WEBSHELF_DATABASE__ACQUIRE_TIMEOUT_SECS
+acquire_timeout_secs = 30
+
+# Read-write routing configuration (optional, has defaults)
+[database_routing]
+# Read replica selection strategy: round_robin | random | weighted
+# Can be overridden by environment variable: WEBSHELF_DATABASE_ROUTING__STRATEGY
+strategy = "round_robin"
+# Weights for each read replica (only applies to weighted strategy).
+# MUST align with database_read_urls by index position.
+#   e.g., database_read_urls = [url_a, url_b] and read_weights = [3, 1]
+#         means url_a gets weight 3, url_b gets weight 1.
+# Can be overridden by environment variable: WEBSHELF_DATABASE_ROUTING__READ_WEIGHTS
+read_weights = []
+# Extra retry attempts after all read replicas have been tried once.
+# Each extra attempt tries any non-circuit-broken replica (including those
+# that previously failed but whose circuit breaker has expired).
+# Can be overridden by environment variable: WEBSHELF_DATABASE_ROUTING__RETRY_ATTEMPTS
+retry_attempts = 2
+# Circuit breaker duration in milliseconds for a failed read replica
+# Can be overridden by environment variable: WEBSHELF_DATABASE_ROUTING__CIRCUIT_BREAK_MS
+circuit_break_ms = 30000
+# Fall back to the write database when no healthy read replicas are available
+# Can be overridden by environment variable: WEBSHELF_DATABASE_ROUTING__FALLBACK_TO_WRITE
+fallback_to_write = true
+# Background health check interval in seconds (0 = disabled)
+# Can be overridden by environment variable: WEBSHELF_DATABASE_ROUTING__HEALTH_CHECK_INTERVAL_SECS
+health_check_interval_secs = 15
+
+# Read replica connection pool configuration (optional, independent from write pool)
+[database_read]
+# Maximum number of connections in the pool (default: 20)
+# Can be overridden by environment variable: WEBSHELF_DATABASE_READ__MAX_CONNECTIONS
+max_connections = 20
+# Minimum number of idle connections to maintain (default: 2)
+# Can be overridden by environment variable: WEBSHELF_DATABASE_READ__MIN_CONNECTIONS
+min_connections = 2
+# Connection timeout in seconds (default: 5, independent from write pool)
+# Can be overridden by environment variable: WEBSHELF_DATABASE_READ__CONNECT_TIMEOUT_SECS
+connect_timeout_secs = 5
+# Idle timeout in seconds (default: 600)
+# Can be overridden by environment variable: WEBSHELF_DATABASE_READ__IDLE_TIMEOUT_SECS
+idle_timeout_secs = 600
+# Acquire timeout in seconds (default: 10, independent from write pool)
+# Can be overridden by environment variable: WEBSHELF_DATABASE_READ__ACQUIRE_TIMEOUT_SECS
+acquire_timeout_secs = 10
 
 # Email (SMTP) configuration
 # When left empty / default, the email service is disabled and registration

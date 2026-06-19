@@ -36,6 +36,10 @@ spec:
             secretKeyRef:
               name: webshelf-secrets
               key: database_url
+        # Read replica URLs (comma-separated, optional)
+        # Set when PostgreSQL read replicas are deployed.
+        - name: WEBSHELF_DATABASE_READ_URLS
+          value: ""
         - name: WEBSHELF_REDIS_URL
           valueFrom:
             secretKeyRef:

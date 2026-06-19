@@ -13,7 +13,7 @@ use tower_http::{
 };
 
 use crate::{
-    AppConfig, AppState,
+    AppConfig, AppState, AutoRouter,
     middlewares::{
         auth::auth_middleware,
         panic::{self, panic_middleware},
@@ -87,9 +87,15 @@ pub async fn init_database(config: &AppConfig) -> Result<sea_orm::DatabaseConnec
     connect_options
         .max_connections(config.database.max_connections)
         .min_connections(config.database.min_connections)
-        .connect_timeout(std::time::Duration::from_secs(8))
-        .acquire_timeout(std::time::Duration::from_secs(30))
-        .idle_timeout(std::time::Duration::from_secs(600))
+        .connect_timeout(std::time::Duration::from_secs(
+            config.database.connect_timeout_secs,
+        ))
+        .acquire_timeout(std::time::Duration::from_secs(
+            config.database.acquire_timeout_secs,
+        ))
+        .idle_timeout(std::time::Duration::from_secs(
+            config.database.idle_timeout_secs,
+        ))
         .max_lifetime(std::time::Duration::from_secs(1800))
         .test_before_acquire(true);
 
@@ -138,7 +144,7 @@ pub async fn init_redis(config: &AppConfig) -> Result<Option<RedisClient>> {
 
 /// Create shared application state
 pub fn create_app_state(
-    db: sea_orm::DatabaseConnection,
+    db: Arc<AutoRouter>,
     redis: Option<RedisClient>,
     config: AppConfig,
 ) -> AppState {
@@ -325,24 +331,48 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
         .unwrap_or_else(|| app_config.server.host.clone());
     let port = cli_args.port.unwrap_or(app_config.server.port);
 
-    let db = init_database(&app_config).await?;
-    run_database_migrations(&db).await?;
+    let db = if app_config.database_read_urls.is_empty() {
+        // No read replicas configured — single-database mode (backward compatible)
+        let write_db = init_database(&app_config).await?;
+        AutoRouter::single(write_db)
+    } else {
+        // Read replicas configured — read-write split mode
+        let db = AutoRouter::new(
+            &app_config.database_url,
+            &app_config.database_read_urls,
+            &app_config.database,
+            &app_config.database_read,
+            &app_config.database_routing,
+        )
+        .await
+        .context("Failed to initialize AutoRouter with read replicas")?;
 
-    // Clean up expired refresh tokens to prevent stale row accumulation.
-    // This is a best-effort maintenance operation — a failure is not fatal
-    // because expired rows are already filtered out at query time.
-    if let Err(e) = crate::services::auth::cleanup_expired_refresh_tokens(&db).await {
+        // Start background health check if configured
+        if app_config.database_routing.health_check_interval_secs > 0 {
+            db.clone()
+                .start_health_check(std::time::Duration::from_secs(
+                    app_config.database_routing.health_check_interval_secs,
+                ));
+        }
+
+        db
+    };
+
+    // Migrations must run on the write database
+    run_database_migrations(db.write_conn()).await?;
+
+    // Clean up expired refresh tokens (write database only)
+    if let Err(e) = crate::services::auth::cleanup_expired_refresh_tokens(db.write_conn()).await {
         tracing::warn!(
             "Failed to cleanup expired refresh tokens (non-fatal): {:?}",
             e
         );
     }
 
-    // Initialize Snowflake ID generator (must happen before seed_system_admin
-    // which uses generate_id() to create the system admin user's ID).
-    let _worker_handle = crate::snowflake::init(&db).await?;
+    // Initialize Snowflake ID generator (must happen before seed_system_admin)
+    let _worker_handle = crate::snowflake::init(db.write_conn()).await?;
 
-    seed_system_admin(&db, &app_config).await?;
+    seed_system_admin(db.write_conn(), &app_config).await?;
 
     let redis_client = init_redis(&app_config).await?;
 

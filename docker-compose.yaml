@@ -19,6 +19,10 @@ services:
       # ⚠️  For production, always set WEBSHELF_POSTGRES_PASSWORD in .env; the fallback below
       #     is for local development only and MUST be changed before deploying.
       - WEBSHELF_DATABASE_URL=postgres://postgres:${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}@postgres:5432/webshelf
+      # Read replica database URLs (comma-separated, empty = disabled).
+      # When configured, SELECT queries are automatically routed to read replicas.
+      # Example: postgres://postgres:password@pg-replica1:5432/webshelf,postgres://postgres:password@pg-replica2:5432/webshelf
+      - WEBSHELF_DATABASE_READ_URLS=${WEBSHELF_DATABASE_READ_URLS:-}
       # Redis URL with password authentication.
       # ⚠️  IMPORTANT: If WEBSHELF_REDIS_PASSWORD contains URL-special characters
       #     (@  :  /  #  ?), they MUST be percent-encoded in the URL

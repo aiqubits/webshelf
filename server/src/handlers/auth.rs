@@ -715,7 +715,7 @@ pub async fn logout(State(state): State<AppState>, headers: HeaderMap) -> Respon
         // Best-effort: a failure to delete the row is not fatal — the
         // cookie clear still ends the browser-side session, and a
         // missing/expired row simply means rows_affected = 0.
-        if let Err(e) = service.delete_refresh_token(&state.db, &token_hash).await {
+        if let Err(e) = service.delete_refresh_token(&*state.db, &token_hash).await {
             tracing::warn!(
                 "Failed to delete refresh token during logout (continuing): {:?}",
                 e

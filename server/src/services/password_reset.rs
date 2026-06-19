@@ -1,4 +1,5 @@
 use crate::repositories::user::{Column, Entity as UserEntity};
+use crate::utils::db_router::AutoRouter;
 use crate::utils::password::hash_password;
 use anyhow::Context;
 use argon2::password_hash::PasswordHash;
@@ -7,9 +8,10 @@ use chrono::{Duration, Utc};
 use emailserver::EmailService;
 use rand::Rng;
 use sea_orm::{
-    ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection, EntityTrait, QueryFilter,
-    Statement, TransactionTrait, sea_query::Expr,
+    ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, QueryFilter, Statement,
+    TransactionTrait, sea_query::Expr,
 };
+use std::sync::Arc;
 
 const CODE_EXPIRY_MINUTES: i64 = 10;
 const RESEND_COOLDOWN_SECONDS: i64 = 60;
@@ -71,12 +73,12 @@ fn verify_code(code: &str, hash: &str) -> anyhow::Result<bool> {
 }
 
 pub struct PasswordResetService {
-    db: DatabaseConnection,
+    db: Arc<AutoRouter>,
     email: EmailService,
 }
 
 impl PasswordResetService {
-    pub fn new(db: DatabaseConnection, email: EmailService) -> Self {
+    pub fn new(db: Arc<AutoRouter>, email: EmailService) -> Self {
         Self { db, email }
     }
 
@@ -86,7 +88,7 @@ impl PasswordResetService {
     ) -> Result<Option<crate::repositories::user::Model>, PasswordResetError> {
         UserEntity::find()
             .filter(Column::Email.eq(email))
-            .one(&self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to query user")
             .map_err(Into::into)
@@ -152,7 +154,7 @@ impl PasswordResetService {
                     .is_null()
                     .or(Column::PasswordResetSentAt.lte(cooldown_threshold)),
             )
-            .exec(&self.db)
+            .exec(&*self.db)
             .await
             .context("Failed to store password-reset code")?;
 
@@ -331,7 +333,7 @@ impl PasswordResetService {
             )
             .filter(Column::Id.eq(user_id))
             .filter(Column::PasswordResetFailedAttempts.lt(MAX_FAILED_ATTEMPTS))
-            .exec(&self.db)
+            .exec(&*self.db)
             .await
             .context("Failed to increment reset failed attempts")?;
 

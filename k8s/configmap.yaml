@@ -35,6 +35,37 @@ data:
     [database]
     max_connections = 10
     min_connections = 1
+    connect_timeout_secs = 8
+    idle_timeout_secs = 600
+    acquire_timeout_secs = 30
+
+    # Read replica database URLs (empty = disabled)
+    # NOTE: database_read_urls are optional — when empty the system runs in
+    # single-database mode (backward compatible). Set only if you have
+    # PostgreSQL read replicas deployed.
+    # Can be overridden by env var: WEBSHELF_DATABASE_READ_URLS
+    database_read_urls = []
+
+    # Read-write routing configuration
+    [database_routing]
+    strategy = "round_robin"
+    # Read weights; must align with database_read_urls by index position
+    read_weights = []
+    # Extra retry attempts after all read replicas have been tried once.
+    # Each extra attempt tries non-circuit-broken replicas (e.g., those
+    # that failed previously but whose circuit breaker has expired).
+    retry_attempts = 2
+    circuit_break_ms = 30000
+    fallback_to_write = true
+    health_check_interval_secs = 15
+
+    # Read replica connection pool configuration
+    [database_read]
+    max_connections = 20
+    min_connections = 2
+    connect_timeout_secs = 5
+    idle_timeout_secs = 600
+    acquire_timeout_secs = 10
 
   # ------------------------------------------
   # Individual keys for env var injection

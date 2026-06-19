@@ -1,15 +1,17 @@
+use std::sync::Arc;
+
 use crate::repositories::user::{
     ActiveModel, Column, CreateUserInput, Entity as UserEntity, Model as UserModel,
     UpdateUserInput, UserResponse,
 };
+use crate::utils::db_router::AutoRouter;
 use crate::utils::password::{hash_password, verify_password};
 use crate::utils::validator::require_password;
 use anyhow::Context;
 use chrono::Utc;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, DatabaseConnection,
-    EntityTrait, PaginatorTrait, QueryFilter, QueryOrder, QuerySelect, Set, Statement,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, ConnectionTrait, DatabaseBackend, EntityTrait, PaginatorTrait,
+    QueryFilter, QueryOrder, QuerySelect, Set, Statement, TransactionTrait,
 };
 
 /// Balance scale factor: 1 display unit = 10^10 stored units (1 × 10^10).
@@ -78,7 +80,7 @@ fn check_balance_rbac(target: &UserModel, actor_role: &str) -> Result<(), UserEr
 
 /// User service for CRUD operations
 pub struct UserService {
-    db: DatabaseConnection,
+    db: Arc<AutoRouter>,
 }
 /// Pagination parameters
 #[derive(Debug)]
@@ -108,7 +110,7 @@ pub struct PaginatedResponse<T> {
 
 impl UserService {
     /// Create a new user service
-    pub fn new(db: DatabaseConnection) -> Self {
+    pub fn new(db: Arc<AutoRouter>) -> Self {
         Self { db }
     }
 
@@ -172,7 +174,7 @@ impl UserService {
         };
 
         tracing::debug!("Inserting user into database");
-        let result = user.insert(&self.db).await.map_err(|e| {
+        let result = user.insert(&*self.db).await.map_err(|e| {
             if matches!(
                 e.sql_err(),
                 Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
@@ -192,9 +194,14 @@ impl UserService {
     ///
     /// This is used internally (e.g., `get_me`) where the actor is fetching their
     /// own data. No role-based filtering is applied.
+    ///
+    /// NOTE: This query routes through AutoRouter and may hit a read replica.
+    /// If the caller requires read-your-writes consistency (e.g., the user just
+    /// updated their profile and needs to see the latest data), use
+    /// `self.db.write_conn()` directly instead.
     pub async fn get_user(&self, id: i64) -> Result<Option<UserResponse>, UserError> {
         let user = UserEntity::find_by_id(id)
-            .one(&self.db)
+            .one(&*self.db)
             .await
             .context("Failed to query user")?;
 
@@ -220,7 +227,14 @@ impl UserService {
             query = query.filter(Column::Role.eq("user"));
         }
 
-        let user = query.one(&self.db).await.context("Failed to query user")?;
+        // READ FROM WRITE: guarantees read-your-writes consistency so that a
+        // recently-created user is not falsely reported as NotFound due to
+        // read replica replication lag (e.g., admin creates a user then
+        // immediately opens the detail view via this endpoint).
+        let user = query
+            .one(self.db.write_conn())
+            .await
+            .context("Failed to query user")?;
 
         Ok(user.map(UserResponse::from))
     }
@@ -228,7 +242,7 @@ impl UserService {
     /// Get user by ID including the password hash (for internal auth flows).
     pub async fn get_user_with_hash(&self, id: i64) -> Result<Option<UserModel>, UserError> {
         let user = UserEntity::find_by_id(id)
-            .one(&self.db)
+            .one(&*self.db)
             .await
             .context("Failed to query user")?;
 
@@ -240,7 +254,7 @@ impl UserService {
         let email_normalized = email.to_lowercase();
         let user = UserEntity::find()
             .filter(Column::Email.eq(&email_normalized))
-            .one(&self.db)
+            .one(&*self.db)
             .await
             .context("Failed to query user")?;
 
@@ -254,8 +268,12 @@ impl UserService {
         input: UpdateUserInput,
         actor_role: &str,
     ) -> Result<UserResponse, UserError> {
+        // READ FROM WRITE: guarantees read-your-writes consistency — a user
+        // that exists on the write database must not appear as NotFound due to
+        // replication lag, even if this operation was triggered immediately
+        // after creation by another node.
         let user = UserEntity::find_by_id(id)
-            .one(&self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to query user")?
             .ok_or(UserError::NotFound)?;
@@ -369,12 +387,12 @@ impl UserService {
             // (ActiveModel::update returns the model with the old token_version
             //  because it was set to NotSet in the SET clause).
             UserEntity::find_by_id(id)
-                .one(&self.db)
+                .one(self.db.write_conn())
                 .await
                 .context("Failed to re-query user after role change")?
                 .ok_or(UserError::NotFound)?
         } else {
-            active_model.update(&self.db).await.map_err(|e| {
+            active_model.update(&*self.db).await.map_err(|e| {
                 if matches!(
                     e.sql_err(),
                     Some(sea_orm::SqlErr::UniqueConstraintViolation(_))
@@ -404,8 +422,11 @@ impl UserService {
         current_password: &str,
         new_password: &str,
     ) -> Result<(UserResponse, i32), UserError> {
+        // READ FROM WRITE: must see the latest user state to avoid falsely
+        // rejecting a password change when the user record is not yet visible
+        // on a lagging read replica.
         let user = UserEntity::find_by_id(id)
-            .one(&self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to query user")?
             .ok_or(UserError::NotFound)?;
@@ -488,7 +509,7 @@ impl UserService {
 
         // Re-query to obtain the atomically-incremented token_version.
         let updated = UserEntity::find_by_id(id)
-            .one(&self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to re-query user after password change")?
             .ok_or(UserError::NotFound)?;
@@ -503,10 +524,10 @@ impl UserService {
         actor_role: &str,
         actor_id: i64,
     ) -> Result<(), UserError> {
-        // Fetch target first so non-existent users always get NotFound
-        // regardless of actor_id or role checks (anti-enumeration).
+        // Fetch target from the write database so that a recently-created
+        // user is not falsely reported as NotFound due to read replica lag.
         let target = UserEntity::find_by_id(id)
-            .one(&self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to query user")?
             .ok_or(UserError::NotFound)?;
@@ -550,7 +571,7 @@ impl UserService {
         }
 
         let result = delete_stmt
-            .exec(&self.db)
+            .exec(&*self.db)
             .await
             .context("Failed to delete user")?;
 
@@ -580,7 +601,7 @@ impl UserService {
             query = query.filter(Column::Role.eq("user"));
         }
 
-        let paginator = query.paginate(&self.db, per_page);
+        let paginator = query.paginate(&*self.db, per_page);
 
         let total = paginator
             .num_items()

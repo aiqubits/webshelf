@@ -22,6 +22,9 @@ http-body-util = "0.1"
 
 # Database
 sea-orm = { version = "1.1.20", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
+async-trait = "0.1"
+parking_lot = "0.12"
+futures = "0.3"
 
 # Redis for distributed locking
 redis = { version = "1.2.3", features = ["tokio-comp", "connection-manager"] }

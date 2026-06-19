@@ -30,6 +30,7 @@ async fn create_test_app() -> Router {
     use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
     use redis::Client as RedisClient;
     use sea_orm::Database;
+    use webshelf_server::AutoRouter;
     use webshelf_server::utils::load_config;
     use webshelf_server::{
         AppState,
@@ -41,12 +42,12 @@ async fn create_test_app() -> Router {
     let db = Database::connect(&config.database_url)
         .await
         .expect("Failed to connect to database");
-
-    webshelf_server::migrations::run_migrations(&db)
+    let db = AutoRouter::single(db);
+    webshelf_server::migrations::run_migrations(db.write_conn())
         .await
         .expect("Failed to run migrations");
 
-    webshelf_server::snowflake::init(&db)
+    webshelf_server::snowflake::init(db.write_conn())
         .await
         .expect("Failed to initialize Snowflake generator");
 

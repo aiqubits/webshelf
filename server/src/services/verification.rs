@@ -1,13 +1,11 @@
 use crate::repositories::user::{ActiveModel, Column, Entity as UserEntity};
+use crate::utils::db_router::AutoRouter;
 use anyhow::Context;
 use argon2::{Argon2, PasswordHasher, PasswordVerifier, password_hash::SaltString};
 use chrono::{Duration, Utc};
 use emailserver::EmailService;
 use rand::Rng;
-use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, Set,
-    sea_query::Expr,
-};
+use sea_orm::{ActiveModelTrait, ColumnTrait, EntityTrait, QueryFilter, Set, sea_query::Expr};
 use std::sync::{Arc, OnceLock};
 use tokio::sync::Semaphore;
 
@@ -47,13 +45,13 @@ pub enum VerificationError {
 }
 
 pub struct VerificationService {
-    db: DatabaseConnection,
+    db: Arc<AutoRouter>,
     email: EmailService,
     email_send_limiter: Arc<Semaphore>,
 }
 
 impl VerificationService {
-    pub fn new(db: DatabaseConnection, email: EmailService) -> Self {
+    pub fn new(db: Arc<AutoRouter>, email: EmailService) -> Self {
         Self {
             db,
             email,
@@ -91,7 +89,7 @@ impl VerificationService {
     ) -> Result<Option<crate::repositories::user::Model>, VerificationError> {
         UserEntity::find()
             .filter(Column::Email.eq(email))
-            .one(&self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to query user")
             .map_err(Into::into)
@@ -118,7 +116,7 @@ impl VerificationService {
         active_model.verification_failed_attempts = Set(0);
         active_model.updated_at = Set(now);
         let updated = active_model
-            .update(&self.db)
+            .update(&*self.db)
             .await
             .context("Failed to store verification code")?;
 
@@ -240,7 +238,7 @@ impl VerificationService {
         active_model.email_verified = Set(true);
         active_model.updated_at = Set(now);
         active_model
-            .update(&self.db)
+            .update(&*self.db)
             .await
             .context("Failed to auto-verify email")?;
 
@@ -326,7 +324,7 @@ impl VerificationService {
         active_model.verification_failed_attempts = Set(0);
         active_model.updated_at = Set(now);
         let updated_user = active_model
-            .update(&self.db)
+            .update(&*self.db)
             .await
             .context("Failed to verify email")?;
 
@@ -349,7 +347,7 @@ impl VerificationService {
             )
             .filter(Column::Id.eq(user_id))
             .filter(Column::VerificationFailedAttempts.lt(MAX_FAILED_ATTEMPTS))
-            .exec(&self.db)
+            .exec(&*self.db)
             .await
             .context("Failed to increment failed attempts")?;
 
@@ -424,7 +422,7 @@ impl VerificationService {
                     .is_null()
                     .or(Column::VerificationCodeSentAt.lte(cooldown_threshold)),
             )
-            .exec(&self.db)
+            .exec(&*self.db)
             .await
             .context("Failed to store verification code")?;
 

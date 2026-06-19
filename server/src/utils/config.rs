@@ -13,6 +13,18 @@ pub struct AppConfig {
     #[serde(default = "default_redis_url")]
     pub redis_url: String,
 
+    /// Read replica database URLs (empty = no read-write split, backward compatible)
+    #[serde(default)]
+    pub database_read_urls: Vec<String>,
+
+    /// Read-write routing configuration
+    #[serde(default)]
+    pub database_routing: DatabaseRoutingConfig,
+
+    /// Read replica connection pool configuration
+    #[serde(default)]
+    pub database_read: DatabaseReadConfig,
+
     /// JWT secret key for token signing
     #[serde(default = "default_jwt_secret")]
     pub jwt_secret: String,
@@ -80,6 +92,18 @@ pub struct DatabaseConfig {
     /// Minimum number of idle connections to maintain
     #[serde(default = "default_min_connections")]
     pub min_connections: u32,
+
+    /// Connection timeout in seconds
+    #[serde(default = "default_connect_timeout")]
+    pub connect_timeout_secs: u64,
+
+    /// Idle timeout in seconds
+    #[serde(default = "default_idle_timeout")]
+    pub idle_timeout_secs: u64,
+
+    /// Acquire timeout in seconds
+    #[serde(default = "default_acquire_timeout")]
+    pub acquire_timeout_secs: u64,
 }
 
 fn default_max_connections() -> u32 {
@@ -88,12 +112,103 @@ fn default_max_connections() -> u32 {
 fn default_min_connections() -> u32 {
     1
 }
+fn default_connect_timeout() -> u64 {
+    8
+}
+fn default_idle_timeout() -> u64 {
+    600
+}
+fn default_acquire_timeout() -> u64 {
+    30
+}
 
 impl Default for DatabaseConfig {
     fn default() -> Self {
         Self {
             max_connections: default_max_connections(),
             min_connections: default_min_connections(),
+            connect_timeout_secs: default_connect_timeout(),
+            idle_timeout_secs: default_idle_timeout(),
+            acquire_timeout_secs: default_acquire_timeout(),
+        }
+    }
+}
+
+/// Read-write routing configuration
+#[derive(Debug, Deserialize, Clone)]
+pub struct DatabaseRoutingConfig {
+    /// Read replica selection strategy: round_robin | random | weighted
+    #[serde(default = "default_read_strategy")]
+    pub strategy: String,
+
+    /// Weights for each read replica (only applies to weighted strategy)
+    #[serde(default)]
+    pub read_weights: Vec<u32>,
+
+    /// Extra retry attempts after each read replica has been tried once.
+    /// Each extra attempt retries any non-circuit-broken replica (including
+    /// those whose circuit breaker has expired since the first attempt).
+    #[serde(default = "default_retry_attempts")]
+    pub retry_attempts: usize,
+
+    /// Circuit breaker duration in milliseconds for a failed read replica
+    #[serde(default = "default_circuit_break_ms")]
+    pub circuit_break_ms: u64,
+
+    /// Fall back to the write database when no healthy read replicas are available
+    #[serde(default = "default_fallback_to_write")]
+    pub fallback_to_write: bool,
+
+    /// Background health check interval in seconds (0 = disabled)
+    #[serde(default = "default_health_check_interval_secs")]
+    pub health_check_interval_secs: u64,
+}
+
+impl Default for DatabaseRoutingConfig {
+    fn default() -> Self {
+        Self {
+            strategy: default_read_strategy(),
+            read_weights: Vec::new(),
+            retry_attempts: default_retry_attempts(),
+            circuit_break_ms: default_circuit_break_ms(),
+            fallback_to_write: default_fallback_to_write(),
+            health_check_interval_secs: default_health_check_interval_secs(),
+        }
+    }
+}
+
+/// Read replica connection pool configuration (independent from the write pool)
+#[derive(Debug, Deserialize, Clone)]
+pub struct DatabaseReadConfig {
+    /// Maximum number of connections in the pool
+    #[serde(default = "default_read_max_connections")]
+    pub max_connections: u32,
+
+    /// Minimum number of idle connections to maintain
+    #[serde(default = "default_read_min_connections")]
+    pub min_connections: u32,
+
+    /// Connection timeout in seconds
+    #[serde(default = "default_read_connect_timeout")]
+    pub connect_timeout_secs: u64,
+
+    /// Idle timeout in seconds
+    #[serde(default = "default_read_idle_timeout")]
+    pub idle_timeout_secs: u64,
+
+    /// Acquire timeout in seconds
+    #[serde(default = "default_read_acquire_timeout")]
+    pub acquire_timeout_secs: u64,
+}
+
+impl Default for DatabaseReadConfig {
+    fn default() -> Self {
+        Self {
+            max_connections: default_read_max_connections(),
+            min_connections: default_read_min_connections(),
+            connect_timeout_secs: default_read_connect_timeout(),
+            idle_timeout_secs: default_read_idle_timeout(),
+            acquire_timeout_secs: default_read_acquire_timeout(),
         }
     }
 }
@@ -138,6 +253,37 @@ fn default_cookie_secure() -> bool {
     true
 }
 
+fn default_read_strategy() -> String {
+    "round_robin".to_string()
+}
+fn default_retry_attempts() -> usize {
+    2
+}
+fn default_circuit_break_ms() -> u64 {
+    30000
+}
+fn default_fallback_to_write() -> bool {
+    true
+}
+fn default_health_check_interval_secs() -> u64 {
+    15
+}
+fn default_read_max_connections() -> u32 {
+    20
+}
+fn default_read_min_connections() -> u32 {
+    2
+}
+fn default_read_connect_timeout() -> u64 {
+    5
+}
+fn default_read_idle_timeout() -> u64 {
+    600
+}
+fn default_read_acquire_timeout() -> u64 {
+    10
+}
+
 fn default_host() -> String {
     "0.0.0.0".to_string()
 }
@@ -175,7 +321,8 @@ pub fn load_config(config_path: &str, env: &str) -> Result<AppConfig> {
                 .separator("__")
                 .try_parsing(true)
                 .list_separator(",")
-                .with_list_parse_key("server.allowed_origins"),
+                .with_list_parse_key("server.allowed_origins")
+                .with_list_parse_key("database_read_urls"),
         )
         .build()
         .context("Failed to build configuration")?;
@@ -248,6 +395,9 @@ mod tests {
             system_admin_password: "change-me-admin-password".to_string(),
             server: ServerConfig::default(),
             database: DatabaseConfig::default(),
+            database_read_urls: Vec::new(),
+            database_routing: DatabaseRoutingConfig::default(),
+            database_read: DatabaseReadConfig::default(),
             email: emailserver::EmailConfig::default(),
         };
         let cloned = config.clone();

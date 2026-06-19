@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AppState;
 use crate::repositories::user::Entity as UserEntity;
+use crate::utils::db_router::AutoRouter;
 use crate::utils::error::ErrorResponse;
 
 /// Cookie names for token delivery — shared with handlers.
@@ -138,20 +139,18 @@ pub async fn auth_middleware(
 }
 
 /// Verify that the token's token_version matches the user's current token_version.
-/// Queries the database directly — the PK lookup is O(1) and fast enough
-/// that caching provides negligible benefit while introducing cache-invalidation
-/// race conditions (token_version changes on password/role changes).
 ///
-/// TODO: For high-throughput deployments (1k+ req/s), consider a Redis-based
-/// (user_id → token_version) cache with per-user TTL equal to JWT remaining
-/// lifetime, falling back to DB on cache miss.
+/// ⚠️  This query MUST be executed against the **write database** via `db.write_conn()`
+/// to guarantee read-your-writes consistency. If routed to a read replica with
+/// replication lag, a recently-changed password would produce a stale token_version
+/// and incorrectly reject the user.
 async fn verify_token_version(
-    db: &sea_orm::DatabaseConnection,
+    db: &AutoRouter,
     user_id: i64,
     token_version: i32,
 ) -> anyhow::Result<()> {
     let user = UserEntity::find_by_id(user_id)
-        .one(db)
+        .one(db.write_conn())
         .await
         .context("Failed to query user for token version check")?;
 
