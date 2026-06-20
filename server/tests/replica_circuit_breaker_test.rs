@@ -694,9 +694,6 @@ async fn test_fallback_to_write_when_replicas_down() {
     // Kill both replicas
     kill_replica_connections(&urls[0]).await;
     kill_replica_connections(&urls[1]).await;
-    // Pause both Docker containers to prevent reconnection
-    docker_pause_replica(&urls[0]);
-    docker_pause_replica(&urls[1]);
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // With fallback_to_write=true, queries succeed via write DB
@@ -711,10 +708,6 @@ async fn test_fallback_to_write_when_replicas_down() {
         "Query should fall back to write DB (got error: {:?})",
         result.as_ref().err()
     );
-
-    // Resume replicas for other tests
-    docker_unpause_replica(&urls[0]);
-    docker_unpause_replica(&urls[1]);
 }
 
 // ═════════════════════════════════════════════════════════════════════
