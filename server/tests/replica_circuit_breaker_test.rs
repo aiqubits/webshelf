@@ -152,62 +152,29 @@ async fn concurrent_reads(router: &Arc<AutoRouter>, n: usize) -> usize {
     success
 }
 
-/// Attempt to pause a replica Docker container to prevent the connection pool
-/// from reconnecting.
+/// Kill all backend connections on a replica repeatedly to prevent the
+/// connection pool from re-establishing a connection.
 ///
-/// Maps replica URL port to container name:
-///   :5433 → pg-replica1
-///   :5434 → pg-replica2
-///
-/// Returns `true` if the Docker pause command was successful.
-fn docker_pause_replica(url: &str) -> bool {
-    let name = if url.contains(":5433") {
-        "pg-replica1"
-    } else if url.contains(":5434") {
-        "pg-replica2"
-    } else {
-        return false;
+/// Uses a single persistent SeaORM connection to call pg_terminate_backend
+/// in a tight loop (~10ms intervals) for the specified duration.
+/// Returns immediately (background task) — the caller should await the handle.
+async fn keep_killing_replica(url: &str, duration_ms: u64) {
+    let conn_opt = Database::connect(url).await;
+    let conn = match conn_opt {
+        Ok(c) => c,
+        Err(e) => {
+            eprintln!("WARNING: Could not connect to {} for keep-kill: {}", url, e);
+            return;
+        }
     };
-    std::process::Command::new("docker")
-        .args(["pause", name])
-        .output()
-        .map(|o| {
-            if !o.status.success() {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                eprintln!("WARNING: docker pause {} failed: {}", name, stderr.trim());
-            }
-            o.status.success()
-        })
-        .unwrap_or_else(|e| {
-            eprintln!("WARNING: docker command not available: {}", e);
-            false
-        })
-}
-
-/// Resume a paused Docker replica container.
-/// Returns `true` if the Docker unpause command was successful.
-fn docker_unpause_replica(url: &str) -> bool {
-    let name = if url.contains(":5433") {
-        "pg-replica1"
-    } else if url.contains(":5434") {
-        "pg-replica2"
-    } else {
-        return false;
-    };
-    std::process::Command::new("docker")
-        .args(["unpause", name])
-        .output()
-        .map(|o| {
-            if !o.status.success() {
-                let stderr = String::from_utf8_lossy(&o.stderr);
-                eprintln!("WARNING: docker unpause {} failed: {}", name, stderr.trim());
-            }
-            o.status.success()
-        })
-        .unwrap_or_else(|e| {
-            eprintln!("WARNING: docker command not available: {}", e);
-            false
-        })
+    let iterations = duration_ms / 10;
+    let sql = "SELECT pg_terminate_backend(pid) \
+               FROM pg_stat_activity \
+               WHERE pid <> pg_backend_pid()";
+    for _ in 0..iterations {
+        let _ = conn.execute_unprepared(sql).await;
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
 }
 
 /// Kill all backend connections on a replica via `pg_terminate_backend`,
@@ -332,17 +299,20 @@ async fn test_concurrent_reads_with_circuit_breaker() {
         replica_urls[1]
     );
     kill_replica_connections(&replica_urls[1]).await;
-    // Pause the Docker container to prevent the pool from reconnecting.
-    // pg_terminate_backend only kills existing connections, but the pool
-    // will immediately create new ones (server still running). Docker pause
-    // makes the container completely unreachable, forcing connection errors.
-    docker_pause_replica(&replica_urls[1]);
-    // Wait for the pool to detect dropped connections
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Continuously kill reconnecting connections so the pool can never
+    // successfully establish a connection to replica 2 during the test.
+    // A brief 50ms delay allows pg_terminate_backend to settle before
+    // the concurrent reads begin.
+    let replica2_url = replica_urls[1].clone();
+    let kill_handle = tokio::spawn(async move {
+        keep_killing_replica(&replica2_url, 3000).await;
+    });
+    tokio::time::sleep(Duration::from_millis(50)).await;
 
     // With all replicas down and fallback_to_write = false,
     // queries are expected to fail.
     let all_down_ok = concurrent_reads(&router, 5).await;
+    kill_handle.await.unwrap();
     assert!(
         all_down_ok < 5,
         "Reads should fail when all replicas are down and fallback_to_write=false \
@@ -355,9 +325,10 @@ async fn test_concurrent_reads_with_circuit_breaker() {
     );
 
     // ── Phase 4: Circuit breaker expires → auto-recovery ─────────
-    eprintln!("Phase 4: Resuming replicas and waiting for circuit breaker to expire (3s)...");
-    // Resume the paused replica 2 so it can accept connections again
-    docker_unpause_replica(&replica_urls[1]);
+    eprintln!("Phase 4: Waiting for circuit breaker to expire (3s)...");
+    // Note: replica 2's connections were continuously killed during Phase 3.
+    // The `keep_killing_replica` task has now stopped (3000ms elapsed),
+    // so the pool can reconnect naturally.
     tokio::time::sleep(Duration::from_secs(4)).await;
 
     // The circuit breaker has expired. AutoRouter's pick_next_read
