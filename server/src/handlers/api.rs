@@ -376,6 +376,18 @@ pub async fn logout_all(
         .await
         .map_err(|_| ApiError::Internal("Failed to revoke all sessions".to_string()))?;
 
+    // Invalidate token_version cache so subsequent requests with old JWTs
+    // hit the DB (which has the incremented token_version) instead of the
+    // stale cached value.
+    let token_cache_key = format!("user:token_version:{}", user_id);
+    if let Err(e) = state.cache.invalidate(&token_cache_key).await {
+        tracing::warn!(
+            "Failed to invalidate token_version cache for user {}: {:?}",
+            user_id,
+            e
+        );
+    }
+
     let cookies = super::auth::clear_auth_cookies(state.config.cookie_secure);
 
     let mut response = Json(LogoutAllResponse {
