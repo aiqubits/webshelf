@@ -25,10 +25,15 @@ use tower::ServiceExt;
 
 // Helper function to create test app
 async fn create_test_app() -> Router {
+    create_test_app_and_state().await.0
+}
+
+/// Create test app and return both Router and AppState for direct cache inspection.
+async fn create_test_app_and_state() -> (Router, webshelf_server::AppState) {
     use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
-    use redis::Client as RedisClient;
     use sea_orm::Database;
     use webshelf_server::AutoRouter;
+    use webshelf_server::services::CacheService;
     use webshelf_server::utils::load_config;
     use webshelf_server::{
         AppState,
@@ -55,11 +60,11 @@ async fn create_test_app() -> Router {
         .expect("Failed to initialize Snowflake generator");
 
     // Create Redis client (optional)
-    let redis = RedisClient::open(config.redis_url.as_str()).ok();
+    let cache = CacheService::new(&config.redis_url, config.cache_max_connections).await;
 
     let state = AppState {
         db,
-        redis,
+        cache,
         config: Arc::new(config),
         email: emailserver::EmailService::new(emailserver::EmailConfig::default()),
     };
@@ -83,7 +88,7 @@ async fn create_test_app() -> Router {
         .allow_headers(tower_http::cors::Any);
 
     // Build test router with same middleware stack as main app
-    Router::new()
+    let router = Router::new()
         .nest("/api", api_routes())
         .nest(
             "/api/public/auth",
@@ -98,7 +103,9 @@ async fn create_test_app() -> Router {
         ))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
-        .with_state(state)
+        .with_state(state.clone());
+
+    (router, state)
 }
 
 // Helper to cleanup test users (call at end of test suite to avoid data accumulation)
@@ -2336,4 +2343,454 @@ async fn test_reset_password_expired_code() {
         .await
         .unwrap();
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// ── Cache Invalidation Integration Tests ─────────────────────────────────
+//
+// These tests verify that UserService write operations properly invalidate
+// the Redis cache so that subsequent reads fetch fresh data.
+
+fn unique_email(prefix: &str) -> String {
+    let ts = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    format!("{}_{}@example.com", prefix, ts)
+}
+
+#[tokio::test]
+async fn test_cache_invalidation_after_user_update() {
+    use webshelf_server::repositories::user::CreateUserInput;
+    use webshelf_server::services::UserService;
+
+    let (_app, state) = create_test_app_and_state().await;
+    let svc = UserService::new(state.db.clone(), state.cache.clone());
+
+    // Create a user via service
+    let email = unique_email("update_cache");
+    let user = svc
+        .create_user(
+            CreateUserInput {
+                email: email.clone(),
+                password: "Password123!".to_string(),
+                name: "Cache Test".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("Failed to create user");
+    let cache_key = format!("user:{}", user.id);
+
+    // Populate cache by reading the user
+    let cached = svc
+        .get_user(user.id.as_i64())
+        .await
+        .expect("get_user failed");
+    assert!(cached.is_some(), "user should be found");
+
+    // Verify cache is now populated
+    let cached_via_redis = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(
+        cached_via_redis.is_some(),
+        "user should be cached after get_user"
+    );
+
+    // Update the user — this should invalidate the cache
+    let updated = svc
+        .update_user(
+            user.id.as_i64(),
+            webshelf_server::repositories::user::UpdateUserInput {
+                name: Some("Updated Name".to_string()),
+                email: None,
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("update_user failed");
+    assert_eq!(updated.name, "Updated Name");
+
+    // Verify cache was invalidated
+    let after_update = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(
+        after_update.is_none(),
+        "cache should be invalidated after update_user"
+    );
+
+    // Clean up cache
+    let _ = state.cache.invalidate(&cache_key).await;
+}
+
+#[tokio::test]
+async fn test_cache_invalidation_after_password_change() {
+    use webshelf_server::repositories::user::CreateUserInput;
+    use webshelf_server::services::UserService;
+
+    let (_app, state) = create_test_app_and_state().await;
+    let svc = UserService::new(state.db.clone(), state.cache.clone());
+
+    // Create user
+    let email = unique_email("pwd_cache");
+    let user = svc
+        .create_user(
+            CreateUserInput {
+                email: email.clone(),
+                password: "OldPass123!".to_string(),
+                name: "Pwd Cache Test".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+    let cache_key = format!("user:{}", user.id);
+
+    // Populate cache
+    let _ = svc
+        .get_user(user.id.as_i64())
+        .await
+        .expect("get_user failed");
+    let cached = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(
+        cached.is_some(),
+        "user should be cached before password change"
+    );
+
+    // Change password — should invalidate cache
+    let (updated, _new_version) = svc
+        .change_password(user.id.as_i64(), "OldPass123!", "NewPass456!")
+        .await
+        .expect("change_password failed");
+    assert_eq!(updated.name, "Pwd Cache Test");
+
+    // Verify cache was invalidated
+    let after_change = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(
+        after_change.is_none(),
+        "cache should be invalidated after password change"
+    );
+
+    let _ = state.cache.invalidate(&cache_key).await;
+}
+
+#[tokio::test]
+async fn test_cache_invalidation_after_delete() {
+    use webshelf_server::repositories::user::CreateUserInput;
+    use webshelf_server::services::UserService;
+
+    let (_app, state) = create_test_app_and_state().await;
+    let svc = UserService::new(state.db.clone(), state.cache.clone());
+
+    // Create user
+    let email = unique_email("del_cache");
+    let user = svc
+        .create_user(
+            CreateUserInput {
+                email: email.clone(),
+                password: "Password123!".to_string(),
+                name: "Delete Cache Test".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+    let cache_key = format!("user:{}", user.id);
+
+    // Populate cache
+    let _ = svc
+        .get_user(user.id.as_i64())
+        .await
+        .expect("get_user failed");
+    let cached = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(cached.is_some(), "user should be cached before delete");
+
+    // Delete the user — should invalidate cache
+    svc.delete_user(user.id.as_i64(), "system", 0)
+        .await
+        .expect("delete_user failed");
+
+    // Verify cache was invalidated
+    let after_delete = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(
+        after_delete.is_none(),
+        "cache should be invalidated after delete_user"
+    );
+}
+
+#[tokio::test]
+async fn test_cache_invalidation_after_balance_change() {
+    use webshelf_server::repositories::user::CreateUserInput;
+    use webshelf_server::services::UserService;
+
+    let (_app, state) = create_test_app_and_state().await;
+    let svc = UserService::new(state.db.clone(), state.cache.clone());
+
+    // Create user
+    let email = unique_email("bal_cache");
+    let user = svc
+        .create_user(
+            CreateUserInput {
+                email: email.clone(),
+                password: "Password123!".to_string(),
+                name: "Balance Cache Test".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+    let cache_key = format!("user:{}", user.id);
+
+    // Populate cache
+    let _ = svc
+        .get_user(user.id.as_i64())
+        .await
+        .expect("get_user failed");
+    let cached = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(
+        cached.is_some(),
+        "user should be cached before balance change"
+    );
+    assert_eq!(cached.as_ref().unwrap().balance, 0);
+
+    // Set balance — should invalidate cache
+    let updated = svc
+        .set_balance(user.id.as_i64(), 500, "system")
+        .await
+        .expect("set_balance failed");
+    assert_eq!(updated.balance, 500);
+
+    // Verify cache was invalidated
+    let after_balance = state
+        .cache
+        .get::<webshelf_server::repositories::user::UserResponse>(&cache_key)
+        .await
+        .expect("cache get failed");
+    assert!(
+        after_balance.is_none(),
+        "cache should be invalidated after balance change"
+    );
+
+    let _ = state.cache.invalidate(&cache_key).await;
+}
+
+// ── Pagination Count Cache Integration Tests ────────────────────────────
+
+#[tokio::test]
+async fn test_count_cache_populated_on_list_users() {
+    use webshelf_server::repositories::user::CreateUserInput;
+    use webshelf_server::services::UserService;
+    use webshelf_server::services::user::PaginationParams;
+
+    let (_app, state) = create_test_app_and_state().await;
+    let svc = UserService::new(state.db.clone(), state.cache.clone());
+    let role = "admin";
+
+    // Create a user so list_users returns at least one result
+    let email = unique_email("count_cache");
+    let _user = svc
+        .create_user(
+            CreateUserInput {
+                email: email.clone(),
+                password: "Password123!".to_string(),
+                name: "Count Cache Test".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+
+    // First list_users: count cache miss → should populate
+    let page1 = svc
+        .list_users(PaginationParams::default(), role)
+        .await
+        .expect("list_users failed");
+    assert!(page1.total > 0, "should have at least one user");
+
+    // Verify count cache was populated
+    let count_key = format!("user:count:{}", role);
+    let cached_count: Option<u64> = state.cache.get(&count_key).await.expect("cache get failed");
+    assert!(
+        cached_count.is_some(),
+        "count cache should be populated after list_users"
+    );
+    assert_eq!(cached_count.unwrap(), page1.total);
+
+    // Second list_users: should hit cache (same count expected)
+    let page2 = svc
+        .list_users(PaginationParams::default(), role)
+        .await
+        .expect("list_users failed");
+    assert_eq!(page2.total, page1.total);
+
+    // Clean up
+    let _ = state.cache.invalidate(&count_key).await;
+}
+
+#[tokio::test]
+async fn test_count_cache_invalidated_after_create_and_delete() {
+    use webshelf_server::repositories::user::CreateUserInput;
+    use webshelf_server::services::UserService;
+    use webshelf_server::services::user::PaginationParams;
+
+    let (_app, state) = create_test_app_and_state().await;
+    let svc = UserService::new(state.db.clone(), state.cache.clone());
+    let role = "admin";
+
+    // Create an initial user so list_users works
+    let email1 = unique_email("cnt_create_1");
+    let user1 = svc
+        .create_user(
+            CreateUserInput {
+                email: email1.clone(),
+                password: "Password123!".to_string(),
+                name: "Count Create 1".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+
+    // Populate count cache via list_users
+    let _page = svc
+        .list_users(PaginationParams::default(), role)
+        .await
+        .expect("list_users failed");
+
+    let count_key = format!("user:count:{}", role);
+    let before_create: Option<u64> = state.cache.get(&count_key).await.unwrap();
+    assert!(before_create.is_some(), "count cache should exist");
+
+    // Create another user — should invalidate count cache
+    let email2 = unique_email("cnt_create_2");
+    let _user2 = svc
+        .create_user(
+            CreateUserInput {
+                email: email2.clone(),
+                password: "Password123!".to_string(),
+                name: "Count Create 2".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+
+    // Verify count cache was invalidated
+    let after_create: Option<u64> = state.cache.get(&count_key).await.unwrap();
+    assert!(
+        after_create.is_none(),
+        "count cache should be invalidated after creating a user"
+    );
+
+    // Re-populate count cache
+    let _page = svc
+        .list_users(PaginationParams::default(), role)
+        .await
+        .expect("list_users failed");
+
+    // Now delete user1 — should invalidate count cache again
+    svc.delete_user(user1.id.as_i64(), "system", 0)
+        .await
+        .expect("delete_user failed");
+
+    let after_delete: Option<u64> = state.cache.get(&count_key).await.unwrap();
+    assert!(
+        after_delete.is_none(),
+        "count cache should be invalidated after deleting a user"
+    );
+
+    let _ = state.cache.invalidate(&count_key).await;
+}
+
+#[tokio::test]
+async fn test_count_cache_invalidated_after_create_system_role() {
+    use webshelf_server::repositories::user::CreateUserInput;
+    use webshelf_server::services::UserService;
+    use webshelf_server::services::user::PaginationParams;
+
+    let (_app, state) = create_test_app_and_state().await;
+    let svc = UserService::new(state.db.clone(), state.cache.clone());
+    let role = "system";
+
+    // Create an initial user so list_users works
+    let email1 = unique_email("cnt_sys_1");
+    let _user1 = svc
+        .create_user(
+            CreateUserInput {
+                email: email1.clone(),
+                password: "Password123!".to_string(),
+                name: "Sys Count 1".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+
+    // Populate system count cache via list_users with system role
+    let _page = svc
+        .list_users(PaginationParams::default(), role)
+        .await
+        .expect("list_users failed");
+
+    let count_key = format!("user:count:{}", role);
+    let before_create: Option<u64> = state.cache.get(&count_key).await.unwrap();
+    assert!(before_create.is_some(), "system count cache should exist");
+
+    // Create another user — should invalidate system count cache
+    let email2 = unique_email("cnt_sys_2");
+    let _user2 = svc
+        .create_user(
+            CreateUserInput {
+                email: email2.clone(),
+                password: "Password123!".to_string(),
+                name: "Sys Count 2".to_string(),
+                role: None,
+            },
+            "system",
+        )
+        .await
+        .expect("create_user failed");
+
+    // Verify system count cache was invalidated
+    let after_create: Option<u64> = state.cache.get(&count_key).await.unwrap();
+    assert!(
+        after_create.is_none(),
+        "system count cache should be invalidated after creating a user"
+    );
+
+    let _ = state.cache.invalidate(&count_key).await;
 }

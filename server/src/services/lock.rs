@@ -1,3 +1,62 @@
+//! # Distributed Locking
+//!
+//! Redis-backed distributed locking with safe release (Lua script), retry logic,
+//! and automatic lock release on `Drop`.
+//!
+//! ## 何时需要分布式锁？（刚需场景判断）
+//!
+//! 分布式锁的适用场景比直觉中要窄得多。在选择分布式锁之前，优先考虑
+//! 现有架构中更可靠的替代方案：
+//!
+//! | 场景 | 首选方案 | 说明 |
+//! |---|---|---|
+//! | DB 行级并发修改 | `SELECT ... FOR UPDATE` + 事务 | PostgreSQL MVCC 跨副本天然生效 |
+//! | 唯一性约束 | DB `UNIQUE` 约束 | 数据库保证原子性，无需锁 |
+//! | 分布式 ID 分配 | Snowflake + DB INSERT 自协调 | `worker_id` 通过 UNIQUE 约束分配 |
+//! | 原子计数/限流 | Redis `SET NX EX` / `INCR` | Redis 单线程模型保证原子性 |
+//! | 条件更新防 TOCTOU | `UPDATE ... WHERE ... < MAX` | 一条 SQL 完成读-改-写 |
+//! | 刷新令牌轮转 | 事务内 DELETE + INSERT | 事务保证原子性 |
+//!
+//! **分布式锁应作为最后手段（last resort）**，仅在以上方案都无法满足时使用。
+//!
+//! ### 真正需要分布式锁的场景
+//!
+//! #### 1. 缓存击穿保护（Stampede Protection）
+//!
+//! K8s 多副本环境下，当热点缓存 key 过期，所有 pod 同时回源查询 DB。
+//! 分布式锁让只有一个 pod 回源，其余等待后读缓存。
+//! - **正确性**：非必须（没有锁系统仍正确）
+//! - **性能**：强烈推荐（防止 DB 负载瞬增 N 倍）
+//! - **实现**：[`CacheService::get_or_insert_with_lock`]
+//!
+//! #### 2. 定时/批处理任务互斥
+//!
+//! K8s 多副本环境下，如果每个 pod 都独立运行定时任务（如清理过期数据、
+//! 批量发送通知），需要分布式锁确保同一时刻只有一个副本执行。
+//! - **正确性**：如果任务不可重入/非幂等，则必须
+//! - **实现**：[`LockGuard::acquire`] / [`LockGuard::acquire_with_client`]
+//!
+//! #### 3. 跨副本资源初始化（保护非幂等操作）
+//!
+//! 某些启动时只需执行一次的操作（如创建外部资源、调用第三方 API），
+//! 如果不可重入，需要用分布式锁协调。如果操作已幂等（如数据库迁移），
+//! 则无需分布式锁。
+//! - **正确性**：如果操作非幂等，则必须
+//! - **实现**：[`LockGuard::acquire`]（fail-open，Redis 不可用时跳过关键区）
+//!
+//! ## 策略选择：fail-open vs fail-close
+//!
+//! - **fail-open**（[`LockGuard::acquire`]）：Redis 不可用时返回 `None`，
+//!   调用方跳过关键区。适用于"有锁更好，没有也能凑合"的场景。
+//! - **fail-close**（[`acquire_lock`]）：Redis 不可用时返回 `Err`，
+//!   调用方必须处理错误。适用于"没有锁就不能继续"的场景。
+//!
+//! ## 安全释放
+//!
+//! 所有锁释放均通过 [`SAFE_RELEASE_SCRIPT`] Lua 脚本完成，原子地检查
+//! 锁的值是否匹配，防止误释放其他持有者的锁。锁的默认 TTL 兜底机制
+//! 确保即使进程崩溃，锁也不会永久占用。
+
 use anyhow::{Context, Result};
 use redis::Client;
 use redis::aio::ConnectionManager;
@@ -30,7 +89,20 @@ else
 end
 "#;
 
-/// Acquire a distributed lock with retry mechanism
+/// Acquire a distributed lock with retry mechanism.
+///
+/// # 适用场景
+///
+/// - **需要 fail-close 语义**的场景：当 Redis 不可用时必须让调用方感知错误。
+/// - 调用方已通过其他方式确认 Redis 可用（如[`CacheService::is_available`]）。
+///
+/// # 不使用此函数的场景
+///
+/// - DB 行级并发 → 使用 `SELECT ... FOR UPDATE` + 事务
+/// - 唯一性约束 → 使用 DB `UNIQUE` 约束
+/// - 限流器 → 使用 Redis 原子命令（[`distributed-ratelimit`] crate）
+///
+/// 这是**低层 API**。更推荐使用 [`LockGuard::acquire`]（自动释放锁）。
 ///
 /// # Arguments
 /// * `redis_client` - Optional Redis client instance (None if not configured)
@@ -166,6 +238,85 @@ pub async fn release_lock(
     Ok(())
 }
 
+/// Acquire a distributed lock using a pre-established `redis::Client`
+/// (from CacheService). Skips the fail-close `Option` check — caller is
+/// responsible for ensuring `client` is `Some`.
+///
+/// # 适用场景
+///
+/// - 调用方已通过 [`CacheService`] 持有 `redis::Client`，希望复用此实例
+///   而非另外维护一个独立的 Redis 客户端。
+/// - 需要低层控制（直接获取 `(bool, lock_value)` 元组）。
+///
+/// # 不使用此函数的场景
+///
+/// - 需要自动释放锁 → 使用 [`LockGuard::acquire_with_client`]
+/// - 不需要精确控制锁值（UUID）→ 使用 [`LockGuard`] 系列 API
+///
+/// 与 [`acquire_lock`] 不同，本函数接收 `&Client`（而非 `Option<&Client>`），
+/// 由调用方负责确保 client 可用。每次调用内部仍然会通过
+/// [`redis::Client::get_connection_manager`] 创建新的连接管理器，
+/// 这是 redis crate 的 API 限制，无法绕过。
+///
+/// 本函数的核心价值是重用 CacheService 的 `redis::Client` 实例，
+/// 避免调用方自行管理 Redis 客户端配置和生命周期。
+pub async fn acquire_lock_with_client(
+    client: &Client,
+    lock_key: &str,
+    expiry_seconds: u64,
+    max_retries: u32,
+    retry_delay: Duration,
+) -> Result<(bool, String)> {
+    let conn = client
+        .get_connection_manager()
+        .await
+        .context("Failed to get async Redis connection")?;
+
+    let lock_value = Uuid::new_v4().to_string();
+    let acquired = try_acquire_with_retry(
+        conn,
+        lock_key,
+        &lock_value,
+        expiry_seconds,
+        max_retries,
+        retry_delay,
+    )
+    .await?;
+
+    Ok((acquired, lock_value))
+}
+
+/// Release a distributed lock using a pre-established `redis::Client`.
+pub async fn release_lock_with_client(
+    client: &Client,
+    lock_key: &str,
+    lock_value: &str,
+) -> Result<()> {
+    let mut conn = client
+        .get_connection_manager()
+        .await
+        .context("Failed to get async Redis connection")?;
+
+    let script = redis::Script::new(SAFE_RELEASE_SCRIPT);
+    let deleted: i32 = script
+        .key(lock_key)
+        .arg(lock_value)
+        .invoke_async(&mut conn)
+        .await
+        .context("Failed to execute safe release script")?;
+
+    if deleted == 1 {
+        tracing::debug!("Lock released for key: {}", lock_key);
+    } else {
+        tracing::warn!(
+            "Lock release skipped for key: {} — value mismatch (lock may have expired or been re-acquired)",
+            lock_key
+        );
+    }
+
+    Ok(())
+}
+
 /// Result of a lock acquisition attempt
 #[derive(Debug)]
 pub enum AcquireResult {
@@ -205,6 +356,20 @@ impl LockGuard {
 
     /// Acquire a lock and return a guard that releases it on drop.
     ///
+    /// # 适用场景
+    ///
+    /// - **缓存击穿保护**（推荐）：与 [`CacheService::get_or_insert_with_lock`] 配合，
+    ///   防止 K8s 多副本同时回源查 DB。
+    /// - **定时任务互斥**：多个 K8s pod 同时启动定时任务时，确保只有一个执行。
+    /// - **跨副本资源初始化**：只需一个实例完成的启动初始化（已幂等的操作除外）。
+    ///
+    /// # 不使用此函数的场景
+    ///
+    /// 大多数并发控制场景已被以下方案覆盖：
+    /// - DB 事务 + `FOR UPDATE` → 行级并发修改
+    /// - DB `UNIQUE` 约束 → 唯一性保证
+    /// - Redis 原子命令 → 计数/限流
+    ///
     /// # Returns
     /// - `Ok(Some(AcquireResult::Acquired(guard)))` — lock acquired successfully
     /// - `Ok(Some(AcquireResult::Contended))` — lock not acquired due to contention
@@ -241,6 +406,57 @@ impl LockGuard {
         if acquired {
             Ok(Some(AcquireResult::Acquired(Box::new(Self::new(
                 redis_client.cloned(),
+                lock_key.to_string(),
+                lock_value,
+            )))))
+        } else {
+            Ok(Some(AcquireResult::Contended))
+        }
+    }
+
+    /// Acquire a lock using a `redis::Client` from [`CacheService::redis_client`].
+    ///
+    /// # 适用场景
+    ///
+    /// 与 [`LockGuard::acquire`] 相同，但：
+    /// - 调用方已通过 [`CacheService`] 持有 `redis::Client`，无需重新创建连接
+    /// - 适合在已集成缓存的代码路径中复用同一 Redis 连接
+    ///
+    /// # 与 [`LockGuard::acquire`] 的区别
+    ///
+    /// - `acquire`：接收 `Option<&Client>`，使用 `acquire_lock`（独立 ConnectionManager）
+    /// - `acquire_with_client`：接收 `Option<&Client>`，使用 `acquire_lock_with_client`
+    ///   （复用 CacheService 的 redis::Client，减少额外 ConnectionManager 创建开销）
+    ///
+    /// Both methods are **fail-open**: when the underlying `client` is `None`,
+    /// they return `Ok(None)` and the caller proceeds without lock protection.
+    /// If fail-close semantics are needed, callers should check
+    /// [`CacheService::is_available()`] before calling this method.
+    pub async fn acquire_with_client(
+        client: Option<&Client>,
+        lock_key: &str,
+        expiry_seconds: u64,
+        max_retries: u32,
+        retry_delay: Duration,
+    ) -> Result<Option<AcquireResult>> {
+        let client = match client {
+            Some(c) => c,
+            None => {
+                tracing::warn!(
+                    "Redis client not available, skipping distributed lock for key: {}",
+                    lock_key
+                );
+                return Ok(None);
+            }
+        };
+
+        let (acquired, lock_value) =
+            acquire_lock_with_client(client, lock_key, expiry_seconds, max_retries, retry_delay)
+                .await?;
+
+        if acquired {
+            Ok(Some(AcquireResult::Acquired(Box::new(Self::new(
+                Some(client.clone()),
                 lock_key.to_string(),
                 lock_value,
             )))))

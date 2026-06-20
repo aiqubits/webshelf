@@ -10,7 +10,7 @@
 # Can be overridden by environment variable: WEBSHELF_DATABASE_URL
 database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@127.0.0.1:5432/webshelf"
 
-# Redis connection URL (for distributed locking only)
+# Redis connection URL (for caching, distributed locking, and rate limiting)
 # NOTE: When using Docker Compose, this is overridden by WEBSHELF_REDIS_URL
 #       which includes the Redis password. Make sure to include the password
 #       if your Redis instance has requirepass enabled.
@@ -20,6 +20,12 @@ database_url = "postgres://postgres:CHANGE_ME_POSTGRES_PASSWORD@127.0.0.1:5432/w
 # Format: redis://[:password]@host:port
 # Can be overridden by environment variable: WEBSHELF_REDIS_URL
 redis_url = "redis://:CHANGE_ME_REDIS_PASSWORD@127.0.0.1:6379"
+
+# Redis cache connection pool size (default: 10)
+# Maximum number of concurrent connections for the bb8 Redis cache pool.
+# Increase this if the application handles many concurrent cache operations.
+# Can be overridden by environment variable: WEBSHELF_CACHE_MAX_CONNECTIONS
+cache_max_connections = 10
 
 # Read replica database URLs (empty = disabled, backward compatible)
 # When configured, SELECT queries are automatically routed to read replicas

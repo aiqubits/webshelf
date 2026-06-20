@@ -222,7 +222,7 @@ pub async fn register(
     // redundant normalization in multiple downstream call sites.
     let email = payload.email.to_lowercase();
 
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let user = service
         .create_user(
             CreateUserInput {

@@ -80,7 +80,7 @@ pub async fn list_users(
     Extension(auth_user): Extension<AuthUser>,
     Query(query): Query<ListUsersQuery>,
 ) -> Result<Json<PaginatedUsersResponse>, ApiError> {
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let result = service
         .list_users(
             PaginationParams {
@@ -143,7 +143,7 @@ pub async fn create_user(
         None
     };
 
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let mut result = service
         .create_user(
             CreateUserInput {
@@ -206,7 +206,7 @@ pub async fn get_me(
         ApiError::Internal("An unexpected error occurred".to_string())
     })?;
 
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let result = service
         .get_user(user_id)
         .await?
@@ -278,7 +278,7 @@ async fn change_my_password_inner(
         ));
     }
 
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let (user, token_version) = service
         .change_password(user_id, &payload.current_password, &payload.new_password)
         .await?;
@@ -402,7 +402,7 @@ pub async fn get_user(
     Extension(auth_user): Extension<AuthUser>,
     Path(id): Path<i64>,
 ) -> Result<Json<UserResponse>, ApiError> {
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let result = service
         .get_user_scoped(id, &auth_user.role)
         .await?
@@ -468,7 +468,7 @@ pub async fn update_user(
         None
     };
 
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let result = service
         .update_user(
             id,
@@ -494,7 +494,7 @@ pub async fn delete_user(
         tracing::error!("Invalid user ID in auth token: {}", auth_user.user_id);
         ApiError::Internal("An unexpected error occurred".to_string())
     })?;
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     service.delete_user(id, &auth_user.role, actor_id).await?;
 
     Ok(Json(serde_json::json!({
@@ -525,7 +525,7 @@ pub async fn set_balance(
     Path(id): Path<i64>,
     JsonOrForm(payload): JsonOrForm<SetBalanceRequest>,
 ) -> Result<Json<SetBalanceResponse>, ApiError> {
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let result = service
         .set_balance(id, payload.balance, &auth_user.role)
         .await?;
@@ -562,7 +562,7 @@ pub async fn adjust_balance(
     Path(id): Path<i64>,
     JsonOrForm(payload): JsonOrForm<AdjustBalanceRequest>,
 ) -> Result<Json<AdjustBalanceResponse>, ApiError> {
-    let service = UserService::new(state.db.clone());
+    let service = UserService::new(state.db.clone(), state.cache.clone());
     let result = service
         .adjust_balance(id, payload.amount, &auth_user.role)
         .await?;

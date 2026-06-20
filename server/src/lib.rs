@@ -8,16 +8,19 @@ pub mod services;
 pub mod utils;
 pub use utils::snowflake;
 
-use redis::Client as RedisClient;
 use std::sync::Arc;
 pub use utils::AppConfig;
 pub use utils::db_router::AutoRouter;
+
+use crate::services::CacheService;
 
 /// Application shared state
 #[derive(Clone)]
 pub struct AppState {
     pub db: Arc<AutoRouter>,
-    pub redis: Option<RedisClient>,
+    /// Unified Redis-backed cache service (bb8 pool).
+    /// Gracefully degrades to no-op when Redis is unavailable.
+    pub cache: CacheService,
     pub config: Arc<AppConfig>,
     pub email: emailserver::EmailService,
 }

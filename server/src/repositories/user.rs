@@ -93,7 +93,21 @@ pub struct UpdateUserInput {
 }
 
 /// User response (without sensitive data)
-#[derive(Debug, SerializeTrait)]
+///
+/// # Deserialize note
+///
+/// `Deserialize` is derived solely for Redis cache deserialization via
+/// [`CacheService::get`].  This type is never deserialized from untrusted
+/// input (API responses always use the `From<Model>` conversion, not JSON
+/// deserialization).
+///
+/// ## Security caution
+///
+/// Sensitive fields (e.g. `password_hash`) are already excluded from this
+/// type.  If adding new fields with `#[serde(skip)]`, ensure they also have
+/// default values or `#[serde(default)]` so JSON deserialization does not
+/// fail unexpectedly.
+#[derive(Debug, SerializeTrait, Deserialize)]
 pub struct UserResponse {
     pub id: SnowflakeId,
     pub email: String,

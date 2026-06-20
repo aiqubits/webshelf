@@ -13,6 +13,10 @@ pub struct AppConfig {
     #[serde(default = "default_redis_url")]
     pub redis_url: String,
 
+    /// Redis cache connection pool size (default: 10)
+    #[serde(default = "default_cache_max_connections")]
+    pub cache_max_connections: u32,
+
     /// Read replica database URLs (empty = no read-write split, backward compatible)
     #[serde(default)]
     pub database_read_urls: Vec<String>,
@@ -223,6 +227,11 @@ fn default_redis_url() -> String {
     "redis://:CHANGE_ME_REDIS_PASSWORD@127.0.0.1:6379".to_string()
 }
 
+/// Default Redis cache connection pool size
+fn default_cache_max_connections() -> u32 {
+    10
+}
+
 // Default JWT secret key — must be replaced before deployment
 fn default_jwt_secret() -> String {
     "REPLACE_ME_WITH_A_STRONG_SECRET".to_string()
@@ -386,6 +395,7 @@ mod tests {
         let config = AppConfig {
             database_url: "postgres://127.0.0.1".to_string(),
             redis_url: "redis://127.0.0.1".to_string(),
+            cache_max_connections: 10,
             jwt_secret: "secret".to_string(),
             jwt_expiry_seconds: 7200,
             jwt_remember_expiry_seconds: 2592000,

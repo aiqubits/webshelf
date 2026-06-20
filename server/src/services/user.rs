@@ -4,6 +4,7 @@ use crate::repositories::user::{
     ActiveModel, Column, CreateUserInput, Entity as UserEntity, Model as UserModel,
     UpdateUserInput, UserResponse,
 };
+use crate::services::cache::CacheService;
 use crate::utils::db_router::AutoRouter;
 use crate::utils::password::{hash_password, verify_password};
 use crate::utils::validator::require_password;
@@ -81,6 +82,7 @@ fn check_balance_rbac(target: &UserModel, actor_role: &str) -> Result<(), UserEr
 /// User service for CRUD operations
 pub struct UserService {
     db: Arc<AutoRouter>,
+    cache: CacheService,
 }
 /// Pagination parameters
 #[derive(Debug)]
@@ -110,8 +112,8 @@ pub struct PaginatedResponse<T> {
 
 impl UserService {
     /// Create a new user service
-    pub fn new(db: Arc<AutoRouter>) -> Self {
-        Self { db }
+    pub fn new(db: Arc<AutoRouter>, cache: CacheService) -> Self {
+        Self { db, cache }
     }
 
     /// Create a new user
@@ -187,7 +189,33 @@ impl UserService {
         tracing::debug!("User inserted successfully");
 
         tracing::info!("User created: {}", result.email);
+
+        // Invalidate count cache so new users appear in pagination immediately.
+        // Best-effort: failures are non-fatal.
+        // NOTE: When the system role (super-admin) lists users, the count is all users
+        // (no role filter), so the "system" key must also be invalidated.
+        let _ = self
+            .cache
+            .invalidate(&Self::user_count_cache_key("admin"))
+            .await;
+        let _ = self
+            .cache
+            .invalidate(&Self::user_count_cache_key("user"))
+            .await;
+        let _ = self
+            .cache
+            .invalidate(&Self::user_count_cache_key("system"))
+            .await;
+
         Ok(UserResponse::from(result))
+    }
+
+    /// Cache TTLs for user profile data.
+    const USER_CACHE_TTL_SECS: u64 = 300; // 5 minutes for user data
+    const USER_NULL_TTL_SECS: u64 = 30; // 30 seconds for negative cache
+
+    fn user_cache_key(id: i64) -> String {
+        format!("user:{}", id)
     }
 
     /// Get user by ID (unscoped — caller is responsible for authorization).
@@ -195,16 +223,58 @@ impl UserService {
     /// This is used internally (e.g., `get_me`) where the actor is fetching their
     /// own data. No role-based filtering is applied.
     ///
-    /// NOTE: This query reads from the write database to guarantee
-    /// read-your-writes consistency — a user who just updated their profile
-    /// will immediately see the latest data.
+    /// Implements caching with the `get_or_insert` pattern:
+    /// 1. Try Redis cache first
+    /// 2. On miss, query the write database (read-your-writes consistency)
+    /// 3. Populate cache on hit, set null-marker on miss (cache penetration protection)
+    ///
+    /// Cache is invalidated on every write operation (update, delete, password change).
     pub async fn get_user(&self, id: i64) -> Result<Option<UserResponse>, UserError> {
+        let cache_key = Self::user_cache_key(id);
+        let ttl = std::time::Duration::from_secs(Self::USER_CACHE_TTL_SECS);
+        let null_ttl = std::time::Duration::from_secs(Self::USER_NULL_TTL_SECS);
+
+        // 1. Try cache
+        if let Ok(Some(user)) = self.cache.get::<UserResponse>(&cache_key).await {
+            return Ok(Some(user));
+        }
+
+        // 1b. Check negative-cache marker to avoid cache-penetration DB queries.
+        //     When a previous lookup confirmed this user does not exist, a short-lived
+        //     ":null" marker is stored.  Skipping this check would defeat the purpose
+        //     of storing the marker in the first place.
+        if self
+            .cache
+            .exists(&format!("{}:null", &cache_key))
+            .await
+            .unwrap_or(false)
+        {
+            return Ok(None);
+        }
+
+        // 2. DB fallback
         let user = UserEntity::find_by_id(id)
             .one(self.db.write_conn())
             .await
             .context("Failed to query user")?;
 
-        Ok(user.map(UserResponse::from))
+        match user {
+            Some(u) => {
+                let resp = UserResponse::from(u);
+                // Best-effort cache populate
+                if let Err(e) = self.cache.set(&cache_key, &resp, ttl).await {
+                    tracing::warn!("Failed to cache user {}: {:?}", id, e);
+                }
+                Ok(Some(resp))
+            }
+            None => {
+                // Negative cache to prevent cache penetration
+                if let Err(e) = self.cache.set_null(&cache_key, null_ttl).await {
+                    tracing::warn!("Failed to set null cache for user {}: {:?}", id, e);
+                }
+                Ok(None)
+            }
+        }
     }
 
     /// Get user by ID with RBAC scope enforcement.
@@ -219,23 +289,20 @@ impl UserService {
         id: i64,
         actor_role: &str,
     ) -> Result<Option<UserResponse>, UserError> {
-        let mut query = UserEntity::find_by_id(id);
+        // Delegate to get_user() which uses the cache layer.
+        // RBAC filtering is applied in-memory rather than in SQL so that
+        // the cache (keyed by user:{id}) can be shared across roles.
+        let user = match self.get_user(id).await? {
+            Some(u) => u,
+            None => return Ok(None),
+        };
 
         // Admin scope: admin can only view user accounts
-        if actor_role == "admin" {
-            query = query.filter(Column::Role.eq("user"));
+        if actor_role == "admin" && user.role != "user" {
+            return Ok(None);
         }
 
-        // READ FROM WRITE: guarantees read-your-writes consistency so that a
-        // recently-created user is not falsely reported as NotFound due to
-        // read replica replication lag (e.g., admin creates a user then
-        // immediately opens the detail view via this endpoint).
-        let user = query
-            .one(self.db.write_conn())
-            .await
-            .context("Failed to query user")?;
-
-        Ok(user.map(UserResponse::from))
+        Ok(Some(user))
     }
 
     /// Update user
@@ -302,6 +369,7 @@ impl UserService {
         active_model.token_version = sea_orm::ActiveValue::NotSet;
 
         let mut token_version_stmt: Option<Statement> = None;
+        let mut role_changed = false;
 
         if let Some(ref new_role) = input.role {
             // Defense-in-depth: validate role value is one of the allowed values.
@@ -322,6 +390,7 @@ impl UserService {
             active_model.role = Set(new_role.clone());
 
             if *new_role != old_role {
+                role_changed = true;
                 token_version_stmt = Some(Statement::from_sql_and_values(
                     DatabaseBackend::Postgres,
                     "UPDATE users SET token_version = token_version + 1 WHERE id = $1",
@@ -382,6 +451,23 @@ impl UserService {
         };
 
         tracing::info!("User updated: {}", result.email);
+
+        // Invalidate cache so next read fetches fresh data.
+        if let Err(e) = self.cache.invalidate(&Self::user_cache_key(id)).await {
+            tracing::warn!("Failed to invalidate cache for user {}: {:?}", id, e);
+        }
+        // Invalidate token_version cache when role changed.
+        if role_changed {
+            let token_cache_key = format!("user:token_version:{}", id);
+            if let Err(e) = self.cache.invalidate(&token_cache_key).await {
+                tracing::warn!(
+                    "Failed to invalidate token_version cache for user {}: {:?}",
+                    id,
+                    e
+                );
+            }
+        }
+
         Ok(UserResponse::from(result))
     }
 
@@ -491,6 +577,21 @@ impl UserService {
             .context("Failed to re-query user after password change")?
             .ok_or(UserError::NotFound)?;
         let new_version = updated.token_version;
+
+        // Invalidate cache so next get_user fetches fresh data.
+        if let Err(e) = self.cache.invalidate(&Self::user_cache_key(id)).await {
+            tracing::warn!("Failed to invalidate cache for user {}: {:?}", id, e);
+        }
+        // Invalidate token_version cache so auth middleware reads fresh value.
+        let token_cache_key = format!("user:token_version:{}", id);
+        if let Err(e) = self.cache.invalidate(&token_cache_key).await {
+            tracing::warn!(
+                "Failed to invalidate token_version cache for user {}: {:?}",
+                id,
+                e
+            );
+        }
+
         Ok((UserResponse::from(updated), new_version))
     }
 
@@ -557,7 +658,47 @@ impl UserService {
         }
 
         tracing::info!("User deleted: {}", id);
+
+        // Invalidate user profile cache (also removes null marker).
+        if let Err(e) = self.cache.invalidate(&Self::user_cache_key(id)).await {
+            tracing::warn!(
+                "Failed to invalidate cache for deleted user {}: {:?}",
+                id,
+                e
+            );
+        }
+        // Invalidate token_version cache so auth middleware rejects stale tokens.
+        let token_cache_key = format!("user:token_version:{}", id);
+        if let Err(e) = self.cache.invalidate(&token_cache_key).await {
+            tracing::warn!(
+                "Failed to invalidate token_version cache for user {}: {:?}",
+                id,
+                e
+            );
+        }
+        // Invalidate count cache so pagination reflects deletion immediately.
+        // NOTE: When the system role lists users, the count is all users (no role filter),
+        // so the "system" key must also be invalidated.
+        let _ = self
+            .cache
+            .invalidate(&Self::user_count_cache_key("admin"))
+            .await;
+        let _ = self
+            .cache
+            .invalidate(&Self::user_count_cache_key("user"))
+            .await;
+        let _ = self
+            .cache
+            .invalidate(&Self::user_count_cache_key("system"))
+            .await;
+
         Ok(())
+    }
+
+    const USER_COUNT_TTL_SECS: u64 = 30; // 30 seconds for count cache
+
+    fn user_count_cache_key(actor_role: &str) -> String {
+        format!("user:count:{}", actor_role)
     }
 
     /// List users with pagination
@@ -580,10 +721,27 @@ impl UserService {
 
         let paginator = query.paginate(&*self.db, per_page);
 
-        let total = paginator
-            .num_items()
-            .await
-            .context("Failed to count users")?;
+        // Cache the total count (30s TTL) — the list data itself still reads
+        // from the database (which benefits from read-replica routing).
+        // COUNT(*) queries are the most expensive part of pagination, especially
+        // under active role-scoped filtering, so caching just the count provides
+        // ~80% of the pagination caching benefit with zero cache-fragmentation risk.
+        let count_cache_key = Self::user_count_cache_key(actor_role);
+        let count_ttl = std::time::Duration::from_secs(Self::USER_COUNT_TTL_SECS);
+
+        let total = match self.cache.get::<u64>(&count_cache_key).await {
+            Ok(Some(count)) => count,
+            _ => {
+                let count = paginator
+                    .num_items()
+                    .await
+                    .context("Failed to count users")?;
+                if let Err(e) = self.cache.set(&count_cache_key, &count, count_ttl).await {
+                    tracing::warn!("Failed to cache user count: {:?}", e);
+                }
+                count
+            }
+        };
         let total_pages = total.div_ceil(per_page);
 
         let users = paginator
@@ -654,6 +812,20 @@ impl UserService {
             balance,
             actor_role
         );
+
+        // Invalidate cache so next get_user/get_me returns latest balance.
+        if let Err(e) = self
+            .cache
+            .invalidate(&Self::user_cache_key(target_id))
+            .await
+        {
+            tracing::warn!(
+                "Failed to invalidate cache for balance change on user {}: {:?}",
+                target_id,
+                e
+            );
+        }
+
         Ok(UserResponse::from(result))
     }
 
@@ -717,6 +889,20 @@ impl UserService {
             amount,
             actor_role
         );
+
+        // Invalidate cache so next get_user/get_me returns latest balance.
+        if let Err(e) = self
+            .cache
+            .invalidate(&Self::user_cache_key(target_id))
+            .await
+        {
+            tracing::warn!(
+                "Failed to invalidate cache for balance change on user {}: {:?}",
+                target_id,
+                e
+            );
+        }
+
         Ok(UserResponse::from(result))
     }
 }

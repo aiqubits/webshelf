@@ -28,9 +28,9 @@ const REFRESH_COOKIE: &str = "webshelf_refresh";
 /// Create a full test application with the same middleware stack as production.
 async fn create_test_app() -> Router {
     use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
-    use redis::Client as RedisClient;
     use sea_orm::Database;
     use webshelf_server::AutoRouter;
+    use webshelf_server::services::CacheService;
     use webshelf_server::utils::load_config;
     use webshelf_server::{
         AppState,
@@ -51,11 +51,11 @@ async fn create_test_app() -> Router {
         .await
         .expect("Failed to initialize Snowflake generator");
 
-    let redis = RedisClient::open(config.redis_url.as_str()).ok();
+    let cache = CacheService::new(&config.redis_url, config.cache_max_connections).await;
 
     let state = AppState {
         db,
-        redis,
+        cache,
         config: Arc::new(config),
         email: emailserver::EmailService::new(emailserver::EmailConfig::default()),
     };

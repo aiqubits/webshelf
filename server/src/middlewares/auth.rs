@@ -13,6 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::AppState;
 use crate::repositories::user::Entity as UserEntity;
+use crate::services::CacheService;
 use crate::utils::db_router::AutoRouter;
 use crate::utils::error::ErrorResponse;
 
@@ -119,7 +120,8 @@ pub async fn auth_middleware(
                 }
             };
 
-            match verify_token_version(&state.db, user_id, claims.token_version).await {
+            match verify_token_version(&state.db, &state.cache, user_id, claims.token_version).await
+            {
                 Ok(()) => {
                     let auth_user = AuthUser::from(claims);
                     request.extensions_mut().insert(auth_user);
@@ -140,21 +142,62 @@ pub async fn auth_middleware(
 
 /// Verify that the token's token_version matches the user's current token_version.
 ///
-/// ⚠️  This query MUST be executed against the **write database** via `db.write_conn()`
-/// to guarantee read-your-writes consistency. If routed to a read replica with
-/// replication lag, a recently-changed password would produce a stale token_version
-/// and incorrectly reject the user.
+/// Uses a Redis cache (30s TTL) to avoid querying the write database on every
+/// authenticated request. The cache is invalidated when token_version changes:
+/// - Password change: [`crate::services::user::UserService::change_password`]
+/// - Role change:    [`crate::services::user::UserService::update_user`]
+/// - User deletion:  [`crate::services::user::UserService::delete_user`]
+///
+/// ⚠️  The fallback DB query MUST be executed against the **write database** via
+/// `db.write_conn()` to guarantee read-your-writes consistency. If routed to a
+/// read replica with replication lag, a recently-changed password would produce
+/// a stale token_version and incorrectly reject the user.
+///
+/// # Cache correctness
+///
+/// `token_version` is monotonically increasing — only incremented, never
+/// decremented. Caching is safe because:
+/// - After a password change, the cache is explicitly invalidated in the
+///   `change_password` method, so the next request re-fetches from DB.
+/// - The 30s TTL is a safety net if invalidation fails (best-effort).
+/// - If Redis is unavailable, `CacheService` gracefully degrades to no-op
+///   and the DB fallback is used directly.
 async fn verify_token_version(
     db: &AutoRouter,
+    cache: &CacheService,
     user_id: i64,
     token_version: i32,
 ) -> anyhow::Result<()> {
+    let cache_key = format!("user:token_version:{}", user_id);
+
+    // 1. Try cache first (token_version is read-mostly, rarely changes)
+    if let Ok(Some(cached_version)) = cache.get::<i32>(&cache_key).await {
+        if cached_version == token_version {
+            return Ok(());
+        }
+        // Cached value differs — token was invalidated.
+        // Note: we intentionally do NOT invalidate the cache here because the
+        // cached value is the *latest* DB version; the request carries a stale
+        // token_version. Invalidating would cause the next request (which may
+        // carry a valid new token) to hit the DB unnecessarily.
+        return Err(anyhow::anyhow!(
+            "Token version mismatch (token was invalidated)"
+        ));
+    }
+
+    // 2. Cache miss — query DB
     let user = UserEntity::find_by_id(user_id)
         .one(db.write_conn())
         .await
         .context("Failed to query user for token version check")?;
 
     let user = user.ok_or_else(|| anyhow::anyhow!("User not found"))?;
+
+    // 3. Cache the result (best-effort, 30s TTL)
+    //    The value is cached regardless of match/mismatch so that subsequent
+    //    requests with the same token_version can skip the DB query.
+    let ttl = std::time::Duration::from_secs(30);
+    let _ = cache.set(&cache_key, &user.token_version, ttl).await;
 
     if user.token_version != token_version {
         return Err(anyhow::anyhow!(

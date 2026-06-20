@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use axum::{Router, middleware as axum_middleware};
 use clap::Parser;
 use http::Method;
-use redis::Client as RedisClient;
 use std::sync::Arc;
 use tower_http::{
     compression::CompressionLayer,
@@ -100,41 +99,16 @@ pub async fn run_database_migrations(db: &sea_orm::DatabaseConnection) -> Result
     Ok(())
 }
 
-/// Initialize and verify Redis client
-pub async fn init_redis(config: &AppConfig) -> Result<Option<RedisClient>> {
-    tracing::info!("Initializing Redis client...");
-    if config.redis_url.is_empty() {
-        tracing::warn!("Redis URL is empty. System will run without distributed locking support.");
-        return Ok(None);
-    }
-
-    let redis_client = RedisClient::open(config.redis_url.as_str())
-        .context("Failed to create Redis client from configured redis_url")?;
-
-    let mut redis_conn = redis_client
-        .get_multiplexed_async_connection()
-        .await
-        .context("Failed to establish Redis connection")?;
-
-    let pong: String = redis::cmd("PING")
-        .query_async(&mut redis_conn)
-        .await
-        .context("Redis PING failed")?;
-
-    tracing::info!("Redis client initialized and connection verified: {}", pong);
-    Ok(Some(redis_client))
-}
-
 /// Create shared application state
 pub fn create_app_state(
     db: Arc<AutoRouter>,
-    redis: Option<RedisClient>,
+    cache: crate::services::CacheService,
     config: AppConfig,
 ) -> AppState {
     let email_service = emailserver::EmailService::new(config.email.clone());
     AppState {
         db,
-        redis,
+        cache,
         config: Arc::new(config),
         email: email_service,
     }
@@ -241,12 +215,15 @@ pub fn build_app_router(state: AppState, env: &str) -> Router {
     let cors = configure_cors(&allowed_origins, env);
     let compression = CompressionLayer::new();
 
-    // Create the login rate limiter (disabled if Redis is not configured).
-    let rate_limiter = match &state.redis {
-        Some(client) => RedisRateLimiter::new(client.clone(), RateLimitConfig::default()),
+    // Create the login rate limiter (disabled if Redis client not available).
+    let rate_limiter = match state.cache.redis_client() {
+        Some(client) => {
+            tracing::info!("Rate limiter: sharing redis::Client with CacheService.");
+            RedisRateLimiter::new(client.clone(), RateLimitConfig::default())
+        }
         None => {
             tracing::warn!(
-                "Redis not available — login rate limiting is disabled. \
+                "Redis not available behind CacheService — login rate limiting is disabled. \
                  Set WEBSHELF_REDIS_URL or redis_url in config.toml to enable."
             );
             RedisRateLimiter::disabled(RateLimitConfig::default())
@@ -357,9 +334,12 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
 
     seed_system_admin(db.write_conn(), &app_config).await?;
 
-    let redis_client = init_redis(&app_config).await?;
+    // Initialize CacheService (gracefully degrades if Redis is unavailable).
+    let cache =
+        crate::services::CacheService::new(&app_config.redis_url, app_config.cache_max_connections)
+            .await;
 
-    let state = create_app_state(db, redis_client, app_config);
+    let state = create_app_state(db, cache, app_config);
     let app = build_app_router(state, &cli_args.env);
 
     let bind_addr = format!("{}:{}", host, port);
