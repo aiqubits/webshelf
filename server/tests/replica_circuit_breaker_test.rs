@@ -294,19 +294,32 @@ async fn test_concurrent_reads_with_circuit_breaker() {
     );
 
     // ── Phase 3: Kill replica 2 → all replicas down ──────────────
-    eprintln!(
-        "Phase 3: Killing connections on replica 2 ({})...",
-        replica_urls[1]
-    );
+    eprintln!("Phase 3: Killing connections on both replicas...");
+
+    // Re-kill replica 1's connections so retries cannot succeed on it.
+    // After Phase 2 killed replica 1 (~2.5s ago), the pool may have
+    // re-established connections. We kill both replicas now and keep
+    // killing both continuously to prevent the pool from reconnecting
+    // during the test.
+    kill_replica_connections(&replica_urls[0]).await;
     kill_replica_connections(&replica_urls[1]).await;
-    // Continuously kill reconnecting connections so the pool can never
-    // successfully establish a connection to replica 2 during the test.
-    // A brief 50ms delay allows pg_terminate_backend to settle before
-    // the concurrent reads begin.
+
+    let replica1_url = replica_urls[0].clone();
     let replica2_url = replica_urls[1].clone();
     let kill_handle = tokio::spawn(async move {
-        keep_killing_replica(&replica2_url, 3000).await;
+        // Keep killing both replicas so retry attempts (which bypass
+        // the circuit breaker) cannot succeed on either replica.
+        let h1 = tokio::spawn(async move {
+            keep_killing_replica(&replica1_url, 3000).await;
+        });
+        let h2 = tokio::spawn(async move {
+            keep_killing_replica(&replica2_url, 3000).await;
+        });
+        let _ = h1.await;
+        let _ = h2.await;
     });
+    // A brief 50ms delay allows pg_terminate_backend to settle before
+    // the concurrent reads begin.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // With all replicas down and fallback_to_write = false,
@@ -326,8 +339,8 @@ async fn test_concurrent_reads_with_circuit_breaker() {
 
     // ── Phase 4: Circuit breaker expires → auto-recovery ─────────
     eprintln!("Phase 4: Waiting for circuit breaker to expire (3s)...");
-    // Note: replica 2's connections were continuously killed during Phase 3.
-    // The `keep_killing_replica` task has now stopped (3000ms elapsed),
+    // Note: both replicas' connections were continuously killed during Phase 3.
+    // The `keep_killing_replica` tasks have now stopped (3000ms elapsed),
     // so the pool can reconnect naturally.
     tokio::time::sleep(Duration::from_secs(4)).await;
 
