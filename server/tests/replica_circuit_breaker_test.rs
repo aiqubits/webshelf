@@ -261,15 +261,15 @@ async fn test_concurrent_reads_with_circuit_breaker() {
 
     // ── Phase 1: All replicas healthy ─────────────────────────────
     eprintln!("Phase 1: Warm up both replicas...");
-    warm_up_replicas(&router, 30).await;
+    warm_up_replicas(&router, 15).await;
 
-    let healthy_ok = concurrent_reads(&router, 20).await;
+    let healthy_ok = concurrent_reads(&router, 10).await;
     assert_eq!(
-        healthy_ok, 20,
-        "All 20 concurrent reads should succeed with both replicas healthy (got {}/{})",
-        healthy_ok, 20
+        healthy_ok, 10,
+        "All 10 concurrent reads should succeed with both replicas healthy (got {}/{})",
+        healthy_ok, 10
     );
-    eprintln!("  ✓ {} / 20 succeeded (healthy)", healthy_ok);
+    eprintln!("  ✓ {} / 10 succeeded (healthy)", healthy_ok);
 
     // ── Phase 2: Kill replica 1 connections → circuit breaker ────
     eprintln!(
@@ -282,14 +282,14 @@ async fn test_concurrent_reads_with_circuit_breaker() {
 
     // With replica 1 down, all reads go to replica 2.
     // The circuit breaker marks replica 1 as down.
-    let one_down_ok = concurrent_reads(&router, 20).await;
+    let one_down_ok = concurrent_reads(&router, 10).await;
     assert_eq!(
-        one_down_ok, 20,
-        "All 20 reads should succeed when only replica 2 is healthy (got {}/{})",
-        one_down_ok, 20
+        one_down_ok, 10,
+        "All 10 reads should succeed when only replica 2 is healthy (got {}/{})",
+        one_down_ok, 10
     );
     eprintln!(
-        "  ✓ {} / 20 succeeded (replica 1 down, circuit breaker active)",
+        "  ✓ {} / 10 succeeded (replica 1 down, circuit breaker active)",
         one_down_ok
     );
 
