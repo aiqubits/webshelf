@@ -620,6 +620,26 @@ async fn test_change_password_success() {
         "new_token from password change should grant access to protected endpoints"
     );
 
+    // Verify old JWT (signed before password change) is rejected — this is a
+    // read-your-writes consistency test: the auth middleware reads token_version
+    // from write_conn() and must detect the increment immediately.
+    let old_jwt_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/api/users/me")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        old_jwt_response.status(),
+        StatusCode::UNAUTHORIZED,
+        "Old JWT (pre-password-change) must be rejected after password change "
+    );
+
     // Verify old password no longer works
     let login_payload = json!({ "email": &email, "password": "Password123!" });
     let login_resp = app

@@ -195,13 +195,12 @@ impl UserService {
     /// This is used internally (e.g., `get_me`) where the actor is fetching their
     /// own data. No role-based filtering is applied.
     ///
-    /// NOTE: This query routes through AutoRouter and may hit a read replica.
-    /// If the caller requires read-your-writes consistency (e.g., the user just
-    /// updated their profile and needs to see the latest data), use
-    /// `self.db.write_conn()` directly instead.
+    /// NOTE: This query reads from the write database to guarantee
+    /// read-your-writes consistency — a user who just updated their profile
+    /// will immediately see the latest data.
     pub async fn get_user(&self, id: i64) -> Result<Option<UserResponse>, UserError> {
         let user = UserEntity::find_by_id(id)
-            .one(&*self.db)
+            .one(self.db.write_conn())
             .await
             .context("Failed to query user")?;
 
@@ -237,28 +236,6 @@ impl UserService {
             .context("Failed to query user")?;
 
         Ok(user.map(UserResponse::from))
-    }
-
-    /// Get user by ID including the password hash (for internal auth flows).
-    pub async fn get_user_with_hash(&self, id: i64) -> Result<Option<UserModel>, UserError> {
-        let user = UserEntity::find_by_id(id)
-            .one(&*self.db)
-            .await
-            .context("Failed to query user")?;
-
-        Ok(user)
-    }
-
-    /// Get user by email
-    pub async fn get_user_by_email(&self, email: &str) -> Result<Option<UserModel>, UserError> {
-        let email_normalized = email.to_lowercase();
-        let user = UserEntity::find()
-            .filter(Column::Email.eq(&email_normalized))
-            .one(&*self.db)
-            .await
-            .context("Failed to query user")?;
-
-        Ok(user)
     }
 
     /// Update user

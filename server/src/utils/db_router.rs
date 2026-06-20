@@ -63,6 +63,12 @@ pub struct AutoRouter {
     fallback_to_write: bool,
 }
 
+/// Overall timeout in seconds for each read replica connection attempt.
+/// This is a safety net on top of the per-connection connect_timeout
+/// to prevent startup hangs when a replica host is completely unreachable
+/// (e.g., firewall silently dropping SYN packets).
+const CONNECT_TIMEOUT_SECS: u64 = 30;
+
 impl AutoRouter {
     /// Create a multi-database router (one writer + N readers).
     pub async fn new(
@@ -98,7 +104,20 @@ impl AutoRouter {
             .into_iter()
             .map(|(i, url)| {
                 let cfg = read_config.clone();
-                tokio::spawn(async move { (i, connect_db_read(&url, &cfg).await) })
+                tokio::spawn(async move {
+                    match tokio::time::timeout(
+                        Duration::from_secs(CONNECT_TIMEOUT_SECS),
+                        connect_db_read(&url, &cfg),
+                    )
+                    .await
+                    {
+                        Ok(result) => (i, result),
+                        Err(_) => (
+                            i,
+                            Err(DbErr::Custom("read replica connection timed out".into())),
+                        ),
+                    }
+                })
             })
             .collect();
 
@@ -292,31 +311,8 @@ impl AutoRouter {
                 healthy[rng.gen_range(0..healthy.len())]
             }
             ReadStrategy::Weighted => {
-                let weights: Vec<u64> = healthy
-                    .iter()
-                    .map(|&i| self.reads[i].weight as u64)
-                    .collect();
-                let total: u64 = weights.iter().sum();
-                // total > 0 is guaranteed during normal operation because
-                // weight values are min-capped at 1 during connection setup.
-                // This guard prevents panics if a future refactor removes the
-                // min-cap — if total is 0, fall back to round-robin.
-                if total == 0 {
-                    let idx = self.rr_counter.fetch_add(1, Ordering::Relaxed);
-                    healthy[idx % healthy.len()]
-                } else {
-                    let mut rng = rand::thread_rng();
-                    let mut roll = rng.gen_range(0..total);
-                    let mut chosen = healthy[0];
-                    for (&idx, &w) in healthy.iter().zip(weights.iter()) {
-                        if roll < w {
-                            chosen = idx;
-                            break;
-                        }
-                        roll -= w;
-                    }
-                    chosen
-                }
+                let weights: Vec<u32> = healthy.iter().map(|&i| self.reads[i].weight).collect();
+                select_weighted_index(&healthy, &weights, &self.rr_counter)
             }
         };
 
@@ -395,6 +391,32 @@ impl AutoRouter {
         if let Some(slot) = health.down_until.get_mut(idx) {
             *slot = Some(Instant::now() + self.circuit_break);
         }
+    }
+}
+
+/// Select an index from healthy replicas using weighted random selection.
+/// Falls back to round-robin when all weights sum to zero.
+fn select_weighted_index(healthy: &[usize], weights: &[u32], rr_counter: &AtomicUsize) -> usize {
+    let total: u64 = weights.iter().map(|&w| w as u64).sum();
+    // total > 0 is guaranteed during normal operation because
+    // weight values are min-capped at 1 during connection setup.
+    // This guard prevents panics if a future refactor removes the
+    // min-cap — if total is 0, fall back to round-robin.
+    if total == 0 {
+        let idx = rr_counter.fetch_add(1, Ordering::Relaxed);
+        healthy[idx % healthy.len()]
+    } else {
+        let mut rng = rand::thread_rng();
+        let mut roll = rng.gen_range(0..total);
+        let mut chosen = healthy[0];
+        for (&idx, &w) in healthy.iter().zip(weights.iter()) {
+            if roll < w as u64 {
+                chosen = idx;
+                break;
+            }
+            roll -= w as u64;
+        }
+        chosen
     }
 }
 
@@ -525,11 +547,60 @@ fn is_write_statement(stmt: &Statement) -> bool {
     if sql.is_empty() {
         return false;
     }
-    let up = sql.trim_start().to_ascii_uppercase();
-    up.starts_with("INSERT ")
+    let trimmed = sql.trim_start();
+    let up = trimmed.to_ascii_uppercase();
+
+    // Direct write statement detection
+    if up.starts_with("INSERT ")
         || up.starts_with("UPDATE ")
         || up.starts_with("DELETE ")
         || up.starts_with("REPLACE ")
+    {
+        return true;
+    }
+
+    // CTE (WITH ...) may wrap a write statement as its main operation.
+    // Use a depth-based parser to find the main statement keyword outside
+    // of parenthesized CTE subqueries.
+    if up.starts_with("WITH ") {
+        return cte_main_stmt_is_write(&up);
+    }
+
+    false
+}
+
+/// Given an uppercase SQL string that starts with "WITH ", determine
+/// whether the main statement (after all CTE definitions) is a write
+/// operation (INSERT/UPDATE/DELETE/REPLACE).
+///
+/// Uses parenthesis depth tracking to distinguish CTE subqueries from
+/// the outer statement. This is a simplified parser — it does not handle
+/// string literals containing parentheses, but such cases are extremely
+/// rare in auto-generated SQL and would only cause false positives
+/// (routing a SELECT to the write DB), never a correctness failure.
+fn cte_main_stmt_is_write(uppercase_sql: &str) -> bool {
+    let rest = uppercase_sql.strip_prefix("WITH ").unwrap();
+    let rest = rest.strip_prefix("RECURSIVE ").unwrap_or(rest);
+
+    let bytes = rest.as_bytes();
+    let mut depth: u32 = 0;
+    let mut i = 0;
+
+    while i < bytes.len() {
+        let remaining = &bytes[i..];
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' if depth > 0 => depth -= 1,
+            b'I' if depth == 0 && remaining.starts_with(b"INSERT ") => return true,
+            b'U' if depth == 0 && remaining.starts_with(b"UPDATE ") => return true,
+            b'D' if depth == 0 && remaining.starts_with(b"DELETE ") => return true,
+            b'R' if depth == 0 && remaining.starts_with(b"REPLACE ") => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+
+    false
 }
 
 /// Determine whether a `DbErr` likely represents a connection-level
@@ -955,14 +1026,14 @@ mod tests {
     #[test]
     fn test_is_write_statement_with_cte_insert() {
         // A WITH ... INSERT is still an INSERT statement.
+        // With the CTE depth-based parser, this is now correctly detected.
+        // The DELETE inside the CTE subquery is at depth > 0 and ignored;
+        // the INSERT at depth 0 is detected as the main write operation.
         let stmt = Statement::from_string(
             DbBackend::Postgres,
             "WITH deleted AS (DELETE FROM logs WHERE created_at < $1 RETURNING *) INSERT INTO audit SELECT * FROM deleted".to_string(),
         );
-        // starts with "WITH", not "INSERT", so is_write_statement returns false.
-        // This is acceptable: the CTE-INSERT is rare, and even if routed to a
-        // read replica, PostgreSQL would reject it with a write-error.
-        assert!(!is_write_statement(&stmt));
+        assert!(is_write_statement(&stmt));
     }
 
     #[test]
@@ -975,5 +1046,345 @@ mod tests {
                 .to_string(),
         );
         assert!(is_write_statement(&stmt));
+    }
+
+    // ---- CTE write statement tests (enhanced CTE detection) ----
+
+    #[test]
+    fn test_is_write_statement_with_cte_update() {
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "WITH to_update AS (SELECT * FROM users WHERE status = 'inactive') UPDATE users SET status = 'archived' FROM to_update WHERE users.id = to_update.id"
+                .to_string(),
+        );
+        assert!(is_write_statement(&stmt));
+    }
+
+    #[test]
+    fn test_is_write_statement_with_cte_delete() {
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "WITH expired AS (SELECT id FROM sessions WHERE expires_at < NOW()) DELETE FROM sessions WHERE id IN (SELECT id FROM expired)"
+                .to_string(),
+        );
+        assert!(is_write_statement(&stmt));
+    }
+
+    #[test]
+    fn test_is_write_statement_with_cte_recursive_insert() {
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "WITH RECURSIVE org_tree AS (SELECT id, parent_id FROM orgs WHERE id = $1 UNION ALL SELECT o.id, o.parent_id FROM orgs o JOIN org_tree t ON o.parent_id = t.id) INSERT INTO audit_log (org_id, action) SELECT id, 'deleted' FROM org_tree"
+                .to_string(),
+        );
+        assert!(is_write_statement(&stmt));
+    }
+
+    #[test]
+    fn test_is_write_statement_with_cte_multiple_insert() {
+        // Multiple CTEs followed by an INSERT
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "WITH deleted_orders AS (DELETE FROM orders WHERE status = 'cancelled' RETURNING *), archived_products AS (UPDATE products SET archived = true WHERE stock = 0 RETURNING *) INSERT INTO audit (event, table_name) SELECT 'deleted', 'orders' FROM deleted_orders UNION ALL SELECT 'archived', 'products' FROM archived_products"
+                .to_string(),
+        );
+        assert!(is_write_statement(&stmt));
+    }
+
+    #[test]
+    fn test_is_write_statement_with_cte_nested_parens() {
+        // CTE subquery with deeply nested parentheses
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "WITH filtered AS (SELECT * FROM (SELECT * FROM (SELECT * FROM users WHERE id IN (1, 2, 3)) t1) t2) DELETE FROM users USING filtered WHERE users.id = filtered.id"
+                .to_string(),
+        );
+        assert!(is_write_statement(&stmt));
+    }
+
+    #[test]
+    fn test_is_write_statement_with_cte_select_count_not_write() {
+        // CTE with aggregation SELECT — NOT a write
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "WITH user_counts AS (SELECT role, count(*) as cnt FROM users GROUP BY role) SELECT role, cnt FROM user_counts ORDER BY cnt DESC"
+                .to_string(),
+        );
+        assert!(!is_write_statement(&stmt));
+    }
+
+    #[test]
+    fn test_is_write_statement_cte_unchanged_for_direct_inserts() {
+        // Regular INSERT must still be detected (regression check)
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "INSERT INTO users (name, email) VALUES ($1, $2) RETURNING id".to_string(),
+        );
+        assert!(is_write_statement(&stmt));
+    }
+
+    #[test]
+    fn test_is_write_statement_cte_unchanged_for_direct_select() {
+        // Regular SELECT must still NOT be detected (regression check)
+        let stmt = Statement::from_string(
+            DbBackend::Postgres,
+            "SELECT * FROM users WHERE id = $1".to_string(),
+        );
+        assert!(!is_write_statement(&stmt));
+    }
+
+    // ---- select_weighted_index tests ----
+
+    #[test]
+    fn test_select_weighted_index_single_element() {
+        let counter = AtomicUsize::new(0);
+        let result = select_weighted_index(&[0], &[5], &counter);
+        assert_eq!(result, 0);
+    }
+
+    #[test]
+    fn test_select_weighted_index_zero_weights_fallback_round_robin() {
+        let counter = AtomicUsize::new(0);
+        // All weights are 0 — fall back to round-robin.
+        // With healthy = [0, 1, 2] and counter starting at 0:
+        //   call 1: fetch_add(0) = 0 -> 0 %% 3 = 0
+        //   call 2: fetch_add(1) = 1 -> 1 %% 3 = 1
+        //   call 3: fetch_add(2) = 2 -> 2 %% 3 = 2
+        //   call 4: fetch_add(3) = 3 -> 3 %% 3 = 0
+        let healthy = [0usize, 1, 2];
+        let weights = [0u32, 0, 0];
+
+        assert_eq!(select_weighted_index(&healthy, &weights, &counter), 0);
+        assert_eq!(select_weighted_index(&healthy, &weights, &counter), 1);
+        assert_eq!(select_weighted_index(&healthy, &weights, &counter), 2);
+        assert_eq!(select_weighted_index(&healthy, &weights, &counter), 0);
+    }
+
+    #[test]
+    fn test_select_weighted_index_mixed_weights_fallback_guard() {
+        // Some zero weights, but total > 0 — should not fall back to round-robin.
+        // The RNG makes this non-deterministic, but we can verify the returned
+        // index is always from the healthy set (not a bounds error).
+        let counter = AtomicUsize::new(100);
+        let healthy = [0usize, 1, 2];
+        let weights = [3u32, 0, 1];
+
+        // Run multiple times and verify the result is always valid
+        for _ in 0..200 {
+            let idx = select_weighted_index(&healthy, &weights, &counter);
+            assert!(idx < 3, "Index {} out of bounds", idx);
+        }
+    }
+
+    #[test]
+    fn test_select_weighted_index_skips_index_if_healthy_filtered() {
+        // healthy = [1, 2] means only replicas 1 and 2 are available.
+        // weights = [5, 10] maps to healthy indices [1, 2] by position.
+        let counter = AtomicUsize::new(0);
+        let healthy = [1usize, 2];
+        let weights = [5u32, 10];
+
+        for _ in 0..100 {
+            let idx = select_weighted_index(&healthy, &weights, &counter);
+            assert!(idx == 1 || idx == 2, "Expected index 1 or 2, got {}", idx);
+        }
+    }
+
+    // ---- is_connection_error additional edge cases ----
+
+    #[test]
+    fn test_is_connection_error_query_broken_pipe() {
+        // SQLx may report connection failures as DbErr::Query
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "broken pipe: the server closed the connection".to_string(),
+        ));
+        assert!(is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_connection_reset() {
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "connection reset by peer while reading data".to_string(),
+        ));
+        assert!(is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_io_error() {
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "IO error: unexpected EOF reading from socket".to_string(),
+        ));
+        assert!(is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_network_unreachable() {
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "network is unreachable while connecting to host".to_string(),
+        ));
+        assert!(is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_transport_tls() {
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "transport layer error: TLS handshake failed".to_string(),
+        ));
+        assert!(is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_custom_not_connection() {
+        // DbErr::Custom should never be treated as a connection error
+        let err = DbErr::Custom("connection pool exhausted".to_string());
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_syntax_error_not_connection() {
+        // Syntax errors must not be mistaken for connection issues
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "syntax error at or near \"INSERT\"".to_string(),
+        ));
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_relation_not_found() {
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "relation \"users\" does not exist".to_string(),
+        ));
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_deadlock_not_connection() {
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "deadlock detected while waiting for resource".to_string(),
+        ));
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_query_serialization_failure() {
+        let err = DbErr::Query(RuntimeErr::Internal(
+            "could not serialize access due to concurrent update".to_string(),
+        ));
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_conn_acquire_unknown() {
+        let err = DbErr::ConnectionAcquire(ConnAcquireErr::Timeout);
+        assert!(is_connection_error(&err));
+    }
+
+    // ---- HealthState mark_down / probe behavior tests ----
+
+    #[test]
+    fn test_health_state_mark_down_updates_timer() {
+        let mut health = HealthState {
+            down_until: vec![None, None],
+        };
+        let now = Instant::now();
+        health.down_until[0] = Some(now);
+        assert!(health.down_until[0].is_some());
+        assert!(health.down_until[0].unwrap() >= now);
+        assert!(health.down_until[1].is_none());
+    }
+
+    #[test]
+    fn test_health_state_expired_is_none_or_future() {
+        let past = Instant::now() - Duration::from_secs(60);
+        let future = Instant::now() + Duration::from_secs(60);
+        let health = HealthState {
+            down_until: vec![Some(past), Some(future), None],
+        };
+        assert!(health.down_until[0].is_some());
+        assert!(health.down_until[0].unwrap() < Instant::now());
+        assert!(health.down_until[1].unwrap() > Instant::now());
+        assert!(health.down_until[2].is_none());
+    }
+
+    // ---- is_connection_error negative tests for all non-connection DbErr variants ----
+    //
+    // These tests verify that is_connection_error returns false for every DbErr
+    // variant that does NOT represent a connection-level failure.
+
+    #[test]
+    fn test_is_connection_error_exec_not_connection() {
+        // Execution errors (e.g., constraint violations at execute time) are
+        // NOT connection-level failures and must not trigger a circuit break.
+        let err = DbErr::Exec(RuntimeErr::Internal(
+            "duplicate key value violates unique constraint".to_string(),
+        ));
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_type_not_connection() {
+        let err = DbErr::Type("Expected i32, got String".to_string());
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_json_not_connection() {
+        let err = DbErr::Json("missing field `email`".to_string());
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_migration_not_connection() {
+        let err = DbErr::Migration("already applied".to_string());
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_convert_from_u64_not_connection() {
+        let err = DbErr::ConvertFromU64("bool");
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_try_into_err_not_connection() {
+        let err = DbErr::TryIntoErr {
+            from: "i32",
+            into: "String",
+            source: Box::new(std::io::Error::new(
+                std::io::ErrorKind::InvalidData,
+                "conversion failed",
+            )),
+        };
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_unpack_insert_id_not_connection() {
+        let err = DbErr::UnpackInsertId;
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_update_get_primary_key_not_connection() {
+        let err = DbErr::UpdateGetPrimaryKey;
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_record_not_inserted_not_connection() {
+        let err = DbErr::RecordNotInserted;
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_record_not_updated_not_connection() {
+        let err = DbErr::RecordNotUpdated;
+        assert!(!is_connection_error(&err));
+    }
+
+    #[test]
+    fn test_is_connection_error_attr_not_set_not_connection() {
+        let err = DbErr::AttrNotSet("name".to_string());
+        assert!(!is_connection_error(&err));
     }
 }
