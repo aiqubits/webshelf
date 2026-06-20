@@ -152,24 +152,40 @@ async fn concurrent_reads(router: &Arc<AutoRouter>, n: usize) -> usize {
 ///
 /// Uses SeaORM to connect directly (no Docker required).
 async fn kill_replica_connections(replica_url: &str) {
-    match Database::connect(replica_url).await {
-        Ok(conn) => {
-            // Terminate ALL other backend connections, regardless of their state
-            // (active, idle, idle in transaction, etc.) to force the connection
-            // pool to notice the dropped connections.
-            let sql = "SELECT pg_terminate_backend(pid) \
-                       FROM pg_stat_activity \
-                       WHERE pid <> pg_backend_pid()";
-            if let Err(e) = conn.execute_unprepared(sql).await {
-                eprintln!("WARNING: pg_terminate_backend on {}: {}", replica_url, e);
+    // Kill connections in a loop to catch any new connections the pool tries to establish
+    for attempt in 0..3 {
+        match Database::connect(replica_url).await {
+            Ok(conn) => {
+                // Terminate ALL other backend connections, regardless of their state
+                // (active, idle, idle in transaction, etc.) to force the connection
+                // pool to notice the dropped connections.
+                let sql = "SELECT pg_terminate_backend(pid) \
+                           FROM pg_stat_activity \
+                           WHERE pid <> pg_backend_pid()";
+                if let Err(e) = conn.execute_unprepared(sql).await {
+                    eprintln!(
+                        "WARNING: pg_terminate_backend on {} (attempt {}): {}",
+                        replica_url,
+                        attempt + 1,
+                        e
+                    );
+                }
+                // `conn` drops here, closing the admin session — that's fine.
             }
-            // `conn` drops here, closing the admin session — that's fine.
+            Err(e) => {
+                eprintln!(
+                    "WARNING: Could not connect to {} for backend kill (attempt {}): {}",
+                    replica_url,
+                    attempt + 1,
+                    e
+                );
+                // If we can't connect, the replica might already be down, which is fine
+                break;
+            }
         }
-        Err(e) => {
-            eprintln!(
-                "WARNING: Could not connect to {} for backend kill: {}",
-                replica_url, e
-            );
+        // Small delay between attempts to catch reconnection attempts
+        if attempt < 2 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }
@@ -250,7 +266,8 @@ async fn test_concurrent_reads_with_circuit_breaker() {
         replica_urls[1]
     );
     kill_replica_connections(&replica_urls[1]).await;
-    tokio::time::sleep(Duration::from_secs(2)).await;
+    // Shorter wait to execute queries before the pool can reconnect
+    tokio::time::sleep(Duration::from_millis(500)).await;
 
     // With all replicas down and fallback_to_write = false,
     // queries are expected to fail.
