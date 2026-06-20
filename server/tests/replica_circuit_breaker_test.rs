@@ -152,6 +152,64 @@ async fn concurrent_reads(router: &Arc<AutoRouter>, n: usize) -> usize {
     success
 }
 
+/// Attempt to pause a replica Docker container to prevent the connection pool
+/// from reconnecting.
+///
+/// Maps replica URL port to container name:
+///   :5433 → pg-replica1
+///   :5434 → pg-replica2
+///
+/// Returns `true` if the Docker pause command was successful.
+fn docker_pause_replica(url: &str) -> bool {
+    let name = if url.contains(":5433") {
+        "pg-replica1"
+    } else if url.contains(":5434") {
+        "pg-replica2"
+    } else {
+        return false;
+    };
+    std::process::Command::new("docker")
+        .args(["pause", name])
+        .output()
+        .map(|o| {
+            if !o.status.success() {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                eprintln!("WARNING: docker pause {} failed: {}", name, stderr.trim());
+            }
+            o.status.success()
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("WARNING: docker command not available: {}", e);
+            false
+        })
+}
+
+/// Resume a paused Docker replica container.
+/// Returns `true` if the Docker unpause command was successful.
+fn docker_unpause_replica(url: &str) -> bool {
+    let name = if url.contains(":5433") {
+        "pg-replica1"
+    } else if url.contains(":5434") {
+        "pg-replica2"
+    } else {
+        return false;
+    };
+    std::process::Command::new("docker")
+        .args(["unpause", name])
+        .output()
+        .map(|o| {
+            if !o.status.success() {
+                let stderr = String::from_utf8_lossy(&o.stderr);
+                eprintln!("WARNING: docker unpause {} failed: {}", name, stderr.trim());
+            }
+            o.status.success()
+        })
+        .unwrap_or_else(|e| {
+            eprintln!("WARNING: docker command not available: {}", e);
+            false
+        })
+}
+
 /// Kill all backend connections on a replica via `pg_terminate_backend`,
 /// excluding our own administrative session.
 ///
@@ -274,8 +332,13 @@ async fn test_concurrent_reads_with_circuit_breaker() {
         replica_urls[1]
     );
     kill_replica_connections(&replica_urls[1]).await;
-    // Shorter wait to execute queries before the pool can reconnect
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    // Pause the Docker container to prevent the pool from reconnecting.
+    // pg_terminate_backend only kills existing connections, but the pool
+    // will immediately create new ones (server still running). Docker pause
+    // makes the container completely unreachable, forcing connection errors.
+    docker_pause_replica(&replica_urls[1]);
+    // Wait for the pool to detect dropped connections
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     // With all replicas down and fallback_to_write = false,
     // queries are expected to fail.
@@ -292,7 +355,9 @@ async fn test_concurrent_reads_with_circuit_breaker() {
     );
 
     // ── Phase 4: Circuit breaker expires → auto-recovery ─────────
-    eprintln!("Phase 4: Waiting for circuit breaker to expire (3s)...");
+    eprintln!("Phase 4: Resuming replicas and waiting for circuit breaker to expire (3s)...");
+    // Resume the paused replica 2 so it can accept connections again
+    docker_unpause_replica(&replica_urls[1]);
     tokio::time::sleep(Duration::from_secs(4)).await;
 
     // The circuit breaker has expired. AutoRouter's pick_next_read
@@ -629,6 +694,9 @@ async fn test_fallback_to_write_when_replicas_down() {
     // Kill both replicas
     kill_replica_connections(&urls[0]).await;
     kill_replica_connections(&urls[1]).await;
+    // Pause both Docker containers to prevent reconnection
+    docker_pause_replica(&urls[0]);
+    docker_pause_replica(&urls[1]);
     tokio::time::sleep(Duration::from_secs(2)).await;
 
     // With fallback_to_write=true, queries succeed via write DB
@@ -643,6 +711,10 @@ async fn test_fallback_to_write_when_replicas_down() {
         "Query should fall back to write DB (got error: {:?})",
         result.as_ref().err()
     );
+
+    // Resume replicas for other tests
+    docker_unpause_replica(&urls[0]);
+    docker_unpause_replica(&urls[1]);
 }
 
 // ═════════════════════════════════════════════════════════════════════
