@@ -132,10 +132,12 @@ async fn concurrent_reads(router: &Arc<AutoRouter>, n: usize) -> usize {
 async fn kill_replica_connections(replica_url: &str) {
     match Database::connect(replica_url).await {
         Ok(conn) => {
+            // Terminate ALL other backend connections, regardless of their state
+            // (active, idle, idle in transaction, etc.) to force the connection
+            // pool to notice the dropped connections.
             let sql = "SELECT pg_terminate_backend(pid) \
                        FROM pg_stat_activity \
-                       WHERE pid <> pg_backend_pid() \
-                         AND state = 'active'";
+                       WHERE pid <> pg_backend_pid()";
             if let Err(e) = conn.execute_unprepared(sql).await {
                 eprintln!("WARNING: pg_terminate_backend on {}: {}", replica_url, e);
             }
