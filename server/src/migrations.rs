@@ -21,11 +21,23 @@ fn is_duplicate_table_or_index_error(err: &DbErr) -> bool {
 
     // Fallback string matching for errors not covered by SqlErr:
     // - 42P07: duplicate_table (CREATE TABLE IF NOT EXISTS safety net)
-    // - 42710: duplicate_object (CREATE INDEX IF NOT EXISTS safety net)
+    // - 42710: duplicate_object (CREATE INDEX IF NOT EXISTS, CREATE TYPE IF NOT EXISTS safety net)
     let msg = err.to_string().to_lowercase();
-    msg.contains("42p07")
-        || msg.contains("42710")
-        || (msg.contains("already exists") && msg.contains("relation"))
+
+    // Check for PostgreSQL error codes
+    if msg.contains("42p07") || msg.contains("42710") {
+        return true;
+    }
+
+    // Check for "already exists" messages for various object types
+    if msg.contains("already exists") {
+        return msg.contains("relation")
+            || msg.contains("type")
+            || msg.contains("index")
+            || msg.contains("table");
+    }
+
+    false
 }
 
 /// Run database migrations.
