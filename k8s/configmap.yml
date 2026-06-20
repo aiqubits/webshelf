@@ -40,9 +40,12 @@ data:
     acquire_timeout_secs = 30
 
     # Read replica database URLs (empty = disabled)
-    # NOTE: database_read_urls are optional — when empty the system runs in
-    # single-database mode (backward compatible). Set only if you have
-    # PostgreSQL read replicas deployed.
+    # When using CloudNativePG, set via env var WEBSHELF_DATABASE_READ_URLS
+    # (the env var overrides this config). The .ro service URL:
+    #   postgres://postgres:password@webshelf-db-ro.webshelf.svc.cluster.local:5432/webshelf
+    #
+    # NOTE: CNP's .ro service load-balances across ALL healthy replicas,
+    # so only ONE URL entry is needed (not per-replica URLs).
     # Can be overridden by env var: WEBSHELF_DATABASE_READ_URLS
     database_read_urls = []
 

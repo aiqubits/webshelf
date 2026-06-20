@@ -20,6 +20,7 @@ target/
 .env
 config.toml
 k8s/secret.yaml
+k8s/secret.yml
 
 # Dioxus build output
 app/*/dist/

@@ -1,0 +1,137 @@
+# ==========================================
+# WebShelf PostgreSQL Cluster — CloudNativePG
+# ==========================================
+# Deploys a 1-primary-2-replica PostgreSQL cluster using the
+# CloudNativePG operator, supporting read-write splitting via
+# AutoRouter.
+#
+# Prerequisites:
+#   1. Install CNP operator v1.29:
+#        kubectl apply --server-side \
+#          -f https://raw.githubusercontent.com/cloudnative-pg/cloudnative-pg/release-1.29/releases/cnpg-1.29.0.yaml
+#
+#   2. Create secrets (see k8s/secret.yml.example):
+#        kubectl apply -f k8s/secret.yml
+#
+#   3. Apply this cluster:
+#        kubectl apply -f k8s/postgres-cluster.yml
+#
+#   4. Wait for the cluster to be ready:
+#        kubectl get cluster -n webshelf webshelf-db -w
+#
+#   5. Update webshelf-secrets with database URLs:
+#        PASSWORD=$(kubectl get secrets -n webshelf webshelf-db-superuser \
+#          -o jsonpath='{.data.password}' | base64 -d)
+#        echo -n "postgres://postgres:${PASSWORD}@webshelf-db-rw.webshelf.svc.cluster.local:5432/webshelf" | base64
+#        echo -n "postgres://postgres:${PASSWORD}@webshelf-db-ro.webshelf.svc.cluster.local:5432/webshelf" | base64
+#        # Use the two base64 outputs for database_url and database_read_urls
+#
+#   6. Roll out webshelf to pick up new database URLs:
+#        kubectl rollout restart deployment -n webshelf webshelf
+# ==========================================
+apiVersion: postgresql.cnpg.io/v1
+kind: Cluster
+metadata:
+  name: webshelf-db
+  namespace: webshelf
+  labels:
+    app.kubernetes.io/name: webshelf-db
+    app.kubernetes.io/component: postgresql
+spec:
+  # === Topology: 1 primary + 2 replicas ===
+  # CNP automatically sets up streaming replication between instances.
+  # On primary failure, CNP promotes a replica automatically.
+  # The operator provides three Service endpoints:
+  #   webshelf-db-rw  → routes to the primary only (for write operations)
+  #   webshelf-db-ro  → routes to replicas only (for read operations)
+  #   webshelf-db-r   → routes to all instances (read, including primary)
+  instances: 3
+
+  # === PostgreSQL Image ===
+  # Uses CloudNativePG's official PostgreSQL 16 image.
+  # CNP tags correspond to PostgreSQL versions: 16.6 = PostgreSQL 16.6.
+  # NOTE: CNP uses a Debian-based image (not Alpine), but the PostgreSQL
+  # engine version matches the existing postgres:16-alpine deployment.
+  # See: https://github.com/cloudnative-pg/postgres-containers
+  imageName: ghcr.io/cloudnative-pg/postgresql:16.6
+
+  # === Bootstrap ===
+  # Initialize the webshelf database with a controlled superuser password.
+  # The password is stored in webshelf-db-init-secret and MUST match
+  # the password embedded in database_url / database_read_urls.
+  bootstrap:
+    initdb:
+      database: webshelf
+      owner: postgres
+      secret:
+        name: webshelf-db-init-secret
+
+  # === Storage Configuration ===
+  # Each pod gets its own 1Gi PVC via CNP's volumeClaimTemplates.
+  # NOTE: For production, use a fast storage class (e.g., SSD-backed).
+  storage:
+    size: 1Gi
+    # storageClass: fast-ssd  # Uncomment and set to a specific SC
+
+  # === PostgreSQL Configuration ===
+  # CNP manages the following automatically:
+  #   hot_standby = on          (replicas accept read queries)
+  #   wal_level = replica       (WAL contains enough info for replication)
+  #   max_wal_senders           (auto-sized based on instances)
+  #   max_replication_slots     (auto-sized based on instances)
+  # We only set performance/customization parameters here.
+  postgresql:
+    parameters:
+      # Connection pooling
+      max_connections: "100"
+      # Memory
+      shared_buffers: "256MB"
+      effective_cache_size: "384MB"
+      # Write-ahead log sizing
+      max_wal_size: "1GB"
+      min_wal_size: "256MB"
+      # Query execution
+      work_mem: "8MB"
+      maintenance_work_mem: "64MB"
+      # Replication stability: prevents primary VACUUM from removing
+      # tuples still being read by a replica. Without this, long-running
+      # read queries on a replica can fail with "canceling statement
+      # due to conflict with recovery".
+      hot_standby_feedback: "on"
+    pg_hba:
+      # Allow password authentication from the K8s pod network.
+      # Uses 'host' (not 'hostssl') because the webshelf application
+      # does not configure SSL in its SeaORM connection URL. If SSL
+      # is required in the future, add 'hostssl' entries alongside.
+      # These CIDRs cover the most common CNI ranges. Adjust if your
+      # cluster uses a different pod CIDR.
+      - host webshelf postgres 10.0.0.0/8 scram-sha-256
+      - host webshelf postgres 172.16.0.0/12 scram-sha-256
+      - host webshelf postgres 192.168.0.0/16 scram-sha-256
+
+  # === Resource Limits ===
+  # Matching the existing standalone postgres.yml configuration.
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "250m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+
+  # === Superuser Access ===
+  # CNP creates a Secret named <cluster-name>-superuser containing:
+  #   username, password, dbname, host, port, pgpass, uri, jdbc-uri
+  # This is consumed by the application to construct connection URLs.
+  enableSuperuserAccess: true
+
+  # === Monitoring (disabled by default) ===
+  monitoring:
+    enablePodMonitor: false
+
+  # === Backup (disabled by default — configure for production!) ===
+  # Uncomment and configure for disaster recovery:
+  # backup:
+  #   volumeSnapshot:
+  #     className: <your-volume-snapshot-class>
+  #   retentionPolicy: "7d"

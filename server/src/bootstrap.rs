@@ -3,7 +3,6 @@ use axum::{Router, middleware as axum_middleware};
 use clap::Parser;
 use http::Method;
 use redis::Client as RedisClient;
-use sea_orm::{ConnectOptions, Database};
 use std::sync::Arc;
 use tower_http::{
     compression::CompressionLayer,
@@ -21,7 +20,7 @@ use crate::{
     migrations,
     repositories::user::{Column, Entity as UserEntity},
     routes::{api_routes, auth_routes},
-    utils::{init_logger, load_config},
+    utils::{db_router::connect_db, init_logger, load_config},
 };
 use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
 
@@ -80,29 +79,13 @@ pub fn load_app_config(cli_args: &CliArgs) -> Result<AppConfig> {
 }
 
 /// Initialize database connection
+///
+/// Delegates to `db_router::connect_db` for the actual connection setup.
 pub async fn init_database(config: &AppConfig) -> Result<sea_orm::DatabaseConnection> {
     tracing::info!("Connecting to database...");
-
-    let mut connect_options = ConnectOptions::new(&config.database_url);
-    connect_options
-        .max_connections(config.database.max_connections)
-        .min_connections(config.database.min_connections)
-        .connect_timeout(std::time::Duration::from_secs(
-            config.database.connect_timeout_secs,
-        ))
-        .acquire_timeout(std::time::Duration::from_secs(
-            config.database.acquire_timeout_secs,
-        ))
-        .idle_timeout(std::time::Duration::from_secs(
-            config.database.idle_timeout_secs,
-        ))
-        .max_lifetime(std::time::Duration::from_secs(1800))
-        .test_before_acquire(true);
-
-    let db = Database::connect(connect_options)
+    let db = connect_db(&config.database_url, &config.database)
         .await
         .context("Failed to connect to database")?;
-
     tracing::info!("Database connection established");
     Ok(db)
 }

@@ -1,0 +1,229 @@
+name: webshelf-ci
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ========================================
+  # Backend - Server CI
+  # ========================================
+  server:
+    runs-on: ubuntu-latest
+    services:
+      # Primary PostgreSQL (configured for streaming replication in setup step)
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: devpassword
+          POSTGRES_DB: webshelf
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      # NOTE: CI Redis runs without password authentication, unlike
+      # docker-compose / K8s which use requirepass. CI tests that need
+      # Redis should use a non-auth connection URL (redis://localhost:6379).
+
+    steps:
+    - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: "server"
+    - name: Setup Configuration
+      run: |
+        mv config.toml.example config.toml
+        # CI Redis runs without password — override to ensure no-auth connection
+        echo "WEBSHELF_REDIS_URL=redis://127.0.0.1:6379" >> $GITHUB_ENV
+        # CI PostgreSQL uses password 'devpassword' as configured in the service
+        echo "WEBSHELF_DATABASE_URL=postgres://postgres:devpassword@127.0.0.1:5432/webshelf" >> $GITHUB_ENV
+
+    # ================================================================
+    # PostgreSQL Streaming Replication Setup
+    # ================================================================
+    # This step configures the primary (postgres service) for streaming
+    # replication, then creates two standby replicas via pg_basebackup.
+    # The replicas have the FULL data (same tables as primary) and are
+    # kept in sync via WAL streaming.
+    #
+    # Prerequisites:
+    #   - GH Actions ubuntu-latest has Docker CLI available in steps
+    #   - The primary container is accessible via hostname 'postgres'
+    #     within the Docker network (GH Actions service DNS)
+    - name: Setup PostgreSQL Streaming Replication
+      shell: bash
+      run: |
+        set -euo pipefail
+
+        echo "=== Step 1: Configure primary for streaming replication ==="
+        PRIMARY=$(docker ps --filter "ancestor=postgres:16-alpine" --format "{{.Names}}" | head -1)
+        echo "Primary container: $PRIMARY"
+
+        docker exec "$PRIMARY" bash -c '
+          echo "wal_level = replica"              >> /var/lib/postgresql/data/postgresql.conf
+          echo "max_wal_senders = 10"             >> /var/lib/postgresql/data/postgresql.conf
+          echo "max_replication_slots = 10"       >> /var/lib/postgresql/data/postgresql.conf
+          echo "wal_keep_size = 512"              >> /var/lib/postgresql/data/postgresql.conf
+        '
+        docker exec "$PRIMARY" psql -U postgres -c \
+          "CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD 'devpassword';" 2>/dev/null || true
+        docker exec "$PRIMARY" bash -c \
+          'echo "host replication replicator all md5" >> /var/lib/postgresql/data/pg_hba.conf'
+        docker restart "$PRIMARY"
+
+        echo "=== Step 2: Wait for primary recovery ==="
+        for i in $(seq 1 15); do
+          if docker exec "$PRIMARY" pg_isready -U postgres 2>/dev/null; then
+            echo "Primary recovered after ${i}s"
+            break
+          fi
+          sleep 2
+        done
+
+        echo "=== Step 3: Create streaming replicas ==="
+        NETWORK=$(docker inspect "$PRIMARY" \
+          -f '{{range $net,$v := .NetworkSettings.Networks}}{{$net}}{{"\n"}}{{end}}' | head -1)
+        echo "Docker network: $NETWORK"
+
+        for REPLICA in pg-replica1 pg-replica2; do
+          REPLICA_PORT="$([ "$REPLICA" = pg-replica1 ] && echo 5433 || echo 5434)"
+          echo "Creating $REPLICA on port $REPLICA_PORT..."
+
+          # Volume for replica data (from pg_basebackup)
+          docker volume create "${REPLICA}_data"
+
+          # pg_basebackup: copy primary data (hostname 'postgres' resolves within Docker network)
+          docker run --rm \
+            --network "$NETWORK" \
+            -v "${REPLICA}_data":/var/lib/postgresql/data \
+            -e PGPASSWORD=devpassword \
+            postgres:16-alpine \
+            pg_basebackup -h postgres -U replicator -D /var/lib/postgresql/data -Fp -Xs -v
+
+          # Configure standby: touch signal file + set primary_conninfo
+          docker run --rm \
+            -v "${REPLICA}_data":/var/lib/postgresql/data:rw \
+            --user 999:999 \
+            postgres:16-alpine \
+            bash -c "
+              touch /var/lib/postgresql/data/standby.signal
+              echo \"primary_conninfo = 'host=postgres port=5432 user=replicator password=devpassword'\" \
+                >> /var/lib/postgresql/data/postgresql.auto.conf
+            "
+
+          # Start replica container (same Docker network → DNS resolves 'postgres')
+          docker run -d --name "$REPLICA" \
+            --network "$NETWORK" \
+            -p "$REPLICA_PORT":5432 \
+            -v "${REPLICA}_data":/var/lib/postgresql/data:rw \
+            postgres:16-alpine
+
+          echo "$REPLICA started"
+        done
+
+        echo "=== Step 4: Wait for streaming replication ==="
+        for i in $(seq 1 15); do
+          COUNT=$(docker exec "$PRIMARY" psql -U postgres -t -A \
+            -c "SELECT count(*) FROM pg_stat_replication WHERE state = 'streaming';" 2>/dev/null || echo "0")
+          if [ "$COUNT" -ge 2 ] 2>/dev/null; then
+            echo "Both replicas streaming after ${i}s"
+            break
+          fi
+          sleep 2
+        done
+        echo "=== Replication status ==="
+        docker exec "$PRIMARY" psql -U postgres -c \
+          "SELECT application_name, state, sync_state FROM pg_stat_replication;"
+
+        echo "=== Step 5: Set env vars for AutoRouter ==="
+        echo "WEBSHELF_DATABASE_READ_URLS=postgres://postgres:devpassword@127.0.0.1:5433/webshelf,postgres://postgres:devpassword@127.0.0.1:5434/webshelf" >> "$GITHUB_ENV"
+        echo "=== Streaming replication setup complete ==="
+        echo "Replica 1: postgres://postgres:devpassword@127.0.0.1:5433/webshelf"
+        echo "Replica 2: postgres://postgres:devpassword@127.0.0.1:5434/webshelf"
+
+    - name: Format Check
+      run: cargo fmt --check
+    - name: Lint (Clippy)
+      run: cargo clippy --package webshelf-server -- -D warnings
+    - name: Build Server
+      run: cargo build --package webshelf-server --verbose
+    - name: Run Server Tests
+      run: cargo test --package webshelf-server --verbose
+
+  # ========================================
+  # Frontend - Web CI
+  # ========================================
+  web:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: "web"
+    - name: Install wasm32 target
+      run: rustup target add wasm32-unknown-unknown
+    - name: Install cargo-binstall
+      uses: cargo-bins/cargo-binstall@main
+    - name: Install dioxus-cli
+      run: cargo binstall dioxus-cli --version 0.7.9 -y --force
+    - name: Verify dx installation
+      run: |
+        echo "Cargo bin directory: $HOME/.cargo/bin"
+        ls -la $HOME/.cargo/bin/ | grep dx || echo "dx not found in cargo/bin"
+        which dx || echo "dx not in PATH"
+        if [ -f "$HOME/.cargo/bin/dx" ]; then
+          echo "dx found at: $HOME/.cargo/bin/dx"
+          $HOME/.cargo/bin/dx --version
+        else
+          echo "ERROR: dx binary not found, installing via cargo install as fallback"
+          cargo install dioxus-cli --version 0.7.9
+        fi
+    - name: Run Web Tests
+      run: cargo test --package web --verbose
+    - name: Build Web
+      run: |
+        export PATH="$HOME/.cargo/bin:$PATH"
+        cargo build --profile release-wasm -p web --target wasm32-unknown-unknown
+
+  # ========================================
+  # Client API Library CI
+  # ========================================
+  client-api:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: Swatinem/rust-cache@v2
+      with:
+        shared-key: "client-api"
+    - name: Format Check
+      run: cargo fmt --check --package client-api
+    - name: Lint (Clippy)
+      run: cargo clippy --package client-api --all-targets -- -D warnings
+    - name: Install wasm32 target
+      run: rustup target add wasm32-unknown-unknown
+    - name: Check WASM (Clippy)
+      run: cargo clippy --package client-api --target wasm32-unknown-unknown -- -D warnings
+    - name: Check WASM compilation
+      run: cargo check --package client-api --target wasm32-unknown-unknown
+    - name: Build Client API
+      run: cargo build --package client-api --verbose
+    - name: Run Client API Tests
+      run: cargo test --package client-api --verbose

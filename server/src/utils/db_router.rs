@@ -635,7 +635,6 @@ fn is_connection_error(e: &DbErr) -> bool {
             "broken pipe",
             "connection reset",
             "io error",
-            "i/o",
             "network",
             "eof",
             "transport",

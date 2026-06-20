@@ -549,7 +549,7 @@ minikube image load webshelf-web:latest
 # ==========================================
 # 3. 创建命名空间
 # ==========================================
-kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/namespace.yml
 
 # ==========================================
 # 4. 配置密钥（生成并编码安全凭证）
@@ -569,7 +569,7 @@ DB_URL_B64=$(echo -n "$DATABASE_URL" | base64 | tr -d '\n')
 REDIS_URL_B64=$(echo -n "$REDIS_URL" | base64 | tr -d '\n')
 
 # 写入密钥文件
-cat > k8s/secret.yaml << YAMLEOF
+cat > k8s/secret.yml << YAMLEOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -584,14 +584,14 @@ data:
   redis_url: ${REDIS_URL_B64}
 YAMLEOF
 
-kubectl apply -f k8s/secret.yaml
+kubectl apply -f k8s/secret.yml
 
 # ==========================================
 # 5. 部署 PostgreSQL 和 Redis
 # ==========================================
 # 创建 PVC（Minikube 使用默认 StorageClass）
-kubectl apply -f k8s/postgres.yaml
-kubectl apply -f k8s/redis.yaml
+kubectl apply -f k8s/postgres.yml
+kubectl apply -f k8s/redis.yml
 
 # 等待就绪
 kubectl wait --for=condition=ready pod -l app=postgres -n webshelf --timeout=300s
@@ -600,9 +600,9 @@ kubectl wait --for=condition=ready pod -l app=redis -n webshelf --timeout=300s
 # ==========================================
 # 6. 部署应用
 # ==========================================
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/webshelf.yaml
-kubectl apply -f k8s/webshelf-web.yaml
+kubectl apply -f k8s/configmap.yml
+kubectl apply -f k8s/webshelf.yml
+kubectl apply -f k8s/webshelf-web.yml
 
 # 等待应用就绪
 kubectl rollout status deployment/webshelf -n webshelf --timeout=300s
@@ -611,7 +611,7 @@ kubectl rollout status deployment/webshelf-web -n webshelf --timeout=300s
 # ==========================================
 # 7. 配置 Ingress 并验证
 # ==========================================
-kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/ingress.yml
 
 # 获取 Minikube IP
 MINIKUBE_IP=$(minikube ip)
@@ -654,7 +654,7 @@ minikube image load webshelf-server:latest
 minikube image load webshelf-web:latest
 
 # 部署基础设施
-kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/namespace.yml
 
 # 生成密钥
 JWT_SECRET=$(openssl rand -base64 64 | tr -d '\n')
@@ -663,13 +663,13 @@ REDIS_PASS=$(openssl rand -hex 32)
 DATABASE_URL="postgres://postgres:${POSTGRES_PASS}@postgres-service.webshelf.svc.cluster.local:5432/webshelf"
 REDIS_URL="redis://:${REDIS_PASS}@redis-service.webshelf.svc.cluster.local:6379"
 
-# 检查 secret.yaml 是否已存在，避免覆盖已有配置
-if [ -f k8s/secret.yaml ]; then
-  echo "警告: k8s/secret.yaml 已存在，将备份为 k8s/secret.yaml.bak 后覆盖"
-  cp k8s/secret.yaml k8s/secret.yaml.bak
+# 检查 secret.yml 是否已存在，避免覆盖已有配置
+if [ -f k8s/secret.yml ]; then
+  echo "警告: k8s/secret.yml 已存在，将备份为 k8s/secret.yml.bak 后覆盖"
+  cp k8s/secret.yml k8s/secret.yml.bak
 fi
 
-cat > k8s/secret.yaml << YAMLEOF
+cat > k8s/secret.yml << YAMLEOF
 apiVersion: v1
 kind: Secret
 metadata:
@@ -684,21 +684,21 @@ data:
   redis_url: $(echo -n "$REDIS_URL" | base64 | tr -d '\n')
 YAMLEOF
 
-kubectl apply -f k8s/secret.yaml
-kubectl apply -f k8s/postgres.yaml
-kubectl apply -f k8s/redis.yaml
+kubectl apply -f k8s/secret.yml
+kubectl apply -f k8s/postgres.yml
+kubectl apply -f k8s/redis.yml
 kubectl wait --for=condition=ready pod -l app=postgres -n webshelf --timeout=300s
 kubectl wait --for=condition=ready pod -l app=redis -n webshelf --timeout=300s
 
 # 部署应用
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/webshelf.yaml
-kubectl apply -f k8s/webshelf-web.yaml
+kubectl apply -f k8s/configmap.yml
+kubectl apply -f k8s/webshelf.yml
+kubectl apply -f k8s/webshelf-web.yml
 kubectl rollout status deployment/webshelf -n webshelf --timeout=300s
 kubectl rollout status deployment/webshelf-web -n webshelf --timeout=300s
 
 # Ingress
-kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/ingress.yml
 MINIKUBE_IP=$(minikube ip)
 if ! grep -q "webshelf.local" /etc/hosts 2>/dev/null; then
   echo "${MINIKUBE_IP} webshelf.local" | sudo tee -a /etc/hosts
@@ -738,12 +738,12 @@ minikube delete
 
 ```bash
 # 创建命名空间
-kubectl apply -f k8s/namespace.yaml
+kubectl apply -f k8s/namespace.yml
 
 # 创建密钥
-cp k8s/secret.yaml.example k8s/secret.yaml
+cp k8s/secret.yml.example k8s/secret.yml
 
-# 编辑 k8s/secret.yaml，设置敏感信息：
+# 编辑 k8s/secret.yml，设置敏感信息：
 # - jwt_secret (Base64 编码)
 # - database_url (Base64 编码)
 # - postgres_password (Base64 编码)
@@ -751,7 +751,7 @@ cp k8s/secret.yaml.example k8s/secret.yaml
 # - redis_url (Base64 编码)
 
 # 应用密钥
-kubectl apply -f k8s/secret.yaml
+kubectl apply -f k8s/secret.yml
 ```
 
 **关键 Secret 密钥名称 (base64 编码):**
@@ -775,13 +775,13 @@ echo -n "redis://:your-password@redis-service.webshelf.svc.cluster.local:6379" |
 
 ```bash
 # 部署 PostgreSQL StatefulSet
-kubectl apply -f k8s/postgres.yaml
+kubectl apply -f k8s/postgres.yml
 
 # 等待 PostgreSQL 就绪
 kubectl wait --for=condition=ready pod -l app=postgres -n webshelf --timeout=300s
 
 # 部署 Redis StatefulSet
-kubectl apply -f k8s/redis.yaml
+kubectl apply -f k8s/redis.yml
 
 # 等待 Redis 就绪
 kubectl wait --for=condition=ready pod -l app=redis -n webshelf --timeout=300s
@@ -806,7 +806,7 @@ docker tag webshelf-web:latest your-registry/webshelf-web:latest
 docker push your-registry/webshelf-server:latest
 docker push your-registry/webshelf-web:latest
 
-# 更新 k8s/webshelf.yaml 中的镜像地址：
+# 更新 k8s/webshelf.yml 中的镜像地址：
 # image: your-registry/webshelf-server:latest
 # image: your-registry/webshelf-web:latest
 ```
@@ -815,23 +815,23 @@ docker push your-registry/webshelf-web:latest
 
 ```bash
 # 应用 ConfigMap（可选，大部分配置通过环境变量）
-kubectl apply -f k8s/configmap.yaml
+kubectl apply -f k8s/configmap.yml
 
 # 部署后端应用
-kubectl apply -f k8s/webshelf.yaml
+kubectl apply -f k8s/webshelf.yml
 
 # 等待 WebShelf 部署就绪
 kubectl rollout status deployment/webshelf -n webshelf --timeout=300s
 
 # 部署前端（可选，可由后端 Nginx 提供）
-kubectl apply -f k8s/webshelf-web.yaml
+kubectl apply -f k8s/webshelf-web.yml
 ```
 
 #### 5. 配置 Ingress（外部访问）
 
 ```bash
 # 应用 Ingress 配置
-kubectl apply -f k8s/ingress.yaml
+kubectl apply -f k8s/ingress.yml
 
 # 获取 Ingress IP/Host
 kubectl get ingress webshelf-ingress -n webshelf
@@ -1010,7 +1010,7 @@ kubectl cp ./redis-dump.rdb webshelf/redis-0:/data/dump.rdb
 ### 资源限制
 
 ```yaml
-# k8s/webshelf.yaml 中的资源限制（已配置）
+# k8s/webshelf.yml 中的资源限制（已配置）
 resources:
   requests:
     memory: "256Mi"
@@ -1102,13 +1102,13 @@ WEBSHELF_ENV=development|staging|production
 |------|---------|----------|--------|
 | 本地开发 | 127.0.0.1:5432 | 127.0.0.1:6379 (无密码) | config.toml 中直接配置 |
 | Docker Compose | postgres:5432 | redis:6379 (带密码) | .env 文件中配置 (WEBSHELF_POSTGRES_PASSWORD, WEBSHELF_REDIS_PASSWORD) |
-| Kubernetes | postgres-service:5432 | redis-service:6379 (带密码) | k8s/secret.yaml 中配置 |
+| Kubernetes | postgres-service:5432 | redis-service:6379 (带密码) | k8s/secret.yml 中配置 |
 
 ### 安全最佳实践
 
 1. **永远不要在代码或 Git 中提交敏感信息**
    - 使用 `.env.example` 作为模板
-   - 用 `.env` 和 `secret.yaml` 替代，但**永远不提交**
+   - 用 `.env` 和 `secret.yml` 替代，但**永远不提交**
    - 使用 `.gitignore` 排除敏感文件
 
 2. **使用强随机密钥**

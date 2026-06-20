@@ -37,9 +37,17 @@ spec:
               name: webshelf-secrets
               key: database_url
         # Read replica URLs (comma-separated, optional)
-        # Set when PostgreSQL read replicas are deployed.
+        # When using CloudNativePG, set database_read_urls in webshelf-secrets.
+        # The .ro service load-balances across all healthy replicas:
+        #   postgres://postgres:password@webshelf-db-ro.webshelf.svc.cluster.local:5432/webshelf
+        #
+        # In single-database mode (no CNP), database_read_urls in the secret
+        # should be empty — AutoRouter runs in single-database mode.
         - name: WEBSHELF_DATABASE_READ_URLS
-          value: ""
+          valueFrom:
+            secretKeyRef:
+              name: webshelf-secrets
+              key: database_read_urls
         - name: WEBSHELF_REDIS_URL
           valueFrom:
             secretKeyRef:

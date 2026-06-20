@@ -1,3 +1,15 @@
+# ==========================================
+# ⚠️  DEVELOPMENT ONLY: Single-instance PostgreSQL (no CNP operator)
+# ==========================================
+# This file is for development/testing where CloudNativePG is NOT installed.
+#
+# FOR PRODUCTION with read-write splitting:
+#   Use k8s/postgres-cluster.yml instead. It deploys 1 primary + 2
+#   replicas managed by the CloudNativePG operator, with automatic
+#   failover and the -ro/-rw Services needed by AutoRouter.
+#
+# WARNING: Do NOT apply both manifests simultaneously in the same namespace.
+# ==========================================
 apiVersion: apps/v1
 kind: StatefulSet
 metadata:
@@ -5,6 +17,7 @@ metadata:
   namespace: webshelf
   labels:
     app: postgres
+    webshelf.io/db-mode: standalone
 spec:
   serviceName: postgres-service
   replicas: 1

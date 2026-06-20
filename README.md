@@ -341,18 +341,18 @@ webshelf/
 │   └── default.conf             # Nginx 反向代理配置
 │
 ├── k8s/                         # Kubernetes 部署清单
-│   ├── namespace.yaml           # 命名空间
-│   ├── postgres.yaml            # PostgreSQL 部署
-│   ├── redis.yaml               # Redis 部署
-│   ├── webshelf.yaml            # 应用主部署
-│   ├── webshelf-web.yaml        # 前端部署 (可选)
-│   ├── configmap.yaml           # 配置映射
-│   ├── secret.yaml.example      # 密钥示例
-│   └── ingress.yaml             # Ingress 配置
+│   ├── namespace.yml            # 命名空间
+│   ├── postgres.yml             # PostgreSQL 部署
+│   ├── redis.yml                # Redis 部署
+│   ├── webshelf.yml             # 应用主部署
+│   ├── webshelf-web.yml         # 前端部署 (可选)
+│   ├── configmap.yml            # 配置映射
+│   ├── secret.yml.example       # 密钥示例
+│   └── ingress.yml              # Ingress 配置
 │
 ├── .github/
 │   └── workflows/
-│       └── webshelf.yaml        # CI/CD 流程
+│       └── webshelf.yml         # CI/CD 流程
 │
 ├── docker-compose.yml           # Docker Compose 编排文件
 ├── Dockerfile.server            # 服务器容器镜像
