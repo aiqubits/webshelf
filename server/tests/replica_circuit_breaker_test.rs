@@ -91,32 +91,40 @@ async fn create_test_router(circuit_break_ms: u64, fallback_to_write: bool) -> A
 
 /// Warm up: ensure pool connections are established to all replicas.
 async fn warm_up_replicas(router: &Arc<AutoRouter>, count: usize) {
-    // Execute more queries than the pool size to ensure all connections are established
+    // Phase 1: Sequential warm-up queries to establish initial connections
     for i in 0..count {
         let stmt = Statement::from_string(DbBackend::Postgres, format!("SELECT {} AS warmup", i));
         let _ = router.query_one(stmt).await;
     }
-    // Also do a batch of concurrent queries to warm up parallel connections
-    let barrier = Arc::new(Barrier::new(count));
-    let mut handles = Vec::with_capacity(count);
-    for i in 0..count {
-        let r = Arc::clone(router);
-        let b = Arc::clone(&barrier);
-        handles.push(tokio::spawn(async move {
-            b.wait().await;
-            let stmt = Statement::from_string(
-                DbBackend::Postgres,
-                format!("SELECT {} AS parallel_warmup", i),
-            );
-            r.query_one(stmt).await
-        }));
+
+    // Phase 2: Concurrent queries to establish parallel connections
+    // Do multiple rounds to ensure the pool is fully saturated
+    for round in 0..3 {
+        let barrier = Arc::new(Barrier::new(count));
+        let mut handles = Vec::with_capacity(count);
+        for i in 0..count {
+            let r = Arc::clone(router);
+            let b = Arc::clone(&barrier);
+            handles.push(tokio::spawn(async move {
+                b.wait().await;
+                let stmt = Statement::from_string(
+                    DbBackend::Postgres,
+                    format!("SELECT {} AS parallel_warmup_r{}", i, round),
+                );
+                r.query_one(stmt).await
+            }));
+        }
+        // Wait for all warmup queries to complete
+        for handle in handles {
+            let _ = handle.await;
+        }
+        // Small delay between rounds
+        tokio::time::sleep(Duration::from_millis(200)).await;
     }
-    // Wait for all warmup queries to complete
-    for handle in handles {
-        let _ = handle.await;
-    }
-    // Give the pool a moment to stabilize
-    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Phase 3: Final stabilization delay
+    // Give the pool time to stabilize all connections
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 }
 
 /// Run `n` concurrent read queries through the AutoRouter.
@@ -228,7 +236,7 @@ async fn test_concurrent_reads_with_circuit_breaker() {
 
     // ── Phase 1: All replicas healthy ─────────────────────────────
     eprintln!("Phase 1: Warm up both replicas...");
-    warm_up_replicas(&router, 20).await;
+    warm_up_replicas(&router, 30).await;
 
     let healthy_ok = concurrent_reads(&router, 20).await;
     assert_eq!(
