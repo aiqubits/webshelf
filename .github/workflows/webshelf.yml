@@ -120,8 +120,7 @@ jobs:
 
           # Configure standby: touch signal file + set primary_conninfo
           docker run --rm \
-            -v "${REPLICA}_data":/var/lib/postgresql/data:rw \
-            --user 999:999 \
+            -v "${REPLICA}_data":/var/lib/postgresql/data \
             postgres:16-alpine \
             bash -c "
               touch /var/lib/postgresql/data/standby.signal
