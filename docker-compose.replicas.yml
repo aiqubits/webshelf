@@ -204,9 +204,7 @@ services:
           #     所以必须递归变更所有权，否则 Permission denied。
           # 配置 hot_standby 模式
           touch "$${PGDATA}/standby.signal"
-          cat >> "$${PGDATA}/postgresql.auto.conf" <<- CONN_EOF
-          primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=$${REPLICATION_PASSWORD} application_name=$${HOSTNAME:-webshelf-postgres-replica1}'
-          CONN_EOF
+          echo "primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=$${REPLICATION_PASSWORD} application_name=$${HOSTNAME:-webshelf-postgres-replica1}'" >> "$${PGDATA}/postgresql.auto.conf"
           echo "hot_standby = on" >> "$${PGDATA}/postgresql.conf"
           echo "hot_standby_feedback = on" >> "$${PGDATA}/postgresql.conf"
           chown -R postgres:postgres "$${PGDATA}"
@@ -286,9 +284,7 @@ services:
           #     docker-entrypoint.sh 以 postgres 用户启动 PostgreSQL，
           #     所以必须递归变更所有权，否则 Permission denied。
           touch "$${PGDATA}/standby.signal"
-          cat >> "$${PGDATA}/postgresql.auto.conf" <<- CONN_EOF
-          primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=$${REPLICATION_PASSWORD} application_name=$${HOSTNAME:-webshelf-postgres-replica2}'
-          CONN_EOF
+          echo "primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=$${REPLICATION_PASSWORD} application_name=$${HOSTNAME:-webshelf-postgres-replica2}'" >> "$${PGDATA}/postgresql.auto.conf"
           echo "hot_standby = on" >> "$${PGDATA}/postgresql.conf"
           echo "hot_standby_feedback = on" >> "$${PGDATA}/postgresql.conf"
           chown -R postgres:postgres "$${PGDATA}"
