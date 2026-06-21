@@ -40,7 +40,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use sea_orm::{ConnectionTrait, Database, DbBackend, Statement};
+use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
 use webshelf_server::AutoRouter;
 use webshelf_server::utils::config::{DatabaseReadConfig, DatabaseRoutingConfig};
 
@@ -127,24 +127,16 @@ async fn concurrent_reads(router: &Arc<AutoRouter>, n: usize) -> usize {
 /// connection pool from re-establishing a connection.
 ///
 /// Uses a single persistent SeaORM connection to call pg_terminate_backend
-/// in a tight loop (~10ms intervals) for the specified duration.
+/// in a tight loop (~1ms intervals) for the specified duration.
 /// Returns immediately (background task) — the caller should await the handle.
-async fn keep_killing_replica(url: &str, duration_ms: u64) {
-    let conn_opt = Database::connect(url).await;
-    let conn = match conn_opt {
-        Ok(c) => c,
-        Err(e) => {
-            eprintln!("WARNING: Could not connect to {} for keep-kill: {}", url, e);
-            return;
-        }
-    };
-    let iterations = duration_ms / 10;
+async fn keep_killing_replica(conn: DatabaseConnection, duration_ms: u64) {
+    let iterations = duration_ms;
     let sql = "SELECT pg_terminate_backend(pid) \
                FROM pg_stat_activity \
                WHERE pid <> pg_backend_pid()";
     for _ in 0..iterations {
         let _ = conn.execute_unprepared(sql).await;
-        tokio::time::sleep(Duration::from_millis(10)).await;
+        tokio::time::sleep(Duration::from_millis(1)).await;
     }
 }
 
@@ -267,30 +259,38 @@ async fn test_concurrent_reads_with_circuit_breaker() {
     // ── Phase 3: Kill replica 2 → all replicas down ──────────────
     eprintln!("Phase 3: Killing connections on both replicas...");
 
-    // Re-kill replica 1's connections so retries cannot succeed on it.
-    // After Phase 2 killed replica 1 (~2.5s ago), the pool may have
-    // re-established connections. We kill both replicas now and keep
-    // killing both continuously to prevent the pool from reconnecting
-    // during the test.
-    kill_replica_connections(&replica_urls[0]).await;
-    kill_replica_connections(&replica_urls[1]).await;
+    // Pre-establish admin connections for keep-killing so the kill loop
+    // starts immediately without the Database::connect() setup delay.
+    let admin1 = Database::connect(&replica_urls[0])
+        .await
+        .expect("Failed to connect to replica 1 for keep-killing");
+    let admin2 = Database::connect(&replica_urls[1])
+        .await
+        .expect("Failed to connect to replica 2 for keep-killing");
 
-    let replica1_url = replica_urls[0].clone();
-    let replica2_url = replica_urls[1].clone();
+    // Start continuous killing at 1ms intervals to prevent the pool from
+    // re-establishing connections during retry attempts (which bypass the
+    // circuit breaker and directly try each replica).
     let kill_handle = tokio::spawn(async move {
-        // Keep killing both replicas so retry attempts (which bypass
-        // the circuit breaker) cannot succeed on either replica.
         let h1 = tokio::spawn(async move {
-            keep_killing_replica(&replica1_url, 3000).await;
+            keep_killing_replica(admin1, 3000).await;
         });
         let h2 = tokio::spawn(async move {
-            keep_killing_replica(&replica2_url, 3000).await;
+            keep_killing_replica(admin2, 3000).await;
         });
         let _ = h1.await;
         let _ = h2.await;
     });
-    // A brief 50ms delay allows pg_terminate_backend to settle before
-    // the concurrent reads begin.
+
+    // Let the keep-killing tasks warm up (start terminating connections)
+    // before we run the concurrent reads.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Kill existing pool connections right before the reads.
+    // keep-killing will prevent new connections from surviving.
+    kill_replica_connections(&replica_urls[0]).await;
+    kill_replica_connections(&replica_urls[1]).await;
+    // Brief delay for pg_terminate_backend to settle.
     tokio::time::sleep(Duration::from_millis(50)).await;
 
     // With all replicas down and fallback_to_write = false,
