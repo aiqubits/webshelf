@@ -1,0 +1,360 @@
+# ============================================
+# WebShelf — 一主多从读写分离 Docker Compose
+# ============================================
+# 纯 docker-compose.yml 实现，零外部依赖。
+# 主库（postgres-primary）通过 docker-entrypoint-initdb.d 机制
+# 自动创建复制角色并配置 pg_hba，从库通过 pg_basebackup 全量同步后
+# 以 hot_standby 模式启动，通过流式复制实时接收 WAL 变更。
+#
+# 手动方式：
+#   docker compose -f docker-compose.replicas.yml up -d
+#
+# 查看复制状态：
+#   docker exec webshelf-postgres-primary psql -U postgres -c \
+#     "SELECT application_name, state, sync_state FROM pg_stat_replication;"
+#
+# 环境变量（需在 .env 或 shell 中设置）：
+#   WEBSHELF_POSTGRES_PASSWORD     — PostgreSQL 主库密码
+#   WEBSHELF_REDIS_PASSWORD        — Redis 密码
+#   WEBSHELF_JWT_SECRET            — JWT 密钥
+#   WEBSHELF_REPLICATION_PASSWORD  — 复制角色密码（可选，默认同主库密码）
+#   WEBSHELF_SYSTEM_ADMIN_EMAIL    — 系统管理员邮箱（可选，默认 admin@webshelf.local）
+#   WEBSHELF_SYSTEM_ADMIN_PASSWORD — 系统管理员密码（可选，默认 change-me-admin-password）
+# ============================================
+name: webshelf-replicas
+
+services:
+  # ============================================
+  # Backend - WebShelf Server
+  # ============================================
+  webshelf-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    pull_policy: build
+    container_name: webshelf-server
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      - RUST_LOG=info
+      - WEBSHELF_ENV=${WEBSHELF_ENV:-development}
+      - WEBSHELF_DATABASE_URL=postgres://postgres:${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}@postgres-primary:5432/webshelf
+      # 两个流式复制从库地址，AutoRouter 自动路由 SELECT 查询
+      - WEBSHELF_DATABASE_READ_URLS=postgres://postgres:${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}@postgres-replica1:5432/webshelf,postgres://postgres:${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}@postgres-replica2:5432/webshelf
+      - WEBSHELF_REDIS_URL=redis://:${WEBSHELF_REDIS_PASSWORD:-CHANGE_ME_REDIS_PASSWORD}@redis:6379
+      - WEBSHELF_JWT_SECRET=${WEBSHELF_JWT_SECRET:?Set WEBSHELF_JWT_SECRET in .env file}
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+      postgres-replica1:
+        condition: service_started
+      postgres-replica2:
+        condition: service_started
+      redis:
+        condition: service_healthy
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # ============================================
+  # Frontend - WebShelf Web (nginx + Dioxus WASM)
+  # ============================================
+  webshelf-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+    pull_policy: build
+    container_name: webshelf-web
+    ports:
+      - "80:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      webshelf-server:
+        condition: service_healthy
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:80/nginx-health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # ============================================
+  # PostgreSQL Primary (Write)
+  # ============================================
+  # 覆盖 entrypoint 为 bash -c，在启动前将复制角色创建脚本和
+  # pg_hba 配置脚本写入 docker-entrypoint-initdb.d，然后由
+  # 原始 entrypoint 执行。配置了流式复制所需的 WAL 参数：
+  #   wal_level=replica          — 输出足够 WAL 信息供从库复制
+  #   max_wal_senders=10         — 最大 WAL 发送进程数
+  #   max_replication_slots=10   — 最大复制槽数
+  #   wal_keep_size=512          — 保留的 WAL 大小 (MB)
+  # ============================================
+  postgres-primary:
+    image: postgres:16-alpine
+    pull_policy: missing
+    container_name: webshelf-postgres-primary
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -eo pipefail
+
+        # 1. 写入 SQL init：创建 replicator 复制角色
+        #    注意：$${REPLICATION_PASSWORD} 在 bash 运行时展开为容器环境变量值
+        cat > /docker-entrypoint-initdb.d/01-create-replicator-role.sql <<- SQL_EOF
+        CREATE ROLE replicator WITH REPLICATION LOGIN PASSWORD '$${REPLICATION_PASSWORD}';
+        SQL_EOF
+
+        # 2. 写入 Shell init：允许从库以 replicator 身份做流式复制连接
+        cat > /docker-entrypoint-initdb.d/02-configure-pg_hba.sh <<- 'SH_EOF'
+        #!/bin/bash
+        set -e
+        echo "host replication replicator all md5" >> /var/lib/postgresql/data/pg_hba.conf
+        SH_EOF
+        chmod +x /docker-entrypoint-initdb.d/02-configure-pg_hba.sh
+
+        # 3. 执行原始 entrypoint，传递 PostgreSQL 配置参数
+        exec /usr/local/bin/docker-entrypoint.sh postgres \
+          -c wal_level=replica \
+          -c max_wal_senders=10 \
+          -c max_replication_slots=10 \
+          -c wal_keep_size=512
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}
+      - POSTGRES_DB=webshelf
+      - REPLICATION_USER=replicator
+      - REPLICATION_PASSWORD=${WEBSHELF_REPLICATION_PASSWORD:-${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - webshelf-postgres-primary-data:/var/lib/postgresql/data
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ============================================
+  # PostgreSQL Replica 1 (Read)
+  # ============================================
+  # 覆盖 entrypoint 为 bash -c，首次启动时：
+  #   1. 等待主库就绪
+  #   2. pg_basebackup 全量同步
+  #   3. 配置 standby.signal + primary_conninfo + hot_standby
+  #   4. exec 原始 entrypoint 启动 hot_standby
+  # 后续重启时 PGDATA 已有数据，跳过 pg_basebackup 直接启动。
+  # ============================================
+  postgres-replica1:
+    image: postgres:16-alpine
+    pull_policy: missing
+    container_name: webshelf-postgres-replica1
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -eo pipefail
+
+        PGDATA="$${PGDATA:-/var/lib/postgresql/data}"
+
+        # 等待主库就绪（最多 60s）
+        echo "Waiting for primary (postgres-primary:5432) to be ready..."
+        for i in $(seq 1 30); do
+          if PGPASSWORD="$${POSTGRES_PASSWORD}" pg_isready \
+            -h postgres-primary -U postgres -q 2>/dev/null; then
+            echo "Primary ready after $${i}s"
+            break
+          fi
+          echo "  Waiting... ($${i}/30)"
+          sleep 2
+        done
+
+        # 首次运行：从主库全量同步
+        if [ ! -f "$${PGDATA}/PG_VERSION" ]; then
+          echo "=== PGDATA empty — running pg_basebackup from primary ==="
+
+          # 检查主库是否真的可用
+          if ! PGPASSWORD="$${POSTGRES_PASSWORD}" pg_isready \
+            -h postgres-primary -U postgres -q 2>/dev/null; then
+            echo "ERROR: Primary unreachable after 60s, cannot bootstrap replica"
+            exit 1
+          fi
+
+          PGPASSWORD="$${REPLICATION_PASSWORD}" pg_basebackup \
+            -h postgres-primary \
+            -U replicator \
+            -D "$${PGDATA}" \
+            -Fp -Xs -P -v
+
+          echo "pg_basebackup completed"
+
+          # ⚠️  pg_basebackup 以 root 运行，产生的文件归属 root:root。
+          #     docker-entrypoint.sh 以 postgres 用户启动 PostgreSQL，
+          #     所以必须递归变更所有权，否则 Permission denied。
+          # 配置 hot_standby 模式
+          touch "$${PGDATA}/standby.signal"
+          cat >> "$${PGDATA}/postgresql.auto.conf" <<- CONN_EOF
+          primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=$${REPLICATION_PASSWORD} application_name=$${HOSTNAME:-webshelf-postgres-replica1}'
+          CONN_EOF
+          echo "hot_standby = on" >> "$${PGDATA}/postgresql.conf"
+          echo "hot_standby_feedback = on" >> "$${PGDATA}/postgresql.conf"
+          chown -R postgres:postgres "$${PGDATA}"
+
+          echo "=== Replica bootstrap complete ==="
+        else
+          echo "=== PGDATA exists — starting as hot standby ==="
+        fi
+
+        exec /usr/local/bin/docker-entrypoint.sh postgres
+    environment:
+      - POSTGRES_PASSWORD=${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}
+      - PRIMARY_HOST=postgres-primary
+      - PRIMARY_PORT=5432
+      - REPLICATION_USER=replicator
+      - REPLICATION_PASSWORD=${WEBSHELF_REPLICATION_PASSWORD:-${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}}
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - webshelf-postgres-replica1-data:/var/lib/postgresql/data
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # ============================================
+  # PostgreSQL Replica 2 (Read)
+  # ============================================
+  postgres-replica2:
+    image: postgres:16-alpine
+    pull_policy: missing
+    container_name: webshelf-postgres-replica2
+    entrypoint: ["/bin/bash", "-c"]
+    command:
+      - |
+        set -eo pipefail
+
+        PGDATA="$${PGDATA:-/var/lib/postgresql/data}"
+
+        echo "Waiting for primary (postgres-primary:5432) to be ready..."
+        for i in $(seq 1 30); do
+          if PGPASSWORD="$${POSTGRES_PASSWORD}" pg_isready \
+            -h postgres-primary -U postgres -q 2>/dev/null; then
+            echo "Primary ready after $${i}s"
+            break
+          fi
+          echo "  Waiting... ($${i}/30)"
+          sleep 2
+        done
+
+        if [ ! -f "$${PGDATA}/PG_VERSION" ]; then
+          echo "=== PGDATA empty — running pg_basebackup from primary ==="
+
+          if ! PGPASSWORD="$${POSTGRES_PASSWORD}" pg_isready \
+            -h postgres-primary -U postgres -q 2>/dev/null; then
+            echo "ERROR: Primary unreachable after 60s, cannot bootstrap replica"
+            exit 1
+          fi
+
+          PGPASSWORD="$${REPLICATION_PASSWORD}" pg_basebackup \
+            -h postgres-primary \
+            -U replicator \
+            -D "$${PGDATA}" \
+            -Fp -Xs -P -v
+
+          echo "pg_basebackup completed"
+
+          # ⚠️  pg_basebackup 以 root 运行，产生的文件归属 root:root。
+          #     docker-entrypoint.sh 以 postgres 用户启动 PostgreSQL，
+          #     所以必须递归变更所有权，否则 Permission denied。
+          touch "$${PGDATA}/standby.signal"
+          cat >> "$${PGDATA}/postgresql.auto.conf" <<- CONN_EOF
+          primary_conninfo = 'host=postgres-primary port=5432 user=replicator password=$${REPLICATION_PASSWORD} application_name=$${HOSTNAME:-webshelf-postgres-replica2}'
+          CONN_EOF
+          echo "hot_standby = on" >> "$${PGDATA}/postgresql.conf"
+          echo "hot_standby_feedback = on" >> "$${PGDATA}/postgresql.conf"
+          chown -R postgres:postgres "$${PGDATA}"
+
+          echo "=== Replica bootstrap complete ==="
+        else
+          echo "=== PGDATA exists — starting as hot standby ==="
+        fi
+
+        exec /usr/local/bin/docker-entrypoint.sh postgres
+    environment:
+      - POSTGRES_PASSWORD=${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}
+      - PRIMARY_HOST=postgres-primary
+      - PRIMARY_PORT=5432
+      - REPLICATION_USER=replicator
+      - REPLICATION_PASSWORD=${WEBSHELF_REPLICATION_PASSWORD:-${WEBSHELF_POSTGRES_PASSWORD:-CHANGE_ME_POSTGRES_PASSWORD}}
+    ports:
+      - "127.0.0.1:5434:5432"
+    volumes:
+      - webshelf-postgres-replica2-data:/var/lib/postgresql/data
+    depends_on:
+      postgres-primary:
+        condition: service_healthy
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
+  # ============================================
+  # Redis Cache
+  # ============================================
+  redis:
+    image: redis:7-alpine
+    pull_policy: missing
+    container_name: webshelf-redis
+    command: redis-server --requirepass ${WEBSHELF_REDIS_PASSWORD:-CHANGE_ME_REDIS_PASSWORD}
+    environment:
+      - REDIS_PASSWORD=${WEBSHELF_REDIS_PASSWORD:-CHANGE_ME_REDIS_PASSWORD}
+    ports:
+      - "127.0.0.1:6379:6379"
+    volumes:
+      - webshelf-redis-data:/data
+    networks:
+      - webshelf-net
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  webshelf-postgres-primary-data:
+    driver: local
+  webshelf-postgres-replica1-data:
+    driver: local
+  webshelf-postgres-replica2-data:
+    driver: local
+  webshelf-redis-data:
+    driver: local
+
+networks:
+  webshelf-net:
+    driver: bridge
