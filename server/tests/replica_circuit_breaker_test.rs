@@ -38,7 +38,7 @@
 //! Success = correctly routed to write DB.
 
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use sea_orm::{ConnectionTrait, Database, DatabaseConnection, DbBackend, Statement};
 use webshelf_server::AutoRouter;
@@ -123,20 +123,56 @@ async fn concurrent_reads(router: &Arc<AutoRouter>, n: usize) -> usize {
     success
 }
 
-/// Kill all backend connections on a replica repeatedly to prevent the
-/// connection pool from re-establishing a connection.
+/// Run `n` concurrent slow read queries through the AutoRouter.
+///
+/// Uses `pg_sleep` to make each query last long enough that
+/// `keep_killing_replica` is guaranteed to terminate the connection
+/// mid-query. This prevents false successes where a fast `SELECT N`
+/// completes in the gap between kill cycles (which are bounded by
+/// network round-trip time).
+async fn concurrent_slow_reads(router: &Arc<AutoRouter>, n: usize, sleep_secs: f64) -> usize {
+    let mut handles = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let r = Arc::clone(router);
+        handles.push(tokio::spawn(async move {
+            let stmt = Statement::from_string(
+                DbBackend::Postgres,
+                format!("SELECT pg_sleep({}), {} AS val", sleep_secs, i),
+            );
+            r.query_one(stmt).await
+        }));
+    }
+
+    let mut success = 0usize;
+    for handle in handles {
+        if handle.await.unwrap().is_ok() {
+            success += 1;
+        }
+    }
+    success
+}
+
+/// Kill all backend connections on a replica repeatedly for the specified
+/// duration to prevent the connection pool from re-establishing connections.
 ///
 /// Uses a single persistent SeaORM connection to call pg_terminate_backend
-/// in a tight loop (~1ms intervals) for the specified duration.
-/// Returns immediately (background task) — the caller should await the handle.
-async fn keep_killing_replica(conn: DatabaseConnection, duration_ms: u64) {
-    let iterations = duration_ms;
+/// in a tight loop. The loop is time-based (not iteration-based) to ensure
+/// consistent duration regardless of network latency — the previous
+/// iteration-based approach could run for 18-60s when `execute_unprepared`
+/// itself took 5-20ms per call.
+async fn keep_killing_replica(conn: DatabaseConnection, duration: Duration) {
     let sql = "SELECT pg_terminate_backend(pid) \
                FROM pg_stat_activity \
                WHERE pid <> pg_backend_pid()";
-    for _ in 0..iterations {
+    let deadline = Instant::now() + duration;
+    while Instant::now() < deadline {
         let _ = conn.execute_unprepared(sql).await;
-        tokio::time::sleep(Duration::from_millis(1)).await;
+        // Yield to allow other tasks (including the test's query attempts)
+        // to make progress, ensuring they try and fail while killing is
+        // still active. No fixed sleep — the admin connection's own query
+        // latency provides natural pacing between kill cycles.
+        tokio::task::yield_now().await;
     }
 }
 
@@ -268,9 +304,13 @@ async fn test_concurrent_reads_with_circuit_breaker() {
         .await
         .expect("Failed to connect to replica 2 for keep-killing");
 
-    // Start continuous killing at 1ms intervals to prevent the pool from
-    // re-establishing connections during retry attempts (which bypass the
-    // circuit breaker and directly try each replica).
+    // Start continuous killing to prevent the pool from re-establishing
+    // connections during retry attempts (which bypass the circuit breaker
+    // and directly try each replica).
+    //
+    // Duration is 5 seconds — longer than the slow query duration (2s)
+    // to ensure queries are killed mid-execution even if retry attempts
+    // re-establish connections.
     //
     // ⚠️  Do NOT call kill_replica_connections() while keep-killing is
     // active — it will kill the keep-killing admin connections too
@@ -278,23 +318,25 @@ async fn test_concurrent_reads_with_circuit_breaker() {
     // ALL other connections, including the admin sessions).
     let kill_handle = tokio::spawn(async move {
         let h1 = tokio::spawn(async move {
-            keep_killing_replica(admin1, 3000).await;
+            keep_killing_replica(admin1, Duration::from_secs(5)).await;
         });
         let h2 = tokio::spawn(async move {
-            keep_killing_replica(admin2, 3000).await;
+            keep_killing_replica(admin2, Duration::from_secs(5)).await;
         });
         let _ = h1.await;
         let _ = h2.await;
     });
 
     // Let keep-killing terminate all existing pool connections.
-    // After this delay, keep-killing is actively killing ALL connections
-    // to both replicas every 1ms, so the pool cannot keep any alive.
-    tokio::time::sleep(Duration::from_millis(1000)).await;
+    tokio::time::sleep(Duration::from_secs(1)).await;
 
-    // With all replicas down and fallback_to_write = false,
-    // queries are expected to fail.
-    let all_down_ok = concurrent_reads(&router, 5).await;
+    // Use slow queries (pg_sleep) so each query stays active long enough
+    // for keep_killing to terminate the connection mid-query.
+    // Fast queries like `SELECT N` can complete in the gap between
+    // kill cycles (bounded by network round-trip time), causing false
+    // successes. A 2-second pg_sleep guarantees the query is still
+    // running when the next kill cycle strikes.
+    let all_down_ok = concurrent_slow_reads(&router, 5, 2.0).await;
     kill_handle.await.unwrap();
     assert!(
         all_down_ok < 5,
