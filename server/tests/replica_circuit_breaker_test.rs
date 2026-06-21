@@ -271,6 +271,11 @@ async fn test_concurrent_reads_with_circuit_breaker() {
     // Start continuous killing at 1ms intervals to prevent the pool from
     // re-establishing connections during retry attempts (which bypass the
     // circuit breaker and directly try each replica).
+    //
+    // ⚠️  Do NOT call kill_replica_connections() while keep-killing is
+    // active — it will kill the keep-killing admin connections too
+    // (pg_terminate_backend with WHERE pid <> pg_backend_pid() kills
+    // ALL other connections, including the admin sessions).
     let kill_handle = tokio::spawn(async move {
         let h1 = tokio::spawn(async move {
             keep_killing_replica(admin1, 3000).await;
@@ -282,16 +287,10 @@ async fn test_concurrent_reads_with_circuit_breaker() {
         let _ = h2.await;
     });
 
-    // Let the keep-killing tasks warm up (start terminating connections)
-    // before we run the concurrent reads.
-    tokio::time::sleep(Duration::from_millis(500)).await;
-
-    // Kill existing pool connections right before the reads.
-    // keep-killing will prevent new connections from surviving.
-    kill_replica_connections(&replica_urls[0]).await;
-    kill_replica_connections(&replica_urls[1]).await;
-    // Brief delay for pg_terminate_backend to settle.
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    // Let keep-killing terminate all existing pool connections.
+    // After this delay, keep-killing is actively killing ALL connections
+    // to both replicas every 1ms, so the pool cannot keep any alive.
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // With all replicas down and fallback_to_write = false,
     // queries are expected to fail.
