@@ -2749,15 +2749,27 @@ async fn test_count_cache_invalidated_after_create_system_role() {
         .await
         .expect("create_user failed");
 
-    // Populate system count cache via list_users with system role
-    let _page = svc
-        .list_users(PaginationParams::default(), role)
-        .await
-        .expect("list_users failed");
-
+    // Populate system count cache via list_users with system role.
+    // Use a retry loop to handle potential cache invalidation from parallel
+    // tests (other test's create_user invalidates all count cache keys).
     let count_key = format!("user:count:{}", role);
-    let before_create: Option<u64> = state.cache.get(&count_key).await.unwrap();
-    assert!(before_create.is_some(), "system count cache should exist");
+    let mut before_create: Option<u64> = None;
+    for attempt in 1..=3 {
+        let _page = svc
+            .list_users(PaginationParams::default(), role)
+            .await
+            .expect("list_users failed");
+        if let Some(cached) = state.cache.get::<u64>(&count_key).await.unwrap() {
+            before_create = Some(cached);
+            break;
+        }
+        tracing::warn!(
+            "system count cache empty after list_users (attempt {}), retrying...",
+            attempt
+        );
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    }
+    assert!(before_create.is_some(), "system count cache should exist after list_users");
 
     // Create another user — should invalidate system count cache
     let email2 = unique_email("cnt_sys_2");
