@@ -33,17 +33,14 @@ pub use webshelf_runtime::Runtime;
 // 默认（没有任何 feature 时）走 webshelf-axum；
 // 启用 webshelf-salvo 时走 salvo。
 // 这样 cargo run --features webshelf-salvo 即可切换，无需 --no-default-features。
-#[cfg(not(feature = "webshelf-salvo"))]
+// webshelf-axum 始终编译，类型无条件 re-export；
+// 当 salvo 适配完成后再按 feature 切换框架类型别名。
 pub use webshelf_axum::*;
 
-#[cfg(not(feature = "webshelf-salvo"))]
 pub type AppRuntime = AxumRuntime<AppState>;
-
-#[cfg(not(feature = "webshelf-salvo"))]
 pub type AppRouter = <AppRuntime as Runtime>::Router;
 
-// 待 salvo 适配完成后启用以下代码（需移除 #[cfg(...)] 上的注释）
-// #[cfg(feature = "webshelf-salvo")]
+// 待 salvo 适配完成后启用以下代码并添加 #[cfg(feature = "webshelf-salvo")] 条件
 // pub use webshelf_salvo::*;
 // pub type AppRuntime = SalvoRuntime<AppState>;
 // pub type AppRouter = <AppRuntime as Runtime>::Router;

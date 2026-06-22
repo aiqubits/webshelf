@@ -2769,7 +2769,10 @@ async fn test_count_cache_invalidated_after_create_system_role() {
         );
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     }
-    assert!(before_create.is_some(), "system count cache should exist after list_users");
+    assert!(
+        before_create.is_some(),
+        "system count cache should exist after list_users"
+    );
 
     // Create another user — should invalidate system count cache
     let email2 = unique_email("cnt_sys_2");
