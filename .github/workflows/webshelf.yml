@@ -56,13 +56,18 @@ jobs:
         # CI PostgreSQL uses password 'devpassword' as configured in the service
         echo "WEBSHELF_DATABASE_URL=postgres://postgres:devpassword@127.0.0.1:5432/webshelf" >> $GITHUB_ENV
 
-
-    - name: Format Check
-      run: cargo fmt --check
-    - name: Lint (Clippy)
-      run: cargo clippy --package webshelf-server -- -D warnings
-    - name: Build Server
-      run: cargo build --package webshelf-server --verbose
+    # ================================================================
+    # PostgreSQL Streaming Replication Setup
+    # ================================================================
+    # This step configures the primary (postgres service) for streaming
+    # replication, then creates two standby replicas via pg_basebackup.
+    # The replicas have the FULL data (same tables as primary) and are
+    # kept in sync via WAL streaming.
+    #
+    # Prerequisites:
+    #   - GH Actions ubuntu-latest has Docker CLI available in steps
+    #   - The primary container is accessible via hostname 'postgres'
+    #     within the Docker network (GH Actions service DNS)
     - name: Setup PostgreSQL Streaming Replication
       shell: bash
       run: |
@@ -157,6 +162,12 @@ jobs:
         docker exec "$PRIMARY" psql -U postgres -c \
           "DO \$\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname='root') THEN CREATE ROLE root WITH LOGIN; END IF; END \$\$;"
 
+    - name: Format Check
+      run: cargo fmt --check
+    - name: Lint (Clippy)
+      run: cargo clippy --package webshelf-server -- -D warnings
+    - name: Build Server
+      run: cargo build --package webshelf-server --verbose
     - name: Run Server Tests
       run: cargo test --package webshelf-server --verbose
 
