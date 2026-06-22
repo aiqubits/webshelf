@@ -1,6 +1,7 @@
-use axum::extract::{FromRequest, Request};
-use axum::http::header::CONTENT_TYPE;
-use axum::response::{IntoResponse, Response};
+use crate::body;
+use crate::header::CONTENT_TYPE;
+use crate::{FromRequest, IntoResponse, Json, Request, Response};
+// JsonRejection 通过 crate::rejection::JsonRejection 全路径引用
 use serde::de::DeserializeOwned;
 
 /// Maximum body size for form-data parsing (10 MB, matching RequestBodyLimitLayer).
@@ -17,7 +18,7 @@ pub struct JsonOrForm<T>(pub T);
 
 #[derive(Debug)]
 pub enum JsonOrFormRejection {
-    Json(axum::extract::rejection::JsonRejection),
+    Json(crate::rejection::JsonRejection),
     Form(String),
 }
 
@@ -26,7 +27,7 @@ impl IntoResponse for JsonOrFormRejection {
         match self {
             Self::Json(rejection) => rejection.into_response(),
             Self::Form(msg) => (
-                axum::http::StatusCode::BAD_REQUEST,
+                crate::StatusCode::BAD_REQUEST,
                 format!("Failed to parse form body: {msg}"),
             )
                 .into_response(),
@@ -50,7 +51,7 @@ where
             .to_ascii_lowercase();
 
         if content_type.contains("application/x-www-form-urlencoded") {
-            let bytes = axum::body::to_bytes(req.into_body(), MAX_FORM_BODY_SIZE)
+            let bytes = body::to_bytes(req.into_body(), MAX_FORM_BODY_SIZE)
                 .await
                 .map_err(|e| JsonOrFormRejection::Form(e.to_string()))?;
             let value: T = serde_urlencoded::from_bytes(&bytes)
@@ -58,7 +59,7 @@ where
             Ok(JsonOrForm(value))
         } else {
             // Default to JSON parsing (preserves existing behavior)
-            let json = axum::Json::<T>::from_request(req, state)
+            let json = Json::<T>::from_request(req, state)
                 .await
                 .map_err(JsonOrFormRejection::Json)?;
             Ok(JsonOrForm(json.0))

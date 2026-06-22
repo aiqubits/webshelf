@@ -1,8 +1,4 @@
-use axum::{
-    Json,
-    http::StatusCode,
-    response::{IntoResponse, Response},
-};
+use crate::{IntoResponse, Json, Response, StatusCode};
 use serde::Serialize;
 use thiserror::Error;
 
@@ -201,7 +197,7 @@ impl From<crate::services::password_reset::PasswordResetError> for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use http_body_util::BodyExt;
+    use crate::BodyExt;
 
     async fn extract_error_json(response: Response) -> serde_json::Value {
         let body = response.into_body();

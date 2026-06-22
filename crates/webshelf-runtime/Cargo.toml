@@ -1,0 +1,9 @@
+[package]
+name = "webshelf-runtime"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+tracing.workspace = true
+tokio = { workspace = true, features = ["rt", "signal"] }

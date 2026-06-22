@@ -1,10 +1,4 @@
-use axum::{
-    Json,
-    extract::Request,
-    http::StatusCode,
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
+use crate::{IntoResponse, Json, Next, Request, Response, StatusCode};
 
 use crate::utils::error::ErrorResponse;
 
@@ -86,7 +80,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_panic_middleware_success() {
-        use axum::{Router, routing::get};
+        use crate::{Router, get};
         use tower::ServiceExt;
 
         async fn ok_handler() -> &'static str {
@@ -95,13 +89,13 @@ mod tests {
 
         let app = Router::new()
             .route("/", get(ok_handler))
-            .layer(axum::middleware::from_fn(panic_middleware));
+            .layer(crate::from_fn(panic_middleware));
 
         let response = app
             .oneshot(
-                axum::http::Request::builder()
+                crate::Request::builder()
                     .uri("/")
-                    .body(axum::body::Body::empty())
+                    .body(crate::Body::empty())
                     .unwrap(),
             )
             .await
@@ -109,7 +103,7 @@ mod tests {
 
         assert_eq!(response.status(), StatusCode::OK);
 
-        use http_body_util::BodyExt;
+        use crate::BodyExt;
         let bytes = response.into_body().collect().await.unwrap().to_bytes();
         let body = String::from_utf8(bytes.to_vec()).unwrap();
         assert_eq!(body, "success");
@@ -117,7 +111,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_panic_middleware_catches_panic() {
-        use axum::{Router, routing::get};
+        use crate::{Router, get};
         use tower::ServiceExt;
 
         async fn panicking_handler() -> &'static str {
@@ -126,13 +120,13 @@ mod tests {
 
         let app = Router::new()
             .route("/", get(panicking_handler))
-            .layer(axum::middleware::from_fn(panic_middleware));
+            .layer(crate::from_fn(panic_middleware));
 
         let response = app
             .oneshot(
-                axum::http::Request::builder()
+                crate::Request::builder()
                     .uri("/")
-                    .body(axum::body::Body::empty())
+                    .body(crate::Body::empty())
                     .unwrap(),
             )
             .await
@@ -149,7 +143,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_internal_error_response_body() {
-        use http_body_util::BodyExt;
+        use crate::BodyExt;
 
         let response = internal_error_response("Test error message");
 

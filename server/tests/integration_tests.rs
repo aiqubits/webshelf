@@ -13,15 +13,12 @@
 //!   DELETE FROM users WHERE email LIKE '%@example.com';
 //! Or use the `cleanup_test_users` helper at the end of your test suite.
 
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode},
-};
-use http_body_util::BodyExt;
 use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
+use webshelf_axum::{Any, Body, CorsLayer, Method, Request, Router, StatusCode, TraceLayer};
+use webshelf_axum::{BodyExt, from_fn, from_fn_with_state};
+use webshelf_server::middlewares::auth::auth_middleware;
 
 // Helper function to create test app
 async fn create_test_app() -> Router {
@@ -69,14 +66,9 @@ async fn create_test_app_and_state() -> (Router, webshelf_server::AppState) {
         email: emailserver::EmailService::new(emailserver::EmailConfig::default()),
     };
 
-    use http::Method;
-    use tower_http::cors::CorsLayer;
-    use tower_http::trace::TraceLayer;
-    use webshelf_server::middlewares::auth::auth_middleware;
-
     // Configure CORS
     let cors = CorsLayer::new()
-        .allow_origin(tower_http::cors::Any)
+        .allow_origin(Any)
         .allow_methods([
             Method::GET,
             Method::POST,
@@ -85,7 +77,7 @@ async fn create_test_app_and_state() -> (Router, webshelf_server::AppState) {
             Method::PATCH,
             Method::OPTIONS,
         ])
-        .allow_headers(tower_http::cors::Any);
+        .allow_headers(Any);
 
     // Build test router with same middleware stack as main app
     let router = Router::new()
@@ -94,11 +86,8 @@ async fn create_test_app_and_state() -> (Router, webshelf_server::AppState) {
             "/api/public/auth",
             auth_routes(RedisRateLimiter::disabled(RateLimitConfig::default())),
         )
-        .layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ))
-        .layer(axum::middleware::from_fn(
+        .layer(from_fn_with_state(state.clone(), auth_middleware))
+        .layer(from_fn(
             webshelf_server::middlewares::panic::panic_middleware,
         ))
         .layer(TraceLayer::new_for_http())

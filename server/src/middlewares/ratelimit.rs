@@ -1,11 +1,7 @@
-use axum::{
-    body::Body,
-    extract::{State, connect_info::ConnectInfo},
-    http::{HeaderMap, Request, StatusCode},
-    middleware::Next,
-    response::{IntoResponse, Json, Response},
+use crate::{
+    Body, BodyExt, ConnectInfo, HeaderMap, IntoResponse, Json, Next, Request, Response, State,
+    StatusCode,
 };
-use http_body_util::BodyExt;
 use serde_json::Value;
 
 use distributed_ratelimit::RedisRateLimiter;
@@ -172,7 +168,7 @@ fn extract_client_ip(headers: &HeaderMap) -> Option<String> {
 /// This is a fallback when no proxy headers are present (e.g. direct
 /// connections in development or when the reverse proxy does not forward
 /// headers).
-fn extract_peer_ip(extensions: &http::Extensions) -> Option<String> {
+fn extract_peer_ip(extensions: &crate::Extensions) -> Option<String> {
     extensions
         .get::<ConnectInfo<std::net::SocketAddr>>()
         .map(|ConnectInfo(addr)| addr.ip().to_string())
@@ -266,9 +262,9 @@ mod tests {
 
     #[test]
     fn test_extract_peer_ip_with_connect_info() {
-        use axum::extract::connect_info::ConnectInfo;
+        use crate::ConnectInfo;
 
-        let mut extensions = http::Extensions::new();
+        let mut extensions = crate::Extensions::new();
         extensions.insert(ConnectInfo(
             "127.0.0.1:8080".parse::<std::net::SocketAddr>().unwrap(),
         ));
@@ -277,7 +273,7 @@ mod tests {
 
     #[test]
     fn test_extract_peer_ip_missing() {
-        let extensions = http::Extensions::new();
+        let extensions = crate::Extensions::new();
         assert_eq!(extract_peer_ip(&extensions), None);
     }
 
@@ -312,8 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_disabled_limiter_passes_through_ip_check() {
-        use axum::Router;
-        use axum::routing::get;
+        use crate::{Router, get};
         use distributed_ratelimit::RateLimitConfig;
         use tower::ServiceExt;
 
@@ -326,9 +321,9 @@ mod tests {
             key_prefix: "test",
         };
 
-        let app = Router::new().route("/", get(|| async { "passed" })).layer(
-            axum::middleware::from_fn_with_state(guard, rate_limit_middleware),
-        );
+        let app = Router::new()
+            .route("/", get(|| async { "passed" }))
+            .layer(crate::from_fn_with_state(guard, rate_limit_middleware));
 
         let response = app
             .oneshot(Request::builder().uri("/").body(Body::empty()).unwrap())
@@ -343,8 +338,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_disabled_limiter_ignores_email_check() {
-        use axum::Router;
-        use axum::routing::post;
+        use crate::{Router, post};
         use distributed_ratelimit::RateLimitConfig;
         use tower::ServiceExt;
 
@@ -359,10 +353,7 @@ mod tests {
 
         let app = Router::new()
             .route("/", post(|_: String| async { "passed" }))
-            .layer(axum::middleware::from_fn_with_state(
-                guard,
-                rate_limit_middleware,
-            ));
+            .layer(crate::from_fn_with_state(guard, rate_limit_middleware));
 
         let response = app
             .oneshot(

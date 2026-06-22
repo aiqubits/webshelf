@@ -12,13 +12,11 @@ repository.workspace = true
 homepage.workspace = true
 
 [dependencies]
-# Web framework
-axum = "0.8.9"
+# Web framework abstraction (不直接依赖 axum/tower/tower-http/http/http-body-util)
+webshelf-runtime = { workspace = true }
+webshelf-axum = { workspace = true }  # 始终编译，作为默认后端
+webshelf-salvo = { workspace = true, optional = true }  # salvo 可选后端
 tokio = { version = "1", features = ["full"] }
-tower = "0.5"
-tower-http = { version = "0.6", features = ["trace", "cors", "compression-br", "compression-gzip", "limit"] }
-http = "1"
-http-body-util = "0.1"
 
 # Database
 sea-orm = { version = "1.1.20", features = ["sqlx-postgres", "runtime-tokio-rustls", "macros"] }
@@ -62,5 +60,11 @@ chrono.workspace = true
 uuid.workspace = true
 
 [dev-dependencies]
+# tower 仅用于内联测试和集成测试中的 ServiceExt::oneshot()
 tower = { version = "0.5", features = ["util"] }
-http-body-util = "0.1"
+# webshelf-axum 用于测试中的 Router/Request/Body 等类型
+webshelf-axum = { workspace = true }
+
+[features]
+default = []
+webshelf-salvo = ["dep:webshelf-salvo"]

@@ -38,6 +38,12 @@ COPY app/mobile/Cargo.toml ./app/mobile/Cargo.toml
 COPY crates/emailserver/Cargo.toml ./crates/emailserver/Cargo.toml
 RUN mkdir -p crates/emailserver/src && echo 'pub fn placeholder() {}' > crates/emailserver/src/lib.rs
 
+# Copy webshelf-runtime and webshelf-axum manifests for dependency caching.
+COPY crates/webshelf-runtime/Cargo.toml ./crates/webshelf-runtime/Cargo.toml
+RUN mkdir -p crates/webshelf-runtime/src && echo 'pub fn placeholder() {}' > crates/webshelf-runtime/src/lib.rs
+COPY crates/webshelf-axum/Cargo.toml ./crates/webshelf-axum/Cargo.toml
+RUN mkdir -p crates/webshelf-axum/src && echo 'pub fn placeholder() {}' > crates/webshelf-axum/src/lib.rs
+
 # Fetch all dependencies first (fails on network errors, not on compilation)
 RUN cargo fetch
 
@@ -51,6 +57,8 @@ RUN cargo build --release --package webshelf-server || true
 COPY server/src ./server/src
 COPY server/migrations ./server/migrations
 COPY crates/emailserver/src ./crates/emailserver/src
+COPY crates/webshelf-runtime/src ./crates/webshelf-runtime/src
+COPY crates/webshelf-axum/src ./crates/webshelf-axum/src
 
 # Touch files to ensure rebuild after caching layer
 RUN touch server/src/main.rs

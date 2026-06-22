@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver", "crates/distributed-ratelimit"]
+members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver", "crates/distributed-ratelimit", "crates/webshelf-runtime", "crates/webshelf-axum"]
 # resolver = "3" is required for Rust edition 2024
 # Minimum Rust version: 1.92+
 resolver = "3"
@@ -43,6 +43,17 @@ client-api = { path = "app/client-api" }
 # Shared crates
 emailserver = { path = "crates/emailserver" }
 distributed-ratelimit = { path = "crates/distributed-ratelimit" }
+
+# Web framework crates
+webshelf-runtime = { path = "crates/webshelf-runtime" }
+webshelf-axum = { path = "crates/webshelf-axum" }
+webshelf-salvo = { path = "crates/webshelf-salvo" }
+axum = { version = "0.8.9" }
+tower = "0.5"
+tower-http = { version = "0.6", features = ["trace", "cors", "compression-br", "compression-gzip", "limit"] }
+http = "1"
+http-body-util = "0.1"
+tokio = { version = "1", features = ["full"] }
 
 # ── Release 优化 ──────────────────────────────────────
 [profile.release]

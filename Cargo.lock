@@ -7790,13 +7790,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "webshelf-axum"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "http-body-util",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "webshelf-runtime",
+]
+
+[[package]]
+name = "webshelf-runtime"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "webshelf-salvo"
+version = "0.1.0"
+dependencies = [
+ "webshelf-runtime",
+]
+
+[[package]]
 name = "webshelf-server"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "argon2",
  "async-trait",
- "axum",
  "bb8",
  "bb8-redis",
  "chrono",
@@ -7807,8 +7836,6 @@ dependencies = [
  "emailserver",
  "futures",
  "hex",
- "http",
- "http-body-util",
  "jsonwebtoken",
  "parking_lot",
  "rand 0.8.6",
@@ -7821,11 +7848,13 @@ dependencies = [
  "thiserror 2.0.18",
  "tokio",
  "tower",
- "tower-http",
  "tracing",
  "tracing-subscriber",
  "uuid",
  "validator",
+ "webshelf-axum",
+ "webshelf-runtime",
+ "webshelf-salvo",
 ]
 
 [[package]]

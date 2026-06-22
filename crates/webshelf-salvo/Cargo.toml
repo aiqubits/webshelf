@@ -1,0 +1,7 @@
+[package]
+name = "webshelf-salvo"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+webshelf-runtime = { workspace = true }

@@ -1,11 +1,6 @@
+use crate::header::AUTHORIZATION;
+use crate::{IntoResponse, Json, Next, Request, Response, State, StatusCode};
 use anyhow::Context;
-use axum::{
-    Json,
-    extract::{Request, State},
-    http::{StatusCode, header::AUTHORIZATION},
-    middleware::Next,
-    response::{IntoResponse, Response},
-};
 use jsonwebtoken::{Algorithm, DecodingKey, Validation, decode};
 use sea_orm::EntityTrait;
 use serde::{Deserialize, Serialize};
@@ -239,7 +234,7 @@ fn extract_bearer_token(request: &Request) -> Option<String> {
 /// The browser automatically includes it in same-origin requests, so the frontend
 /// does not need to manually attach it to the Authorization header.
 fn extract_jwt_cookie(request: &Request) -> Option<String> {
-    let cookie_header = request.headers().get(axum::http::header::COOKIE)?;
+    let cookie_header = request.headers().get(crate::header::COOKIE)?;
     let cookie_str = cookie_header.to_str().ok()?;
 
     cookie_str
@@ -407,8 +402,8 @@ mod tests {
 
     #[test]
     fn test_extract_bearer_token_success() {
-        use axum::body::Body;
-        use axum::http::{HeaderValue, Request};
+        use crate::body::Body;
+        use crate::{HeaderValue, Request};
 
         let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
@@ -423,8 +418,8 @@ mod tests {
 
     #[test]
     fn test_extract_bearer_token_lowercase() {
-        use axum::body::Body;
-        use axum::http::{HeaderValue, Request};
+        use crate::body::Body;
+        use crate::{HeaderValue, Request};
 
         let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
@@ -439,8 +434,8 @@ mod tests {
 
     #[test]
     fn test_extract_bearer_token_mixed_case() {
-        use axum::body::Body;
-        use axum::http::{HeaderValue, Request};
+        use crate::body::Body;
+        use crate::{HeaderValue, Request};
 
         let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
@@ -455,7 +450,7 @@ mod tests {
 
     #[test]
     fn test_extract_bearer_token_missing_header() {
-        use axum::body::Body;
+        use crate::body::Body;
 
         let request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
@@ -465,8 +460,8 @@ mod tests {
 
     #[test]
     fn test_extract_bearer_token_wrong_scheme() {
-        use axum::body::Body;
-        use axum::http::{HeaderValue, Request};
+        use crate::body::Body;
+        use crate::{HeaderValue, Request};
 
         let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
 
@@ -486,8 +481,8 @@ mod tests {
     /// return `None` without panicking.
     #[test]
     fn test_extract_bearer_token_multibyte_utf8_does_not_panic() {
-        use axum::body::Body;
-        use axum::http::{HeaderValue, Request};
+        use crate::body::Body;
+        use crate::{HeaderValue, Request};
 
         let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
         // Two fire emojis (4 bytes each) followed by "bearer token".
@@ -504,8 +499,8 @@ mod tests {
     /// must still return None.
     #[test]
     fn test_extract_bearer_token_single_emoji_prefix_returns_none() {
-        use axum::body::Body;
-        use axum::http::{HeaderValue, Request};
+        use crate::body::Body;
+        use crate::{HeaderValue, Request};
 
         let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
         let value = HeaderValue::from_bytes(b"\xF0\x9F\x94\xA5 bearer token")
@@ -518,8 +513,8 @@ mod tests {
     /// Bearer prefix with no trailing token must return None, not panic.
     #[test]
     fn test_extract_bearer_token_prefix_only() {
-        use axum::body::Body;
-        use axum::http::{HeaderValue, Request};
+        use crate::body::Body;
+        use crate::{HeaderValue, Request};
 
         let mut request = Request::builder().uri("/test").body(Body::empty()).unwrap();
         request

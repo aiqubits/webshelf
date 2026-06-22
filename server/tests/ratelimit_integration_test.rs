@@ -7,14 +7,8 @@
 //! Tests use the `disabled` limiter for deterministic behavior without requiring
 //! actual Redis/Database connections.
 
-use axum::{
-    Router,
-    body::Body,
-    http::{Request, StatusCode},
-    response::Response,
-};
-use http_body_util::BodyExt;
 use tower::ServiceExt;
+use webshelf_axum::{Body, BodyExt, Request, Response, Router, StatusCode};
 
 use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
 use webshelf_server::middlewares::ratelimit::{RateLimitGuard, rate_limit_middleware};
@@ -33,8 +27,8 @@ async fn request_through_middleware(
     headers: Vec<(&str, &str)>,
 ) -> Response {
     let app = Router::new()
-        .route("/", axum::routing::get(test_handler).post(test_handler))
-        .layer(axum::middleware::from_fn_with_state(
+        .route("/", webshelf_axum::get(test_handler).post(test_handler))
+        .layer(webshelf_axum::from_fn_with_state(
             guard,
             rate_limit_middleware,
         ));

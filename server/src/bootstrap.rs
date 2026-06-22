@@ -1,17 +1,10 @@
 use anyhow::{Context, Result};
-use axum::{Router, middleware as axum_middleware};
 use clap::Parser;
-use http::Method;
 use std::sync::Arc;
-use tower_http::{
-    compression::CompressionLayer,
-    cors::{Any, CorsLayer},
-    limit::RequestBodyLimitLayer,
-    trace::TraceLayer,
-};
 
 use crate::{
-    AppConfig, AppState, AutoRouter,
+    Any, AppConfig, AppState, AutoRouter, CompressionLayer, CorsLayer, HeaderValue, Method,
+    RequestBodyLimitLayer, TraceLayer, from_fn, from_fn_with_state,
     middlewares::{
         auth::auth_middleware,
         panic::{self, panic_middleware},
@@ -21,6 +14,7 @@ use crate::{
     routes::{api_routes, auth_routes},
     utils::{db_router::connect_db, init_logger, load_config},
 };
+use crate::{AppRouter, AppRuntime, Runtime};
 use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
 
 /// Command-line arguments
@@ -55,7 +49,8 @@ pub struct CliArgs {
 
 /// Application bootstrap result containing all initialized components
 pub struct BootstrapResult {
-    pub app: Router,
+    pub app: AppRouter,
+    pub state: AppState,
     pub bind_addr: String,
     pub _worker_handle: crate::snowflake::WorkerHandle,
 }
@@ -156,14 +151,14 @@ pub fn configure_cors(allowed_origins: &[String], env: &str) -> CorsLayer {
             // Access-Control-Allow-Headers header for debugging convenience.
             return CorsLayer::new()
                 .allow_methods([Method::OPTIONS])
-                .allow_headers(tower_http::cors::Any);
+                .allow_headers(Any);
         }
         return use_any();
     }
 
-    let mut origins: Vec<http::HeaderValue> = Vec::with_capacity(allowed_origins.len());
+    let mut origins: Vec<HeaderValue> = Vec::with_capacity(allowed_origins.len());
     for origin in allowed_origins {
-        match origin.parse::<http::HeaderValue>() {
+        match origin.parse::<HeaderValue>() {
             Ok(header_value) => origins.push(header_value),
             Err(e) => {
                 tracing::error!(
@@ -186,7 +181,7 @@ pub fn configure_cors(allowed_origins: &[String], env: &str) -> CorsLayer {
             );
             return CorsLayer::new()
                 .allow_methods([Method::OPTIONS])
-                .allow_headers(tower_http::cors::Any);
+                .allow_headers(Any);
         }
         tracing::warn!(
             "CORS: all configured allowed_origins failed to parse: {:?}, falling back to Any (development only)",
@@ -210,7 +205,7 @@ pub fn configure_cors(allowed_origins: &[String], env: &str) -> CorsLayer {
 }
 
 /// Build application router with all middleware
-pub fn build_app_router(state: AppState, env: &str) -> Router {
+pub fn build_app_router(state: AppState, env: &str) -> AppRouter {
     let allowed_origins = state.config.server.allowed_origins.clone();
     let cors = configure_cors(&allowed_origins, env);
     let compression = CompressionLayer::new();
@@ -231,19 +226,16 @@ pub fn build_app_router(state: AppState, env: &str) -> Router {
     };
 
     // Middleware layers are applied in reverse order (last added = first to execute).
-    Router::new()
+    AppRouter::new()
         .nest("/api", api_routes())
         .nest("/api/public/auth", auth_routes(rate_limiter))
-        .layer(axum_middleware::from_fn_with_state(
-            state.clone(),
-            auth_middleware,
-        ))
-        .layer(axum_middleware::from_fn(panic_middleware))
+        .layer(from_fn_with_state(state.clone(), auth_middleware))
+        .layer(from_fn(panic_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .layer(compression)
         .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // 10MB max request body
-        .with_state(state)
+    // 注意：with_state 在 Runtime::serve 内部调用，这里不注入
 }
 
 /// Bootstrap the entire application
@@ -340,12 +332,13 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
             .await;
 
     let state = create_app_state(db, cache, app_config);
-    let app = build_app_router(state, &cli_args.env);
+    let app = build_app_router(state.clone(), &cli_args.env);
 
     let bind_addr = format!("{}:{}", host, port);
 
     Ok(BootstrapResult {
         app,
+        state,
         bind_addr,
         _worker_handle,
     })
@@ -448,53 +441,13 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
 pub async fn start_server(bootstrap_result: BootstrapResult) -> Result<()> {
     let BootstrapResult {
         app,
+        state,
         bind_addr,
         _worker_handle,
     } = bootstrap_result;
 
     tracing::info!("Starting server on {}", bind_addr);
-
-    let listener = tokio::net::TcpListener::bind(&bind_addr)
-        .await
-        .context("Failed to bind to address")?;
-
-    tracing::info!("Server is ready to accept connections");
-
-    axum::serve(
-        listener,
-        app.into_make_service_with_connect_info::<std::net::SocketAddr>(),
-    )
-    .with_graceful_shutdown(shutdown_signal())
-    .await
-    .context("Server failed")?;
-
+    AppRuntime::serve(app, state, &bind_addr).await?;
     tracing::info!("Server shutdown completed");
     Ok(())
-}
-
-/// Wait for shutdown signal (SIGTERM or SIGINT)
-async fn shutdown_signal() {
-    let ctrl_c = async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
-        tracing::info!("Received Ctrl+C signal, initiating graceful shutdown");
-    };
-
-    #[cfg(unix)]
-    let terminate = async {
-        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
-            .expect("failed to install signal handler")
-            .recv()
-            .await;
-        tracing::info!("Received SIGTERM signal, initiating graceful shutdown");
-    };
-
-    #[cfg(not(unix))]
-    let terminate = std::future::pending::<()>();
-
-    tokio::select! {
-        _ = ctrl_c => {},
-        _ = terminate => {},
-    }
 }
