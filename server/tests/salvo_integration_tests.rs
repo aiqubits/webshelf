@@ -1426,10 +1426,21 @@ async fn test_cache_invalidation_after_balance_change() {
     let _ = state.cache.invalidate(&cache_key).await;
 }
 
+// ── 全局互斥锁：串行化共享同一数据库的缓存测试 ────────────────────
+
+use std::sync::OnceLock;
+use tokio::sync::Mutex as AsyncMutex;
+
+fn count_cache_lock() -> &'static AsyncMutex<()> {
+    static LOCK: OnceLock<AsyncMutex<()>> = OnceLock::new();
+    LOCK.get_or_init(|| AsyncMutex::new(()))
+}
+
 // ── 分页计数缓存测试（服务层，框架无关） ──────────────────────────
 
 #[tokio::test]
 async fn test_count_cache_populated_on_list_users() {
+    let _guard = count_cache_lock().lock().await;
     use webshelf_server::repositories::user::CreateUserInput;
     use webshelf_server::services::UserService;
     use webshelf_server::services::user::PaginationParams;
@@ -1480,6 +1491,7 @@ async fn test_count_cache_populated_on_list_users() {
 
 #[tokio::test]
 async fn test_count_cache_invalidated_after_create_and_delete() {
+    let _guard = count_cache_lock().lock().await;
     use webshelf_server::repositories::user::CreateUserInput;
     use webshelf_server::services::UserService;
     use webshelf_server::services::user::PaginationParams;
@@ -1570,6 +1582,7 @@ async fn test_count_cache_invalidated_after_create_and_delete() {
 
 #[tokio::test]
 async fn test_count_cache_invalidated_after_create_system_role() {
+    let _guard = count_cache_lock().lock().await;
     use webshelf_server::repositories::user::CreateUserInput;
     use webshelf_server::services::UserService;
     use webshelf_server::services::user::PaginationParams;
