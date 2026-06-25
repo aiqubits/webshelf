@@ -1,6 +1,6 @@
-use crate::middlewares::auth::generate_token;
 use crate::repositories::user::Entity as UserEntity;
 use crate::utils::db_router::AutoRouter;
+use crate::utils::jwt::generate_token;
 use crate::utils::password::{hash_password, verify_password};
 use anyhow::Context;
 use rand::RngCore;

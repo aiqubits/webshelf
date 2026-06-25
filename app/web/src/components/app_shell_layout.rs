@@ -44,6 +44,13 @@ pub fn AppShellLayout() -> Element {
         Some(u) => (u.name.clone(), u.email.clone()),
         None => ("Guest".to_string(), "未登录".to_string()),
     };
+    // 检查当前用户角色，控制 admin 模块的可见性
+    let is_admin = auth
+        .user
+        .read()
+        .as_ref()
+        .map(|u| u.is_admin())
+        .unwrap_or(false);
 
     rsx! {
         AppShell {
@@ -52,6 +59,7 @@ pub fn AppShellLayout() -> Element {
                     open: sidebar_open,
                     on_close: move |_| sidebar_open.set(false),
                     active: active_nav,
+                    show_admin_modules: is_admin,
                     on_select: move |key| {
                         let target = match key {
                             NavKey::Dashboard => Route::Dashboard {},

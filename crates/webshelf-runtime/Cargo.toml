@@ -7,3 +7,12 @@ edition.workspace = true
 anyhow.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["rt", "signal"] }
+
+http.workspace = true
+serde = { workspace = true }
+serde_json.workspace = true
+cookie.workspace = true
+bytes.workspace = true
+jsonwebtoken.workspace = true
+async-trait.workspace = true
+distributed-ratelimit = { workspace = true }

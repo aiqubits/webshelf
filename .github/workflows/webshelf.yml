@@ -166,10 +166,22 @@ jobs:
       run: cargo fmt --check
     - name: Lint (Clippy)
       run: cargo clippy --package webshelf-server -- -D warnings
-    - name: Build Server
+    - name: Lint (Clippy - Salvo)
+      run: cargo clippy --package webshelf-server --features webshelf-salvo -- -D warnings
+    - name: Build Server (Axum)
       run: cargo build --package webshelf-server --verbose
-    - name: Run Server Tests
+    - name: Build Server (Salvo)
+      run: cargo build --package webshelf-server --features webshelf-salvo --verbose
+    - name: Run Server Tests (Axum)
       run: cargo test --package webshelf-server --verbose
+
+    - name: Run Server Tests (Salvo)
+      run: >
+        cargo test --package webshelf-server --features webshelf-salvo
+        --test salvo_integration_tests
+        --test salvo_logout_all_test
+        --test salvo_ratelimit_test
+        --verbose
 
     - name: Run Replica Circuit Breaker Tests
       run: cargo test --package webshelf-server --test replica_circuit_breaker_test --verbose

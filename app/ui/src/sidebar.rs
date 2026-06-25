@@ -12,6 +12,10 @@ pub fn Sidebar(
     on_close: EventHandler<MouseEvent>,
     active: NavKey,
     on_select: EventHandler<NavKey>,
+    /// 是否显示 admin/system 角色专属模块（数据管理 > 用户管理）。
+    /// 由调用方根据当前用户角色传入。
+    #[props(default = false)]
+    show_admin_modules: bool,
 ) -> Element {
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/styling/sidebar.css") }
@@ -28,7 +32,7 @@ pub fn Sidebar(
                 div { class: "ws-sidebar__logo-icon", Layers {} }
                 div { class: "ws-sidebar__logo-text",
                     span { class: "ws-sidebar__logo-title", "WebShelf Admin" }
-                    span { class: "ws-sidebar__logo-subtitle", "Rust Fullstack" }
+                    span { class: "ws-sidebar__logo-subtitle", "Fullend System" }
                 }
                 // 移动端关闭按钮
                 button {
@@ -53,19 +57,21 @@ pub fn Sidebar(
                     }
                 }
 
-                // 数据管理 + admin_layer 徽章
-                div { class: "ws-sidebar__group",
-                    div { class: "ws-sidebar__group-caption-row",
-                        span { class: "ws-sidebar__group-caption", "数据管理" }
-                        Badge { variant: BadgeVariant::AmberCompact, "admin_layer" }
-                    }
-                    SidebarItem {
-                        icon: rsx! {
-                            UserCog {}
-                        },
-                        label: "用户管理 (/users)",
-                        active: active == NavKey::Users,
-                        onclick: move |_| on_select.call(NavKey::Users),
+                // 数据管理 + admin_layer 徽章（仅 admin/system 角色可见）
+                if show_admin_modules {
+                    div { class: "ws-sidebar__group",
+                        div { class: "ws-sidebar__group-caption-row",
+                            span { class: "ws-sidebar__group-caption", "数据管理" }
+                            Badge { variant: BadgeVariant::AmberCompact, "admin_layer" }
+                        }
+                        SidebarItem {
+                            icon: rsx! {
+                                UserCog {}
+                            },
+                            label: "用户管理 (/users)",
+                            active: active == NavKey::Users,
+                            onclick: move |_| on_select.call(NavKey::Users),
+                        }
                     }
                 }
             }

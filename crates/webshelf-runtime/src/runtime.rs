@@ -1,12 +1,6 @@
-/// Runtime trait — 抽象 web 框架的基础设施操作。
-///
-/// 定义在独立的 `webshelf-runtime` crate 中，避免循环依赖。
-/// 每个 web 框架适配器（webshelf-axum / webshelf-salvo）实现此 trait。
-/// Handler/Middleware 的构造不在此 trait 中，而是作为 free function。
-///
-/// 当前所有方法均为**静态方法**（通过 `Self::method()` 调用），
-/// 因为适配器类型（如 `AxumRuntime<S>`）是零大小类型（ZST），不持有实例状态。
-/// 若未来某适配器需要实例内部状态，需重新评估设计。
+/// Runtime trait — abstracts web framework infrastructure operations.
+/// Each adapter (webshelf-axum / webshelf-salvo) implements this trait.
+/// All methods are static (adapters like `AxumRuntime<S>` are ZSTs with no instance state).
 pub trait Runtime: Clone + Send + Sync + Sized + 'static {
     /// 路由类型（axum::Router<S>, salvo::Router）
     type Router: Clone + Send + Sync;
@@ -17,9 +11,6 @@ pub trait Runtime: Clone + Send + Sync + Sized + 'static {
     /// 共享状态类型（由 server 的 bootstrap 注入，不在适配器中固定）
     type State: Clone + Send + Sync;
 
-    // ── Router 构造 ───────────────────────────────
-
-    /// 创建空 Router
     fn new_router() -> Self::Router;
 
     /// 在 path 前缀下嵌套子路由
@@ -31,18 +22,17 @@ pub trait Runtime: Clone + Send + Sync + Sized + 'static {
     /// 注册路径 + 方法路由
     fn with_route(router: Self::Router, path: &str, method: Self::MethodRouter) -> Self::Router;
 
-    /// 注入共享状态
+    /// 注入共享状态。
+    ///
+    /// **语义差异说明**：
+    /// - Axum 端：通过 `router.with_state(state)` 注入状态，路由可直接 serve。
+    /// - Salvo 端：**空操作（no-op）**，因为 Salvo 的 Router 没有类型状态参数，
+    ///   共享状态在 `serve()` 中通过 `affix_state::inject` 中间件注入 Depot。
+    ///   因此 Salvo 模式下 `with_state()` 返回的路由在未经 `serve()` 处理前不可直接使用。
     fn with_state(router: Self::Router, state: Self::State) -> Self::Router;
 
-    // ── Server 启动 ───────────────────────────────
-
-    /// 绑定地址并启动 HTTP 服务（内部创建 TcpListener + 处理 graceful shutdown）。
-    /// 接收已构建好的 Router 和共享状态，内部调用框架的 with_state + serve。
-    /// 之所以 state 单独传递而非在 Router 内注入，是因为 axum 0.8 要求
-    /// Router<()> 才能调用 into_make_service()，适配器内部需先 with_state 再 serve。
-    ///
-    /// 使用显式 `impl Future + Send` 而非 `async fn` 来确保返回的 Future 满足 `Send`
-    /// bound，这是 tokio::spawn 等并发上下文的必要条件。
+    /// Bind address and start HTTP service with graceful shutdown.
+    /// State is passed separately because adapters manage with_state internally.
     fn serve(
         router: Self::Router,
         state: Self::State,

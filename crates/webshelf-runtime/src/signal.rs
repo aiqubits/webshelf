@@ -1,7 +1,5 @@
 /// Wait for shutdown signal (SIGTERM or SIGINT).
-///
-/// 跨平台实现：Unix 系统监听 SIGTERM + Ctrl+C；非 Unix 系统仅监听 Ctrl+C。
-/// 提取到 `webshelf-runtime` 中，所有框架适配器复用，避免代码重复。
+/// Cross-platform: Unix listens for SIGTERM + Ctrl+C; non-Unix listens for Ctrl+C only.
 pub async fn shutdown_signal() {
     let ctrl_c = async {
         tokio::signal::ctrl_c()

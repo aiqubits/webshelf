@@ -1,6 +1,18 @@
+pub mod auth;
+mod error;
+pub mod middleware;
+pub mod rate_limit;
+mod request;
+mod response;
 mod runtime;
 mod signal;
 
+pub use auth::{AuthUser, JwtClaims, validate_jwt};
+pub use error::HttpError;
+pub use middleware::{MiddlewareState, validate_token};
+pub use rate_limit::RateLimitGuard;
+pub use request::RequestContext;
+pub use response::{Response, ResponseBody};
 pub use runtime::Runtime;
 pub use signal::shutdown_signal;
 
@@ -8,13 +20,9 @@ pub use signal::shutdown_signal;
 mod tests {
     use crate::Runtime;
 
-    /// Minimal mock state for compile-time Runtime trait verification.
     #[derive(Clone)]
     struct MockState;
 
-    /// Mock runtime: verifies that the trait contract is implementable
-    /// with simple unit types, covering all required methods including
-    /// `serve` which returns `impl Future + Send`.
     #[derive(Clone, Copy)]
     struct MockRuntime;
 
@@ -57,7 +65,6 @@ mod tests {
 
     #[test]
     fn mock_runtime_compiles_and_works() {
-        // Basic method chaining — confirms all trait methods exist and compose
         MockRuntime::new_router();
         let state = MockState;
         MockRuntime::merge((), ());
@@ -68,8 +75,6 @@ mod tests {
 
     #[test]
     fn mock_runtime_serve_returns_send_future() {
-        // Verify that serve() returns a Future that satisfies Send,
-        // which is required for tokio::spawn and other concurrent contexts.
         let fut = MockRuntime::serve((), MockState, "0.0.0.0:0");
         fn assert_send<T: Send>(_t: T) {}
         assert_send(fut);
@@ -78,7 +83,6 @@ mod tests {
     #[test]
     fn shutdown_signal_is_send_future() {
         use std::future::Future;
-        // Verify shutdown_signal() is a valid Future<Output = ()>
         fn assert_future<T: Future<Output = ()> + Send>(_f: T) {}
         assert_future(crate::shutdown_signal());
     }

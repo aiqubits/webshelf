@@ -11,7 +11,7 @@ use ui::{
     StatsValueColor,
 };
 
-use crate::auth::{AuthState, CurrentUser};
+use crate::auth::AuthState;
 use crate::components::{
     HttpMethod, LogBus, LogEntry, LogKind, SearchSignal, now_unix_ms, push_log_err, push_log_ok,
 };
@@ -72,7 +72,12 @@ pub fn Dashboard() -> Element {
             // 在 effect 闭包内实时读取 auth.user 以建立信号追踪，
             // 确保用户角色变更时触发重取。
             // system 角色同样具备 admin 能力，因此也拉取用户总数。
-            let is_admin = is_admin_or_system(auth_for_effect.user.read().as_ref());
+            let is_admin = auth_for_effect
+                .user
+                .read()
+                .as_ref()
+                .map(|u| u.is_admin())
+                .unwrap_or(false);
             spawn(async move {
                 checking_inner.set(true);
                 run_health_check(
@@ -137,7 +142,12 @@ pub fn Dashboard() -> Element {
 
     // 是否为可查看管控用户数的管理员或系统角色。
     // 在渲染时实时读取以建立响应式追踪，登录/登出/角色变更时自动重渲染。
-    let show_user_count = is_admin_or_system(auth.user.read().as_ref());
+    let show_user_count = auth
+        .user
+        .read()
+        .as_ref()
+        .map(|u| u.is_admin())
+        .unwrap_or(false);
 
     let on_run_health = move |_| {
         let client = auth.client.clone();
@@ -215,7 +225,7 @@ pub fn Dashboard() -> Element {
                 div { class: "ws-hero__body",
                     div { class: "ws-hero__text",
                         h1 { class: "ws-hero__title",
-                            "欢迎来到 WebShelf Rust 全栈管理系统 🚀"
+                            "欢迎来到 WebShelf Rust 全端全栈管理系统 🚀"
                         }
                         p { class: "ws-hero__subtitle",
                             "你好 {user_name}！"
@@ -452,56 +462,4 @@ fn format_ts(unix_ms: u64) -> String {
         .single()
         .map(|dt| dt.format("%H:%M:%S").to_string())
         .unwrap_or_else(|| "--:--:--".to_string())
-}
-
-/// 判断当前用户是否具备 admin / system 权限（即可查看管控用户总数等统计信息）。
-///
-/// 与后端 `require_admin` 中间件的判定保持一致（[server/src/middlewares/auth.rs]）。
-/// 普通 user 角色调用任何 admin-only 端点都会被 403 拒绝，因此这里必须一致。
-fn is_admin_or_system(user: Option<&CurrentUser>) -> bool {
-    matches!(
-        user.map(|u| u.role.as_str()),
-        Some("admin") | Some("system")
-    )
-}
-
-#[cfg(test)]
-mod tests {
-    use super::is_admin_or_system;
-    use crate::auth::CurrentUser;
-
-    fn make_user(role: &str) -> CurrentUser {
-        CurrentUser {
-            id: String::new(),
-            role: role.to_string(),
-            name: String::new(),
-            email: String::new(),
-            balance: 0,
-        }
-    }
-
-    #[test]
-    fn admin_is_admin() {
-        assert!(is_admin_or_system(Some(&make_user("admin"))));
-    }
-
-    #[test]
-    fn system_is_admin() {
-        assert!(is_admin_or_system(Some(&make_user("system"))));
-    }
-
-    #[test]
-    fn user_is_not_admin() {
-        assert!(!is_admin_or_system(Some(&make_user("user"))));
-    }
-
-    #[test]
-    fn none_is_not_admin() {
-        assert!(!is_admin_or_system(None));
-    }
-
-    #[test]
-    fn guest_role_is_not_admin() {
-        assert!(!is_admin_or_system(Some(&make_user("guest"))));
-    }
 }

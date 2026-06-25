@@ -1,21 +1,47 @@
+//! Application bootstrap module.
+//!
+//! Runtime-specific code (build_app_router) is delegated to submodules:
+//! - `axum.rs`: Axum-specific CORS configuration and router construction.
+//! - `salvo.rs`: Salvo-specific router construction.
+//!
+//! Shared bootstrapping logic (config loading, DB init, state creation, server start)
+//! lives in this module.
+
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
 
 use crate::{
-    Any, AppConfig, AppState, AutoRouter, CompressionLayer, CorsLayer, HeaderValue, Method,
-    RequestBodyLimitLayer, TraceLayer, from_fn, from_fn_with_state,
-    middlewares::{
-        auth::auth_middleware,
-        panic::{self, panic_middleware},
-    },
-    migrations,
+    AppConfig, AppState, AutoRouter, migrations,
     repositories::user::{Column, Entity as UserEntity},
-    routes::{api_routes, auth_routes},
+    routes::helpers::create_rate_limiter,
     utils::{db_router::connect_db, init_logger, load_config},
 };
 use crate::{AppRouter, AppRuntime, Runtime};
-use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
+
+// ── Runtime-specific submodules ──────────────────────────
+#[cfg(not(feature = "webshelf-salvo"))]
+pub mod axum;
+#[cfg(feature = "webshelf-salvo")]
+pub mod salvo;
+
+// Re-export build_app_router from the active runtime submodule.
+// These convenience wrappers create the rate limiter from the application
+// state's cache service and delegate to the submodule.
+#[cfg(not(feature = "webshelf-salvo"))]
+pub fn build_app_router(state: AppState, env: &str) -> AppRouter {
+    let rate_limiter = create_rate_limiter(&state.cache);
+    axum::build_app_router(state, env, rate_limiter)
+}
+#[cfg(feature = "webshelf-salvo")]
+pub fn build_app_router(state: AppState, env: &str) -> AppRouter {
+    let rate_limiter = create_rate_limiter(&state.cache);
+    salvo::build_app_router(state, env, rate_limiter)
+}
+
+// Re-export configure_cors (Axum mode only), available for external test usage.
+#[cfg(not(feature = "webshelf-salvo"))]
+pub use axum::configure_cors;
 
 /// Command-line arguments
 #[derive(Parser, Debug, Clone)]
@@ -29,19 +55,15 @@ pub struct CliArgs {
     /// Server bind address (overrides config file)
     #[arg(short = 'H', long)]
     pub host: Option<String>,
-
     /// Server port (overrides config file)
     #[arg(short = 'P', long)]
     pub port: Option<u16>,
-
     /// Environment (development, staging, production)
     #[arg(short = 'E', long, default_value = "development")]
     pub env: String,
-
     /// Configuration file path
     #[arg(short = 'C', long, default_value = "config.toml")]
     pub config: String,
-
     /// Log level (trace, debug, info, warn, error)
     #[arg(short = 'L', long, default_value = "info")]
     pub log_level: String,
@@ -60,9 +82,37 @@ pub fn init_logging(log_level: &str) {
     init_logger(log_level);
 }
 
-/// Setup panic hook for graceful panic handling
+/// Setup panic hook for graceful panic handling.
+///
+/// In salvo mode, the 500 response is handled by the catch_panic middleware
+/// — the global panic hook only logs the panic details (identical to axum mode).
 pub fn setup_panic_handler() {
-    panic::setup_panic_hook();
+    std::panic::set_hook(Box::new(|panic_info| {
+        let payload = panic_info.payload();
+        let message = if let Some(s) = payload.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = payload.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            "Unknown panic".to_string()
+        };
+        let location = panic_info
+            .location()
+            .map(|loc| format!("{}:{}:{}", loc.file(), loc.line(), loc.column()))
+            .unwrap_or_else(|| "unknown location".to_string());
+        tracing::error!(
+            target: "panic",
+            message = %message,
+            location = %location,
+            "Application panic occurred"
+        );
+    }));
+    let mode = if cfg!(feature = "webshelf-salvo") {
+        "salvo"
+    } else {
+        "axum"
+    };
+    tracing::info!("Panic hook installed ({mode} mode: catch_panic middleware returns 500)");
 }
 
 /// Load and merge configuration from file and CLI arguments
@@ -73,8 +123,6 @@ pub fn load_app_config(cli_args: &CliArgs) -> Result<AppConfig> {
 }
 
 /// Initialize database connection
-///
-/// Delegates to `db_router::connect_db` for the actual connection setup.
 pub async fn init_database(config: &AppConfig) -> Result<sea_orm::DatabaseConnection> {
     tracing::info!("Connecting to database...");
     let db = connect_db(&config.database_url, &config.database)
@@ -109,142 +157,12 @@ pub fn create_app_state(
     }
 }
 
-/// Configure CORS layer
-///
-/// Uses allowed_origins from config if specified. In non-development environments
-/// with no allowed_origins, logs an error and returns a restrictive CORS layer that
-/// effectively blocks all cross-origin requests (only OPTIONS preflight is allowed).
-/// In development, falls back to `Any` with a warning log.
-pub fn configure_cors(allowed_origins: &[String], env: &str) -> CorsLayer {
-    let use_any = || {
-        tracing::warn!(
-            "CORS: using Any (allow all origins). \
-             This is acceptable for development but NOT recommended for production."
-        );
-        CorsLayer::new()
-            .allow_origin(Any)
-            .allow_methods([
-                Method::GET,
-                Method::POST,
-                Method::PUT,
-                Method::DELETE,
-                Method::PATCH,
-                Method::OPTIONS,
-            ])
-            .allow_headers(Any)
-    };
-
-    if allowed_origins.is_empty() {
-        if env != "development" {
-            tracing::warn!(
-                "CORS: no allowed_origins configured in {} environment. \
-                 If using a reverse proxy (nginx) for same-origin serving, this is expected. \
-                 Otherwise, set server.allowed_origins in config.toml or via WEBSHELF_SERVER__ALLOWED_ORIGINS.",
-                env
-            );
-            // Return a restrictive CORS layer that effectively denies all cross-origin requests.
-            // An empty allow_origin list means no origin matches; OPTIONS is allowed only
-            // so preflight requests return a response instead of hanging.
-            //
-            // NOTE: allow_headers(Any) here is safe because no origin is allowed —
-            // it only ensures the preflight response includes the correct
-            // Access-Control-Allow-Headers header for debugging convenience.
-            return CorsLayer::new()
-                .allow_methods([Method::OPTIONS])
-                .allow_headers(Any);
-        }
-        return use_any();
-    }
-
-    let mut origins: Vec<HeaderValue> = Vec::with_capacity(allowed_origins.len());
-    for origin in allowed_origins {
-        match origin.parse::<HeaderValue>() {
-            Ok(header_value) => origins.push(header_value),
-            Err(e) => {
-                tracing::error!(
-                    "CORS: failed to parse allowed_origin '{}': {}. \
-                     This origin will be ignored — check your config.toml or WEBSHELF_SERVER__ALLOWED_ORIGINS.",
-                    origin,
-                    e
-                );
-            }
-        }
-    }
-
-    if origins.is_empty() {
-        // In non-development environments, a misconfigured (all-invalid) origin list
-        // is treated the same as an empty list: return a restrictive CORS layer.
-        // This prevents accidentally opening up CORS to all origins due to a typo.
-        if env != "development" {
-            tracing::warn!(
-                "CORS: all configured allowed_origins failed to parse, returning restrictive CORS"
-            );
-            return CorsLayer::new()
-                .allow_methods([Method::OPTIONS])
-                .allow_headers(Any);
-        }
-        tracing::warn!(
-            "CORS: all configured allowed_origins failed to parse: {:?}, falling back to Any (development only)",
-            allowed_origins
-        );
-        return use_any();
-    }
-
-    tracing::info!("CORS: allowing origins: {:?}", origins);
-    CorsLayer::new()
-        .allow_origin(origins)
-        .allow_methods([
-            Method::GET,
-            Method::POST,
-            Method::PUT,
-            Method::DELETE,
-            Method::PATCH,
-            Method::OPTIONS,
-        ])
-        .allow_headers(Any)
-}
-
-/// Build application router with all middleware
-pub fn build_app_router(state: AppState, env: &str) -> AppRouter {
-    let allowed_origins = state.config.server.allowed_origins.clone();
-    let cors = configure_cors(&allowed_origins, env);
-    let compression = CompressionLayer::new();
-
-    // Create the login rate limiter (disabled if Redis client not available).
-    let rate_limiter = match state.cache.redis_client() {
-        Some(client) => {
-            tracing::info!("Rate limiter: sharing redis::Client with CacheService.");
-            RedisRateLimiter::new(client.clone(), RateLimitConfig::default())
-        }
-        None => {
-            tracing::warn!(
-                "Redis not available behind CacheService — login rate limiting is disabled. \
-                 Set WEBSHELF_REDIS_URL or redis_url in config.toml to enable."
-            );
-            RedisRateLimiter::disabled(RateLimitConfig::default())
-        }
-    };
-
-    // Middleware layers are applied in reverse order (last added = first to execute).
-    AppRouter::new()
-        .nest("/api", api_routes())
-        .nest("/api/public/auth", auth_routes(rate_limiter))
-        .layer(from_fn_with_state(state.clone(), auth_middleware))
-        .layer(from_fn(panic_middleware))
-        .layer(TraceLayer::new_for_http())
-        .layer(cors)
-        .layer(compression)
-        .layer(RequestBodyLimitLayer::new(10 * 1024 * 1024)) // 10MB max request body
-    // 注意：with_state 在 Runtime::serve 内部调用，这里不注入
-}
-
 /// Bootstrap the entire application
 pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
     tracing::info!("Starting webshelf in {} mode", cli_args.env);
 
     let app_config = load_app_config(&cli_args)?;
 
-    // Reject default or weak JWT secret in non-development environments
     if cli_args.env != "development" {
         let is_default = app_config.jwt_secret == "REPLACE_ME_WITH_A_STRONG_SECRET";
         if is_default {
@@ -262,17 +180,13 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
                 app_config.jwt_secret.len()
             );
         }
-
-        // Reject default system admin credentials in non-development environments.
-        // Default credentials are a critical security risk — they must be changed
-        // before the application can start in production or staging.
         if app_config.system_admin_email.to_lowercase() == "admin@webshelf.local"
             || app_config.system_admin_password == "change-me-admin-password"
         {
             anyhow::bail!(
                 "System admin credentials must not use default values in {} environment! \
                  Set WEBSHELF_SYSTEM_ADMIN_EMAIL and WEBSHELF_SYSTEM_ADMIN_PASSWORD environment variables \
-                 or update config.toml. Default credentials will be rejected on every startup.",
+                 or update config.toml.",
                 cli_args.env
             );
         }
@@ -284,11 +198,9 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
     let port = cli_args.port.unwrap_or(app_config.server.port);
 
     let db = if app_config.database_read_urls.is_empty() {
-        // No read replicas configured — single-database mode (backward compatible)
         let write_db = init_database(&app_config).await?;
         AutoRouter::single(write_db)
     } else {
-        // Read replicas configured — read-write split mode
         let db = AutoRouter::new(
             &app_config.database_url,
             &app_config.database_read_urls,
@@ -299,21 +211,17 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
         .await
         .context("Failed to initialize AutoRouter with read replicas")?;
 
-        // Start background health check if configured
         if app_config.database_routing.health_check_interval_secs > 0 {
             db.clone()
                 .start_health_check(std::time::Duration::from_secs(
                     app_config.database_routing.health_check_interval_secs,
                 ));
         }
-
         db
     };
 
-    // Migrations must run on the write database
     run_database_migrations(db.write_conn()).await?;
 
-    // Clean up expired refresh tokens (write database only)
     if let Err(e) = crate::services::auth::cleanup_expired_refresh_tokens(db.write_conn()).await {
         tracing::warn!(
             "Failed to cleanup expired refresh tokens (non-fatal): {:?}",
@@ -321,12 +229,9 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
         );
     }
 
-    // Initialize Snowflake ID generator (must happen before seed_system_admin)
     let _worker_handle = crate::snowflake::init(db.write_conn()).await?;
-
     seed_system_admin(db.write_conn(), &app_config).await?;
 
-    // Initialize CacheService (gracefully degrades if Redis is unavailable).
     let cache =
         crate::services::CacheService::new(&app_config.redis_url, app_config.cache_max_connections)
             .await;
@@ -345,10 +250,6 @@ pub async fn bootstrap(cli_args: CliArgs) -> Result<BootstrapResult> {
 }
 
 /// Seed system admin account on first boot.
-///
-/// Checks if a user with the configured `system_admin_email` already exists.
-/// If not, creates a new user with role "system". The system account is the
-/// super-admin: only one can exist, and it bypasses all admin-only restrictions.
 async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig) -> Result<()> {
     use crate::repositories::user::ActiveModel;
     use crate::utils::password::hash_password;
@@ -356,19 +257,14 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
 
     let email = config.system_admin_email.trim().to_lowercase();
 
-    // Fail fast on a misconfigured system admin email rather than silently
-    // creating a malformed account. Email is a critical identifier for the
-    // super-admin and must be valid for login and password recovery flows.
     if email.is_empty() || !validator::ValidateEmail::validate_email(&email) {
         anyhow::bail!(
             "System admin email '{}' is not a valid email address. \
-             Set WEBSHELF_SYSTEM_ADMIN_EMAIL to a valid email address \
-             (e.g. 'admin@example.com').",
+             Set WEBSHELF_SYSTEM_ADMIN_EMAIL to a valid email address (e.g. 'admin@example.com').",
             config.system_admin_email
         );
     }
 
-    // Check if system admin already exists
     let existing = UserEntity::find()
         .filter(Column::Email.eq(&email))
         .one(db)
@@ -388,7 +284,6 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
         );
     }
 
-    // Create system admin user
     let password_hash = hash_password(&config.system_admin_password)
         .context("Failed to hash system admin password")?;
 
@@ -415,9 +310,7 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
     };
 
     match user.insert(db).await {
-        Ok(_) => {
-            tracing::info!("System admin account created: {}", email);
-        }
+        Ok(_) => tracing::info!("System admin account created: {}", email),
         Err(e)
             if matches!(
                 e.sql_err(),
@@ -429,9 +322,7 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
                 email
             );
         }
-        Err(e) => {
-            return Err(e).context("Failed to create system admin user");
-        }
+        Err(e) => return Err(e).context("Failed to create system admin user"),
     }
 
     Ok(())
@@ -445,7 +336,6 @@ pub async fn start_server(bootstrap_result: BootstrapResult) -> Result<()> {
         bind_addr,
         _worker_handle,
     } = bootstrap_result;
-
     tracing::info!("Starting server on {}", bind_addr);
     AppRuntime::serve(app, state, &bind_addr).await?;
     tracing::info!("Server shutdown completed");

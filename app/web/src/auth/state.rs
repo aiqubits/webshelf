@@ -45,6 +45,16 @@ fn is_auth_failure(err: &ClientError) -> bool {
 mod tests {
     use super::*;
 
+    fn make_user(role: &str) -> CurrentUser {
+        CurrentUser {
+            id: String::new(),
+            role: role.to_string(),
+            name: String::new(),
+            email: String::new(),
+            balance: 0,
+        }
+    }
+
     #[test]
     fn auth_failure_401() {
         assert!(is_auth_failure(&ClientError::Other(401, "x".into())));
@@ -68,6 +78,28 @@ mod tests {
     #[test]
     fn auth_failure_network_is_not() {
         assert!(!is_auth_failure(&ClientError::Network("timeout".into())));
+    }
+
+    // ── CurrentUser::is_admin ──
+
+    #[test]
+    fn admin_is_admin() {
+        assert!(make_user("admin").is_admin());
+    }
+
+    #[test]
+    fn system_is_admin() {
+        assert!(make_user("system").is_admin());
+    }
+
+    #[test]
+    fn user_is_not_admin() {
+        assert!(!make_user("user").is_admin());
+    }
+
+    #[test]
+    fn guest_role_is_not_admin() {
+        assert!(!make_user("guest").is_admin());
     }
 }
 
@@ -164,14 +196,21 @@ impl AuthState {
         self.pending_registration.set(None);
     }
 
-    /// 从 cookie 恢复会话并获取真实用户资料。
+    /// 从 sessionStorage + cookie 恢复会话并获取真实用户资料。
     ///
-    /// 流程：读取 `webshelf_exp` cookie 获取过期时间 → 检查是否过期
-    /// → 调用 GET /api/users/me（浏览器自动发送 httpOnly JWT cookie）
+    /// 流程：读取 sessionStorage 中的 JWT 设置到客户端
+    /// → 读取 `webshelf_exp` cookie 获取过期时间 → 检查是否过期
+    /// → 调用 GET /api/users/me（优先使用 Authorization 头）
     /// → 更新 user。
     ///
     /// 如果 JWT 已过期但 refresh token 有效，尝试静默刷新。
     pub async fn restore_from_storage_async(&mut self) {
+        // 1. 优先从 sessionStorage 恢复 JWT token（兜底：httpOnly cookie
+        //    在 Dioxus dev proxy 下不会被存储，因此不能依赖浏览器自动发送）。
+        if let Some(token) = crate::auth::load_jwt() {
+            self.client.set_token(token);
+        }
+
         let Some(expires_at) = crate::auth::load_token() else {
             self.initialized.set(true);
             return;
@@ -196,7 +235,7 @@ impl AuthState {
         }
 
         // 调用 /api/users/me 获取真实用户资料
-        // 浏览器会自动发送 httpOnly JWT cookie，无需手动设置 Authorization 头
+        // 优先使用 sessionStorage 恢复的 Authorization 头；httpOnly cookie 作为兜底
         match self.client.get_me().await {
             Ok(profile) => {
                 // 从 cookie 中读取 JWT 来解码 payload 获取 user_id/role
@@ -291,6 +330,7 @@ impl AuthState {
                 let expires_at = now_unix_secs() + resp.expires_in;
                 self.client.set_token(&resp.token);
                 self.token_expires_at.set(Some(expires_at));
+                crate::auth::save_jwt(&resp.token);
                 crate::auth::save_token(expires_at, resp.refresh_expires_in.max(resp.expires_in));
                 true
             }
@@ -309,7 +349,8 @@ impl AuthState {
     ///
     /// `remember = true` 时后端签发 30 天 JWT + 90 天 refresh token，
     /// 均通过 httpOnly cookie 下发；`remember = false` 时签发 1 小时 JWT。
-    /// 前端保存 JWT 过期时间到可读 cookie。
+    /// 前端将 JWT token 保存到 sessionStorage（页面刷新后恢复），
+    /// 并将 JWT 过期时间保存到可读 cookie。
     pub async fn login(
         &mut self,
         email: &str,
@@ -320,6 +361,9 @@ impl AuthState {
         let expires_at = now_unix_secs() + resp.expires_in;
         self.client.set_token(&resp.token);
         self.token_expires_at.set(Some(expires_at));
+
+        // 持久化 JWT token 到 sessionStorage，确保页面刷新后 token 可恢复。
+        crate::auth::save_jwt(&resp.token);
 
         // 保存过期时间到可读 cookie（JWT 本身在 httpOnly cookie 中）
         // 使用 refresh_expires_in 作为 Max-Age，确保 webshelf_exp 在 refresh token
@@ -395,17 +439,18 @@ impl AuthState {
             self.logout();
             return;
         }
-        self.client.set_token(new_token);
+        self.client.set_token(&new_token);
         self.token_expires_at.set(Some(payload.exp));
         // 沿用旧会话的持久化偏好
         if crate::auth::load_token().is_some() {
+            crate::auth::save_jwt(&new_token);
             crate::auth::save_token(payload.exp, payload.exp.saturating_sub(now_unix_secs()));
         } else {
             crate::auth::clear_token();
         }
     }
 
-    /// 登出。清除 token、user、cookie。
+    /// 登出。清除 token、user、cookie 及 sessionStorage。
     ///
     /// 同步、纯本地状态清理 —— 不发后端请求。适用于被同步代码路径调用
     /// 的"防御性登出"场景（如 `swap_token` 检测到新 token 异常）。
@@ -477,6 +522,7 @@ impl AuthState {
                         self.user.set(None);
                         self.token_expires_at.set(None);
                         crate::auth::clear_token();
+                        crate::auth::clear_jwt();
                         return;
                     }
                     CurrentUser::from_jwt(&payload)
@@ -486,6 +532,7 @@ impl AuthState {
 
             if remember {
                 let now = now_unix_secs();
+                crate::auth::save_jwt(token);
                 crate::auth::save_token(payload.exp, payload.exp.saturating_sub(now));
             } else {
                 crate::auth::clear_token();

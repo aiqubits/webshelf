@@ -1,6 +1,5 @@
-use crate::{IntoResponse, Json, Response, StatusCode};
-use serde::Serialize;
 use thiserror::Error;
+use webshelf_runtime::HttpError;
 
 /// Unified API error type for HTTP boundary
 #[derive(Error, Debug)]
@@ -30,39 +29,24 @@ pub enum ApiError {
     ServiceUnavailable(String),
 }
 
-#[derive(Serialize)]
-pub(crate) struct ErrorResponse {
-    error: String,
-    message: String,
-}
-
-impl ErrorResponse {
-    pub(crate) fn new(error: impl Into<String>, message: impl Into<String>) -> Self {
-        Self {
-            error: error.into(),
-            message: message.into(),
-        }
-    }
-}
-
-impl IntoResponse for ApiError {
-    fn into_response(self) -> Response {
-        let (status, error_type) = match &self {
-            ApiError::BadRequest(_) => (StatusCode::BAD_REQUEST, "bad_request"),
-            ApiError::Unauthorized(_) => (StatusCode::UNAUTHORIZED, "unauthorized"),
-            ApiError::Forbidden(_) => (StatusCode::FORBIDDEN, "forbidden"),
-            ApiError::NotFound(_) => (StatusCode::NOT_FOUND, "not_found"),
-            ApiError::Conflict(_) => (StatusCode::CONFLICT, "conflict"),
-            ApiError::Validation(_) => (StatusCode::BAD_REQUEST, "validation_error"),
-            ApiError::Internal(_) => (StatusCode::INTERNAL_SERVER_ERROR, "internal_error"),
-            ApiError::ServiceUnavailable(_) => {
-                (StatusCode::SERVICE_UNAVAILABLE, "service_unavailable")
+// Convert ApiError to HttpError for unified handler support
+impl From<ApiError> for HttpError {
+    fn from(err: ApiError) -> Self {
+        match err {
+            ApiError::BadRequest(msg) => HttpError::bad_request(msg),
+            ApiError::Unauthorized(msg) => HttpError::unauthorized(msg),
+            ApiError::Forbidden(msg) => HttpError::forbidden(msg),
+            ApiError::NotFound(msg) => HttpError::not_found(msg),
+            ApiError::Conflict(msg) => HttpError::conflict(msg),
+            ApiError::Validation(msg) => {
+                // Validation errors use a specific error_type
+                let mut http_err = HttpError::bad_request(msg);
+                http_err.error_type = "validation_error";
+                http_err
             }
-        };
-
-        let body = Json(ErrorResponse::new(error_type, self.to_string()));
-
-        (status, body).into_response()
+            ApiError::Internal(_) => HttpError::internal("An unexpected error occurred"),
+            ApiError::ServiceUnavailable(msg) => HttpError::service_unavailable(msg),
+        }
     }
 }
 
@@ -197,70 +181,6 @@ impl From<crate::services::password_reset::PasswordResetError> for ApiError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::BodyExt;
-
-    async fn extract_error_json(response: Response) -> serde_json::Value {
-        let body = response.into_body();
-        let bytes = body.collect().await.unwrap().to_bytes();
-        serde_json::from_slice(&bytes).unwrap()
-    }
-
-    #[tokio::test]
-    async fn test_bad_request_response() {
-        let error = ApiError::BadRequest("Invalid input".to_string());
-        let response = error.into_response();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let json = extract_error_json(response).await;
-        assert_eq!(json["error"], "bad_request");
-        assert!(json["message"].as_str().unwrap().contains("Invalid input"));
-    }
-
-    #[tokio::test]
-    async fn test_unauthorized_response() {
-        let error = ApiError::Unauthorized("Token expired".to_string());
-        let response = error.into_response();
-
-        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
-
-        let json = extract_error_json(response).await;
-        assert_eq!(json["error"], "unauthorized");
-        assert!(json["message"].as_str().unwrap().contains("Token expired"));
-    }
-
-    #[tokio::test]
-    async fn test_not_found_response() {
-        let error = ApiError::NotFound("User not found".to_string());
-        let response = error.into_response();
-
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-
-        let json = extract_error_json(response).await;
-        assert_eq!(json["error"], "not_found");
-    }
-
-    #[tokio::test]
-    async fn test_validation_response() {
-        let error = ApiError::Validation("Email is invalid".to_string());
-        let response = error.into_response();
-
-        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-
-        let json = extract_error_json(response).await;
-        assert_eq!(json["error"], "validation_error");
-    }
-
-    #[tokio::test]
-    async fn test_internal_error_response() {
-        let error = ApiError::Internal("Database connection failed".to_string());
-        let response = error.into_response();
-
-        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
-
-        let json = extract_error_json(response).await;
-        assert_eq!(json["error"], "internal_error");
-    }
 
     #[test]
     fn test_error_display() {

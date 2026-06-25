@@ -14,7 +14,7 @@ homepage.workspace = true
 [dependencies]
 # Web framework abstraction (不直接依赖 axum/tower/tower-http/http/http-body-util)
 webshelf-runtime = { workspace = true }
-webshelf-axum = { workspace = true }  # 始终编译，作为默认后端
+webshelf-axum = { workspace = true, optional = true }  # 默认后端
 webshelf-salvo = { workspace = true, optional = true }  # salvo 可选后端
 tokio = { version = "1", features = ["full"] }
 
@@ -54,6 +54,7 @@ serde_json.workspace = true
 serde_urlencoded = "0.7"
 anyhow.workspace = true
 thiserror.workspace = true
+http.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 chrono.workspace = true
@@ -62,9 +63,12 @@ uuid.workspace = true
 [dev-dependencies]
 # tower 仅用于内联测试和集成测试中的 ServiceExt::oneshot()
 tower = { version = "0.5", features = ["util"] }
-# webshelf-axum 用于测试中的 Router/Request/Body 等类型
-webshelf-axum = { workspace = true }
+# reqwest 用于 Salvo 模式的集成测试（通过 HTTP 客户端发送请求）
+reqwest = { version = "0.12", default-features = false, features = ["json", "cookies", "rustls-tls"] }
+# salvo 用于 Salvo 模式的集成测试（Server、TcpListener 等类型）
+salvo = { workspace = true }
 
 [features]
-default = []
+default = ["webshelf-axum"]
+webshelf-axum = ["dep:webshelf-axum"]
 webshelf-salvo = ["dep:webshelf-salvo"]

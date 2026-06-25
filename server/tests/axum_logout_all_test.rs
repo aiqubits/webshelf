@@ -1,3 +1,5 @@
+#![cfg(not(feature = "webshelf-salvo"))]
+
 //! Integration tests for `POST /api/users/me/logout-all`.
 //!
 //! Tests cover the session invalidation mechanism:
@@ -13,11 +15,11 @@
 use serde_json::json;
 use std::sync::Arc;
 use tower::ServiceExt;
+use webshelf_axum::middleware::auth_middleware;
 use webshelf_axum::{Any, Body, CorsLayer, Method, Request, Router, StatusCode, TraceLayer};
 use webshelf_axum::{BodyExt, from_fn, from_fn_with_state};
-use webshelf_server::middlewares::auth::auth_middleware;
 
-/// Refresh cookie name — must match server/src/middlewares/auth.rs.
+/// Refresh cookie name.
 const REFRESH_COOKIE: &str = "webshelf_refresh";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -70,15 +72,18 @@ async fn create_test_app() -> Router {
         .allow_headers(Any);
 
     Router::new()
-        .nest("/api", api_routes())
+        .nest(
+            "/api",
+            api_routes().layer(from_fn_with_state(
+                state.clone(),
+                auth_middleware::<AppState>,
+            )),
+        )
         .nest(
             "/api/public/auth",
             auth_routes(RedisRateLimiter::disabled(RateLimitConfig::default())),
         )
-        .layer(from_fn_with_state(state.clone(), auth_middleware))
-        .layer(from_fn(
-            webshelf_server::middlewares::panic::panic_middleware,
-        ))
+        .layer(from_fn(webshelf_axum::middleware::panic_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)
         .with_state(state)

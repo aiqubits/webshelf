@@ -16,4 +16,4 @@ pub use jwt::{JwtPayload, decode_payload};
 // (referenced by `AuthState::pending_registration` field type),
 // even if no view consumes it directly.
 pub use state::{AuthState, CurrentUser, PendingRegistration, RegisterOutcome};
-pub use storage::{clear_token, load_token, save_token};
+pub use storage::{clear_jwt, clear_token, load_jwt, load_token, save_jwt, save_token};

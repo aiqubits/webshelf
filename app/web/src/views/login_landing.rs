@@ -89,7 +89,7 @@ pub fn LoginLanding() -> Element {
             div { class: "ws-landing__left",
                 div { class: "ws-landing__brand",
                     h1 { class: "ws-landing__brand-title", "WebShelf" }
-                    p { class: "ws-landing__brand-subtitle", "Rust 全栈管理系统" }
+                    p { class: "ws-landing__brand-subtitle", "Rust 全端全栈管理系统" }
                 }
                 AuthForm {
                     mode,
@@ -237,7 +237,7 @@ pub fn LoginLanding() -> Element {
                         p { class: "ws-landing__copyright-text",
                             "© 2024 WebShelf. All rights reserved."
                         }
-                        p { class: "ws-landing__copyright-sub", "Rust Fullstack Admin System" }
+                        p { class: "ws-landing__copyright-sub", "Fullend Admin System" }
                     }
                 }
             }

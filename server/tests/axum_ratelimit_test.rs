@@ -1,3 +1,5 @@
+#![cfg(not(feature = "webshelf-salvo"))]
+
 //! Unit tests for distributed rate limiting middleware.
 //!
 //! These tests verify that rate limiting rules are correctly applied to auth routes,
@@ -9,13 +11,17 @@
 
 use tower::ServiceExt;
 use webshelf_axum::{Body, BodyExt, Request, Response, Router, StatusCode};
+use webshelf_runtime::{HttpError, Response as UnifiedResponse};
 
 use distributed_ratelimit::{RateLimitConfig, RedisRateLimiter};
-use webshelf_server::middlewares::ratelimit::{RateLimitGuard, rate_limit_middleware};
+use webshelf_axum::middleware::rate_limit_middleware;
+use webshelf_runtime::RateLimitGuard;
 
 /// Helper to create a simple test endpoint that returns success.
-async fn test_handler() -> &'static str {
-    "success"
+async fn test_handler(_req: webshelf_axum::UnifiedRequest) -> Result<UnifiedResponse, HttpError> {
+    let mut resp = UnifiedResponse::new();
+    resp.set_text_body("success");
+    Ok(resp)
 }
 
 /// Helper to make a request through the rate limit middleware.
@@ -27,7 +33,7 @@ async fn request_through_middleware(
     headers: Vec<(&str, &str)>,
 ) -> Response {
     let app = Router::new()
-        .route("/", webshelf_axum::get(test_handler).post(test_handler))
+        .route("/", webshelf_axum::post(test_handler))
         .layer(webshelf_axum::from_fn_with_state(
             guard,
             rate_limit_middleware,

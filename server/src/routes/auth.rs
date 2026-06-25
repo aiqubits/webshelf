@@ -1,90 +1,62 @@
-use crate::{AppRouter, from_fn_with_state, post};
+use crate::AppRouter;
+use crate::routes::helpers::{apply_rate_limit, post};
 
 use crate::handlers::auth::{
     forgot_password, login, logout, refresh, register, resend_code, reset_password, verify_email,
 };
-use crate::middlewares::{RateLimitGuard, rate_limit_middleware};
+use crate::middlewares::RateLimitGuard;
 use distributed_ratelimit::RedisRateLimiter;
 
-/// Helper to wrap a route with a rate‑limiting middleware layer.
-fn with_rate_limit(
-    route: AppRouter,
-    limiter: &RedisRateLimiter,
-    key_prefix: &'static str,
-    ip_max_requests: u64,
-    email_max_requests: Option<u64>,
-) -> AppRouter {
-    route.layer(from_fn_with_state(
-        RateLimitGuard {
-            limiter: limiter.clone(),
-            ip_max_requests,
-            ip_window_seconds: 600,
-            email_max_requests,
-            email_window_seconds: 600,
-            key_prefix,
-        },
-        rate_limit_middleware,
-    ))
-}
-
+/// Build auth routes with rate limiting.
+///
+/// Window durations are intentionally hardcoded at 600s (10 min) — a single
+/// reasonable default that applies uniformly across all auth endpoints.
+/// Per-endpoint tuning is done via `ip_max_requests` / `email_max_requests`.
+/// If per-endpoint window variation is needed later, promote these to config values.
 pub fn auth_routes(rate_limiter: RedisRateLimiter) -> AppRouter {
-    let l = &rate_limiter;
+    let make_guard =
+        |key_prefix: &'static str, ip_max_requests: u64, email_max_requests: Option<u64>| {
+            RateLimitGuard {
+                limiter: rate_limiter.clone(),
+                ip_max_requests,
+                ip_window_seconds: 600,
+                email_max_requests,
+                email_window_seconds: 600,
+                key_prefix,
+            }
+        };
 
     AppRouter::new()
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/login", post(login)),
-            l,
-            "login",
-            20,
-            Some(5),
+            make_guard("login", 20, Some(5)),
         ))
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/register", post(register)),
-            l,
-            "register",
-            10,
-            None,
+            make_guard("register", 10, None),
         ))
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/verify-email", post(verify_email)),
-            l,
-            "verify-email",
-            20,
-            None,
+            make_guard("verify-email", 20, None),
         ))
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/resend-code", post(resend_code)),
-            l,
-            "resend-code",
-            5,
-            None,
+            make_guard("resend-code", 5, None),
         ))
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/forgot-password", post(forgot_password)),
-            l,
-            "forgot-password",
-            5,
-            None,
+            make_guard("forgot-password", 5, None),
         ))
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/reset-password", post(reset_password)),
-            l,
-            "reset-password",
-            10,
-            None,
+            make_guard("reset-password", 10, None),
         ))
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/refresh", post(refresh)),
-            l,
-            "refresh",
-            30,
-            None,
+            make_guard("refresh", 30, None),
         ))
-        .merge(with_rate_limit(
+        .merge(apply_rate_limit(
             AppRouter::new().route("/logout", post(logout)),
-            l,
-            "logout",
-            30,
-            None,
+            make_guard("logout", 30, None),
         ))
 }
