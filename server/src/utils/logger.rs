@@ -15,8 +15,11 @@ pub fn init_logger(log_level: &str) {
         _ => Level::INFO,
     };
 
-    let filter =
-        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(level.to_string()));
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| {
+        // 默认抑制 sqlx 逐查询级别日志（如每 10 秒的心跳 UPDATE）
+        // 如需查看可设置 RUST_LOG=sqlx::query=info 或 RUST_LOG=debug
+        EnvFilter::new(format!("{},sqlx::query=warn", level))
+    });
 
     if let Err(e) = tracing_subscriber::registry()
         .with(filter)
