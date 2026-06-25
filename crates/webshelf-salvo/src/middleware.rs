@@ -492,6 +492,93 @@ fn extract_email_from_body(bytes: &[u8]) -> Option<String> {
 mod tests {
     use super::*;
 
+    // ── extract_bearer_token tests ────────────────────────────────
+
+    #[test]
+    fn extract_bearer_token_success() {
+        let mut req = Request::new();
+        // 直接操作 headers
+        req.headers_mut()
+            .insert("authorization", "Bearer my-token".parse().unwrap());
+        assert_eq!(extract_bearer_token(&req), Some("my-token".to_string()));
+    }
+
+    #[test]
+    fn extract_bearer_token_lowercase_bearer() {
+        let mut req = Request::new();
+        req.headers_mut()
+            .insert("authorization", "bearer my-token".parse().unwrap());
+        assert_eq!(extract_bearer_token(&req), Some("my-token".to_string()));
+    }
+
+    #[test]
+    fn extract_bearer_token_mixed_case() {
+        let mut req = Request::new();
+        req.headers_mut()
+            .insert("authorization", "BEARER token-value".parse().unwrap());
+        assert_eq!(extract_bearer_token(&req), Some("token-value".to_string()));
+    }
+
+    #[test]
+    fn extract_bearer_token_missing_header() {
+        let req = Request::new();
+        assert!(extract_bearer_token(&req).is_none());
+    }
+
+    #[test]
+    fn extract_bearer_token_wrong_scheme() {
+        let mut req = Request::new();
+        req.headers_mut()
+            .insert("authorization", "Basic dXNlcjpwYXNz".parse().unwrap());
+        assert!(extract_bearer_token(&req).is_none());
+    }
+
+    #[test]
+    fn extract_bearer_token_empty_value() {
+        let mut req = Request::new();
+        req.headers_mut()
+            .insert("authorization", "Bearer ".parse().unwrap());
+        assert!(extract_bearer_token(&req).is_none());
+    }
+
+    // ── extract_jwt_cookie tests ──────────────────────────────────
+
+    #[test]
+    fn extract_jwt_cookie_success() {
+        let mut req = Request::new();
+        req.headers_mut().insert(
+            "cookie",
+            "webshelf_jwt=my-jwt-token; other=cookie".parse().unwrap(),
+        );
+        assert_eq!(extract_jwt_cookie(&req), Some("my-jwt-token".to_string()));
+    }
+
+    #[test]
+    fn extract_jwt_cookie_multiple_cookies() {
+        let mut req = Request::new();
+        req.headers_mut().insert(
+            "cookie",
+            "session=abc; webshelf_jwt=found-token; lang=en"
+                .parse()
+                .unwrap(),
+        );
+        assert_eq!(extract_jwt_cookie(&req), Some("found-token".to_string()));
+    }
+
+    #[test]
+    fn extract_jwt_cookie_missing_header() {
+        let req = Request::new();
+        assert!(extract_jwt_cookie(&req).is_none());
+    }
+
+    #[test]
+    fn extract_jwt_cookie_no_jwt_cookie() {
+        let mut req = Request::new();
+        req.headers_mut()
+            .insert("cookie", "session=abc".parse().unwrap());
+        assert!(extract_jwt_cookie(&req).is_none());
+    }
+
     // ── extract_client_ip tests ─────────────────────────────────
 
     #[test]

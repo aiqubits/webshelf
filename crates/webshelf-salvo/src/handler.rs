@@ -162,4 +162,52 @@ mod tests {
             }
         }
     }
+
+    #[tokio::test]
+    async fn unified_handler_returns_error_response() {
+        async fn failing_handler(_req: UnifiedRequest) -> Result<UnifiedResponse, HttpError> {
+            Err(HttpError::unauthorized("test error"))
+        }
+
+        let handler = UnifiedHandler(failing_handler);
+
+        let mut depot = Depot::new();
+        let hyper_req = salvo::hyper::Request::builder()
+            .method("POST")
+            .header("content-type", "application/json")
+            .body(salvo::http::body::ReqBody::Once(Bytes::from(
+                "{\"key\": \"value\"}",
+            )))
+            .unwrap();
+        let mut req = salvo::Request::new();
+        req.merge_hyper(hyper_req);
+
+        let mut res = salvo::Response::new();
+        let mut ctrl = FlowCtrl::new(Vec::<Arc<dyn Handler>>::new());
+
+        handler
+            .handle(&mut req, &mut depot, &mut res, &mut ctrl)
+            .await;
+
+        // HttpError::unauthorized should result in 401 status
+        assert_eq!(res.status_code, Some(StatusCode::UNAUTHORIZED));
+
+        // Verify body contains error info
+        match &res.body {
+            salvo::http::body::ResBody::Once(bytes) => {
+                let body_str = std::str::from_utf8(bytes).unwrap();
+                assert!(
+                    body_str.contains("unauthorized"),
+                    "Body should contain error type"
+                );
+                assert!(
+                    body_str.contains("test error"),
+                    "Body should contain error message"
+                );
+            }
+            _ => {
+                panic!("Expected ResBody::Once, got different ResBody variant");
+            }
+        }
+    }
 }
