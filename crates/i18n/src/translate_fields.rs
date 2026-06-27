@@ -61,7 +61,7 @@ translate! {
     login_password_mismatch: "Passwords do not match" => "两次输入的密码不一致",
 
     // dashboard.rs
-    dashboard_title: "Welcome to WebShelf Rust Full-stack System 🚀" => "欢迎来到 WebShelf Rust 全端全栈管理系统 🚀",
+    dashboard_title: "Welcome to WebShelf Rust Fullend System 🚀" => "欢迎来到 WebShelf Rust 全端管理系统 🚀",
     dashboard_hello_user: "Hello {name}!" => "你好 {name}！",
     dashboard_click_health_hint: "Click the button to trigger a health check request." => "点击右侧按钮发起一次真实的健康检查请求。",
     dashboard_call_health_btn: "Call Health Check (GET /health)" => "点此调用健康检查 (GET /health)",

@@ -8,7 +8,7 @@
 
 **The best way to develop your web service with one click.**
 
-WebShelf 是一个生产就绪的 Rust 全栈框架，建立在 Axum 和 Dioxus 基础上，包含完整的后端脚手架、认证系统、数据库集成、分布式锁和分布式限流支持、以及全面的中间件。
+WebShelf 是一个生产就绪的 Rust 全端框架，建立在 Axum 和 Dioxus 基础上，包含完整的后端脚手架、认证系统、数据库集成、分布式锁和分布式限流支持、以及全面的中间件。
 
 ## ✨ 特性
 
@@ -23,7 +23,7 @@ WebShelf 是一个生产就绪的 Rust 全栈框架，建立在 Axum 和 Dioxus 
 - 🧪 **测试框架** - 单元测试和集成测试支持
 - 🚀 **RESTful API** - 完整的用户管理 CRUD 操作
 - 📦 **生产就绪** - 完善的错误处理、压缩、优雅关闭
-- 🌐 **全栈框架** - 后端 (Axum) + 前端 (Dioxus/WASM 多端: Web/Desktop/Mobile) + 反向代理 (Nginx)
+- 🌐 **全端框架** - 后端 (Axum) + 前端 (Dioxus/WASM 多端: Web/Desktop/Mobile) + 反向代理 (Nginx)
 - 🐳 **容器化** - Docker Compose 和 Kubernetes 支持
 - 🔄 **灰度部署** - 支持滚动升级和金丝雀发布
 
