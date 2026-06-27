@@ -1,4 +1,5 @@
 use dioxus::prelude::*;
+use dioxus_icons::lucide::{Eye, EyeOff};
 
 /// TextInput —— 表单输入框。
 ///
@@ -17,16 +18,28 @@ pub fn TextInput(
     #[props(default)] name: Option<String>,
     #[props(default)] autocomplete: Option<String>,
 ) -> Element {
+    let mut show_password = use_signal(|| false);
+
     let input_class = if dense {
         "ws-input__field ws-input__field--dense"
     } else {
         "ws-input__field"
     };
-    let type_attr = match input_type {
-        InputType::Text => "text",
-        InputType::Email => "email",
-        InputType::Password => "password",
-        InputType::Number => "number",
+    let type_attr = if input_type == InputType::Password && *show_password.read() {
+        "text"
+    } else {
+        match input_type {
+            InputType::Text => "text",
+            InputType::Email => "email",
+            InputType::Password => "password",
+            InputType::Number => "number",
+        }
+    };
+
+    let field_class = if input_type == InputType::Password {
+        format!("{} ws-input__field--pw", input_class)
+    } else {
+        input_class.to_string()
     };
 
     rsx! {
@@ -35,18 +48,37 @@ pub fn TextInput(
             if let Some(label_text) = label.as_ref() {
                 label { class: "ws-input__label", "{label_text}" }
             }
-            input {
-                class: "{input_class}",
-                r#type: type_attr,
-                value,
-                required,
-                disabled,
-                placeholder: placeholder.unwrap_or_default(),
-                name: name.unwrap_or_default(),
-                autocomplete: autocomplete.unwrap_or_default(),
-                oninput: move |e| {
-                    *value.write() = e.value();
-                },
+            div { class: "ws-input__field-wrapper",
+                input {
+                    class: "{field_class}",
+                    r#type: type_attr,
+                    value,
+                    required,
+                    disabled,
+                    placeholder: placeholder.unwrap_or_default(),
+                    name: name.unwrap_or_default(),
+                    autocomplete: autocomplete.unwrap_or_default(),
+                    oninput: move |e| {
+                        *value.write() = e.value();
+                    },
+                }
+                if input_type == InputType::Password {
+                    button {
+                        class: "ws-input__toggle-pw",
+                        r#type: "button",
+                        tabindex: "-1",
+                        aria_label: if *show_password.read() { "Hide password" } else { "Show password" },
+                        onclick: move |_| {
+                            let current = *show_password.read();
+                            *show_password.write() = !current;
+                        },
+                        if *show_password.read() {
+                            Eye { width: "18", height: "18" }
+                        } else {
+                            EyeOff { width: "18", height: "18" }
+                        }
+                    }
+                }
             }
             if let Some(err) = error.as_ref() {
                 p { class: "ws-input__error", "{err}" }

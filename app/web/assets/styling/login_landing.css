@@ -183,28 +183,127 @@
   color: var(--color-text-muted-soft);
 }
 
-/* ── 响应式：窄屏时右侧隐藏 ── */
-@media (max-width: 900px) {
-  .ws-landing__right {
-    display: none;
-  }
+/* ═══════════════════════════════════════════════
+   响应式：平板 & 移动端
+   — 双栏 → 单栏（表单在上，信息在下）
+   ═══════════════════════════════════════════════ */
 
-  .ws-landing__left {
-    padding: 32px 24px;
+/* 平板（≤ 1024px）：缩小右侧面板宽度 */
+@media (max-width: 1024px) {
+  .ws-landing__right {
+    width: 420px;
+    padding: 40px 32px;
   }
 }
 
-@media (max-width: 480px) {
+/* 小屏（≤ 900px）：改为上下单列布局 */
+@media (max-width: 900px) {
+  .ws-landing {
+    flex-direction: column;
+  }
+
   .ws-landing__left {
-    padding: 24px 16px;
+    padding: 40px 24px 32px;
+  }
+
+  .ws-landing__right {
+    width: 100%;
+    flex-shrink: 1;
+    padding: 32px 24px 40px;
+    border-left: none;
+    border-top: 1px solid var(--color-border-subtle);
+    background: linear-gradient(180deg, rgba(99, 102, 241, 0.02) 0%, rgba(168, 85, 247, 0.02) 100%);
+  }
+
+  .ws-landing__info-card {
+    max-width: 480px;
+    margin: 0 auto;
+  }
+}
+
+/* 移动端（≤ 640px）：进一步紧凑 */
+@media (max-width: 640px) {
+  .ws-landing__left {
+    padding: 32px 16px 24px;
+  }
+
+  .ws-landing__brand {
+    margin-bottom: 24px;
   }
 
   .ws-landing__brand-title {
-    font-size: 24px;
+    font-size: 26px;
     line-height: 32px;
   }
 
   .ws-landing__brand-subtitle {
     font-size: 12px;
+    line-height: 18px;
+  }
+
+  .ws-landing__right {
+    padding: 24px 16px 32px;
+  }
+
+  .ws-landing__info-card {
+    gap: 24px;
+  }
+
+  .ws-landing__qr-placeholder {
+    padding: 28px 20px;
+    gap: 16px;
+  }
+
+  .ws-landing__qr-img {
+    width: 140px;
+    height: 140px;
+  }
+
+  .ws-landing__qr-label {
+    font-size: 14px;
+    line-height: 20px;
+  }
+
+  .ws-landing__qr-hint {
+    font-size: 12px;
+    line-height: 16px;
+  }
+
+  .ws-landing__github-link {
+    padding: 10px 16px;
+    font-size: 13px;
+  }
+
+  .ws-landing__copyright-text {
+    font-size: 11px;
+  }
+
+  .ws-landing__copyright-sub {
+    font-size: 10px;
+  }
+}
+
+/* 小屏移动端（≤ 400px）：最紧凑尺寸 */
+@media (max-width: 400px) {
+  .ws-landing__left {
+    padding: 24px 12px 16px;
+  }
+
+  .ws-landing__brand-title {
+    font-size: 22px;
+  }
+
+  .ws-landing__right {
+    padding: 20px 12px 24px;
+  }
+
+  .ws-landing__qr-img {
+    width: 120px;
+    height: 120px;
+  }
+
+  .ws-landing__qr-placeholder {
+    padding: 20px 16px;
+    gap: 12px;
   }
 }

@@ -50,7 +50,7 @@ translate! {
     data_table_no_data: "No data" => "暂无数据",
 
     // login_landing.rs
-    login_brand_subtitle: "Rust Full-stack Admin System" => "Rust 全端全栈管理系统",
+    login_brand_subtitle: "Rust Fullend Admin System" => "Rust 全端管理系统",
     login_qr_label: "Follow Us" => "关注公众号",
     login_qr_hint: "Get verification code & latest tech updates" => "获取验证码与最新技术动态",
     login_github_label: "GitHub Repository" => "GitHub 仓库",
@@ -74,7 +74,7 @@ translate! {
     dashboard_stats_middleware_sub: "Interceptor: require_admin" => "拦截器: require_admin",
     dashboard_middleware_active: "Active" => "Active",
     dashboard_routes_title: "Route Architecture" => "路由架构图",
-    dashboard_routes_subtitle: "axum::Router Key Endpoints" => "axum::Router 的关键端点速查",
+    dashboard_routes_subtitle: "Router Key Endpoints" => "Router 的关键端点速查",
     dashboard_no_match: "No matching results" => "无匹配结果",
     dashboard_not_yet_checked: "Not yet checked" => "尚未检测",
     dashboard_version_label: "Version" => "版本",

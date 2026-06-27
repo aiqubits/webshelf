@@ -126,3 +126,41 @@
   font-weight: 500;
   line-height: 1.5;
 }
+
+/* 移动端：减小表单卡片内边距 */
+@media (max-width: 640px) {
+  .ws-auth {
+    padding: 24px 20px;
+    max-width: 100%;
+  }
+
+  .ws-auth__tabs {
+    margin-bottom: 24px;
+  }
+
+  .ws-auth__form {
+    gap: 14px;
+  }
+
+  .ws-auth__meta {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .ws-auth__remember input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+  }
+}
+
+@media (max-width: 400px) {
+  .ws-auth {
+    padding: 20px 16px;
+  }
+
+  .ws-auth__meta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+  }
+}
