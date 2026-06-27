@@ -3,7 +3,7 @@
 //! 流程：填写当前密码 + 新密码 + 确认新密码 → 提交到 POST /api/users/me/password。
 
 use dioxus::prelude::*;
-use ui::{Button, ButtonType, InputType, TextInput};
+use ui::{Button, ButtonType, I18nContext, InputType, TextInput, Translations};
 
 use crate::Route;
 use crate::api::{ErrorContext, handle_unauth, humanize_error};
@@ -16,6 +16,8 @@ pub fn Settings() -> Element {
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
 
     let mut current_password = use_signal(String::new);
     let mut new_password = use_signal(String::new);
@@ -67,23 +69,32 @@ pub fn Settings() -> Element {
     let nav_for_logout = nav;
     let bus_for_logout = log_bus;
 
+    let update_password_btn = format!(
+        "{} [POST /api/users/me/password]",
+        t.settings_update_password_btn
+    );
+    let logout_all_btn = format!(
+        "{} [POST /api/users/me/logout-all]",
+        t.settings_logout_all_btn
+    );
+
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/settings.css") }
         div { class: "ws-settings",
             header { class: "ws-settings__header",
                 div { class: "ws-settings__title-block",
-                    h1 { class: "ws-settings__title", "个人设置" }
-                    p { class: "ws-settings__subtitle", "修改账户密码以保护账号安全" }
+                    h1 { class: "ws-settings__title", "{t.settings_title}" }
+                    p { class: "ws-settings__subtitle", "{t.settings_subtitle}" }
                 }
             }
 
             section { class: "ws-settings__section",
-                h2 { class: "ws-settings__section-title", "账户身份" }
-                div { class: "ws-settings__identity", {render_identity(auth.clone())} }
+                h2 { class: "ws-settings__section-title", "{t.settings_account_title}" }
+                div { class: "ws-settings__identity", {render_identity(auth.clone(), t)} }
             }
 
             section { class: "ws-settings__section",
-                h2 { class: "ws-settings__section-title", "修改密码" }
+                h2 { class: "ws-settings__section-title", "{t.settings_change_password_title}" }
                 form {
                     class: "ws-settings__form",
                     onsubmit: move |e| {
@@ -93,23 +104,23 @@ pub fn Settings() -> Element {
                         }
                         // 同步校验：避免空字段浪费网络请求
                         if current_password.read().is_empty() {
-                            form_error.set(Some("请输入当前密码".into()));
+                            form_error.set(Some(t.settings_validation_current_empty.to_string()));
                             return;
                         }
                         if new_password.read().is_empty() {
-                            form_error.set(Some("请输入新密码".into()));
+                            form_error.set(Some(t.settings_validation_new_empty.to_string()));
                             return;
                         }
                         if new_password.read().len() < 8 {
-                            form_error.set(Some("新密码至少需要 8 个字符".into()));
+                            form_error.set(Some(t.settings_validation_new_short.to_string()));
                             return;
                         }
                         if new_password.read().cloned() != confirm_password.read().cloned() {
-                            form_error.set(Some("两次输入的新密码不一致".into()));
+                            form_error.set(Some(t.settings_validation_new_mismatch.to_string()));
                             return;
                         }
                         if new_password.read().cloned() == current_password.read().cloned() {
-                            form_error.set(Some("新密码不能与当前密码相同".into()));
+                            form_error.set(Some(t.settings_validation_new_same_as_current.to_string()));
                             return;
                         }
 
@@ -160,8 +171,8 @@ pub fn Settings() -> Element {
                         });
                     },
                     TextInput {
-                        label: "当前密码".to_string(),
-                        placeholder: Some("请输入当前密码".to_string()),
+                        label: t.settings_current_password_label.to_string(),
+                        placeholder: Some(t.settings_current_password_placeholder.to_string()),
                         value: current_password,
                         input_type: InputType::Password,
                         required: true,
@@ -170,22 +181,19 @@ pub fn Settings() -> Element {
                         autocomplete: Some("current-password".to_string()),
                     }
                     TextInput {
-                        label: "新密码".to_string(),
-                        placeholder: Some("≥8 字符，包含大小写字母、数字和 ASCII 标点".to_string()),
+                        label: t.settings_new_password_label.to_string(),
+                        placeholder: Some(t.settings_new_password_placeholder.to_string()),
                         value: new_password,
                         input_type: InputType::Password,
                         required: true,
                         disabled: *submitting.read(),
                         name: Some("new_password".to_string()),
                         autocomplete: Some("new-password".to_string()),
-                        hint: Some(
-                            "密码需 ≥8 字符，包含大小写字母、数字和 ASCII 标点"
-                                .to_string(),
-                        ),
+                        hint: Some(t.settings_new_password_hint.to_string()),
                     }
                     TextInput {
-                        label: "确认新密码".to_string(),
-                        placeholder: Some("再次输入新密码".to_string()),
+                        label: t.settings_confirm_password_label.to_string(),
+                        placeholder: Some(t.settings_confirm_password_placeholder.to_string()),
                         value: confirm_password,
                         input_type: InputType::Password,
                         required: true,
@@ -204,15 +212,15 @@ pub fn Settings() -> Element {
                         full_width: true,
                         disabled: *submitting.read(),
                         loading: *submitting.read(),
-                        "更新密码 [POST /api/users/me/password]"
+                        "{update_password_btn}"
                     }
                 }
             }
 
             section { class: "ws-settings__section",
-                h2 { class: "ws-settings__section-title", "会话管理" }
+                h2 { class: "ws-settings__section-title", "{t.settings_session_title}" }
                 p { class: "ws-settings__desc",
-                    "登出所有设备将使当前账户在所有浏览器和设备上的会话立即失效。"
+                    "{t.settings_session_desc}"
                 }
                 Button {
                     button_type: ButtonType::Danger,
@@ -225,14 +233,13 @@ pub fn Settings() -> Element {
                         }
                         show_logout_confirm.set(true);
                     },
-                    "登出所有设备 [POST /api/users/me/logout-all]"
+                    "{logout_all_btn}"
                 }
 
                 ConfirmDialog {
                     open: *show_logout_confirm.read(),
-                    title: "确认登出所有设备".to_string(),
-                    message: "此操作将使当前账户在所有浏览器和设备上的会话立即失效，包括当前设备。你需要重新登录才能继续使用。"
-                        .to_string(),
+                    title: t.settings_confirm_logout_title.to_string(),
+                    message: t.settings_confirm_logout_msg.to_string(),
                     danger: true,
                     loading: *logging_out_all.read(),
                     on_confirm: move |_| {
@@ -259,29 +266,29 @@ pub fn Settings() -> Element {
     }
 }
 
-fn render_identity(auth: AuthState) -> Element {
+fn render_identity(auth: AuthState, t: &Translations) -> Element {
     let snapshot = auth.user.read().clone();
     match snapshot {
         Some(user) => rsx! {
             div { class: "ws-settings__identity-row",
-                span { class: "ws-settings__identity-label", "账户名" }
+                span { class: "ws-settings__identity-label", "{t.settings_account_label}" }
                 span { class: "ws-settings__identity-value", "{user.name}" }
             }
             div { class: "ws-settings__identity-row",
-                span { class: "ws-settings__identity-label", "邮箱地址" }
+                span { class: "ws-settings__identity-label", "{t.settings_email_label}" }
                 span { class: "ws-settings__identity-value", "{user.email}" }
             }
             div { class: "ws-settings__identity-row",
-                span { class: "ws-settings__identity-label", "角色" }
+                span { class: "ws-settings__identity-label", "{t.settings_role_label}" }
                 span { class: "ws-settings__identity-value", "{user.role}" }
             }
             div { class: "ws-settings__identity-row",
-                span { class: "ws-settings__identity-label", "余额" }
+                span { class: "ws-settings__identity-label", "{t.settings_balance_label}" }
                 span { class: "ws-settings__identity-value", "{format_balance(user.balance)}" }
             }
         },
         None => rsx! {
-            span { class: "ws-settings__identity-value", "未登录" }
+            span { class: "ws-settings__identity-value", "{t.settings_not_logged_in}" }
         },
     }
 }

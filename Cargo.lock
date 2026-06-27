@@ -1609,6 +1609,7 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "i18n",
  "ui",
 ]
 
@@ -3458,6 +3459,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "i18n"
+version = "0.1.0"
+dependencies = [
+ "dioxus",
+ "web-sys",
+]
+
+[[package]]
 name = "iana-time-zone"
 version = "0.1.65"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4365,6 +4374,7 @@ name = "mobile"
 version = "0.1.0"
 dependencies = [
  "dioxus",
+ "i18n",
  "ui",
 ]
 
@@ -7966,6 +7976,7 @@ dependencies = [
  "dioxus",
  "dioxus-icons",
  "gloo-timers",
+ "i18n",
  "tokio",
 ]
 
@@ -8350,6 +8361,7 @@ dependencies = [
  "dioxus",
  "dioxus-icons",
  "gloo-timers",
+ "i18n",
  "js-sys",
  "serde",
  "serde_json",

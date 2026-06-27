@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{ChartPie, ExternalLink, Layers, UserCog, X};
 
+use crate::I18nContext;
 use crate::badge::{Badge, BadgeVariant};
 
 /// Sidebar —— 256px 玻璃侧边栏。
@@ -17,6 +18,9 @@ pub fn Sidebar(
     #[props(default = false)]
     show_admin_modules: bool,
 ) -> Element {
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
+
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/styling/sidebar.css") }
         // 移动端 overlay
@@ -31,8 +35,8 @@ pub fn Sidebar(
             div { class: "ws-sidebar__logo",
                 div { class: "ws-sidebar__logo-icon", Layers {} }
                 div { class: "ws-sidebar__logo-text",
-                    span { class: "ws-sidebar__logo-title", "WebShelf Admin" }
-                    span { class: "ws-sidebar__logo-subtitle", "Fullend System" }
+                    span { class: "ws-sidebar__logo-title", {t.sidebar_brand_title} }
+                    span { class: "ws-sidebar__logo-subtitle", {t.sidebar_brand_subtitle} }
                 }
                 // 移动端关闭按钮
                 button {
@@ -46,12 +50,12 @@ pub fn Sidebar(
             nav { class: "ws-sidebar__nav no-scrollbar",
                 // 系统监控
                 div { class: "ws-sidebar__group",
-                    div { class: "ws-sidebar__group-caption", "系统监控" }
+                    div { class: "ws-sidebar__group-caption", {t.sidebar_group_monitoring} }
                     SidebarItem {
                         icon: rsx! {
                             ChartPie {}
                         },
-                        label: "控制中心 (/health)",
+                        label: format!("{} (/health)", t.sidebar_dashboard_label),
                         active: active == NavKey::Dashboard,
                         onclick: move |_| on_select.call(NavKey::Dashboard),
                     }
@@ -61,14 +65,14 @@ pub fn Sidebar(
                 if show_admin_modules {
                     div { class: "ws-sidebar__group",
                         div { class: "ws-sidebar__group-caption-row",
-                            span { class: "ws-sidebar__group-caption", "数据管理" }
+                            span { class: "ws-sidebar__group-caption", {t.sidebar_data_management} }
                             Badge { variant: BadgeVariant::AmberCompact, "admin_layer" }
                         }
                         SidebarItem {
                             icon: rsx! {
                                 UserCog {}
                             },
-                            label: "用户管理 (/users)",
+                            label: format!("{} (/users)", t.sidebar_user_management_label),
                             active: active == NavKey::Users,
                             onclick: move |_| on_select.call(NavKey::Users),
                         }
@@ -91,7 +95,7 @@ pub fn Sidebar(
                     }
                     div { class: "ws-sidebar__github-text",
                         span { class: "ws-sidebar__github-repo", "aiqubits/webshelf" }
-                        span { class: "ws-sidebar__github-sub", "在 GitHub 上查看源码" }
+                        span { class: "ws-sidebar__github-sub", {t.sidebar_github_sub} }
                     }
                     ExternalLink { class: "ws-sidebar__github-arrow" }
                 }
@@ -113,7 +117,7 @@ pub enum NavKey {
 #[component]
 fn SidebarItem(
     icon: Element,
-    label: &'static str,
+    label: String,
     active: bool,
     onclick: EventHandler<MouseEvent>,
 ) -> Element {

@@ -12,6 +12,8 @@
 
 use dioxus::prelude::*;
 
+use ui::{I18nContext, tf};
+
 use crate::Route;
 use crate::api::{ErrorContext, humanize_error};
 use crate::auth::AuthState;
@@ -27,8 +29,8 @@ const RESEND_COOLDOWN_SECS: i32 = 60;
 #[component]
 pub fn VerifyEmail(email: String) -> Element {
     // ── 所有 hook 必须在组件顶部无条件调用 ─────────────────────────
-    // Dioxus hook 按调用顺序索引；early return 前后的 hook 数量不一致
-    // 会导致后续 render 的 hook 状态错位甚至 panic。
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
@@ -41,7 +43,6 @@ pub fn VerifyEmail(email: String) -> Element {
     let mut info_msg = use_signal(|| Option::<String>::None);
 
     // ── 路由守卫（副作用：render 后异步执行） ───────────────────────
-    // 已登录用户访问此路由直接跳走（防止登录后被卡在验证页）。
     let auth_for_auth_guard = auth.clone();
     use_effect(move || {
         if auth_for_auth_guard.is_authenticated() {
@@ -50,14 +51,6 @@ pub fn VerifyEmail(email: String) -> Element {
     });
 
     // ── 脏状态守卫（副作用：render 后异步执行） ─────────────────────
-    // 注册临时态缺失或邮箱不匹配（典型场景：刷新 /verify-email 后 pending 被 GC，
-    // 或用户直接深链到他人邮箱的验证页）。统一跳回 /auth。
-    //
-    // 必须先检查 `is_authenticated()`：
-    // verify-email 成功后 `take_pending_registration` 会把 pending 清空，
-    // 同一 tick 内 auth.user 也变为 Some()。auth_guard 触发
-    // nav.replace(Dashboard)，dirty_guard 不检查登录态就会紧随其后
-    // 触发 nav.replace(Auth) 并覆盖，导致刚验证完的用户卡在登录页。
     let auth_for_dirty_guard = auth.clone();
     let email_for_dirty_guard = email.clone();
     use_effect(move || {
@@ -78,11 +71,6 @@ pub fn VerifyEmail(email: String) -> Element {
     });
 
     // ── 倒计时循环 ────────────────────────────────────────────────
-    // 用 `use_coroutine` 而不是 `use_effect` + `spawn`：
-    // 前者在组件 unmount 时自动取消任务、释放 signal 引用；
-    // 后者会让 spawned task 永远运行、泄漏 countdown signal 的 Arc。
-    // 循环常驻不退出：countdown 归零时不能 break，否则 resend 把 countdown
-    // 重置为 60 后原 task 已终止，倒计时会卡在 60s 不动。
     use_coroutine(move |_rx: UnboundedReceiver<()>| async move {
         loop {
             client_api::Client::sleep_ms(1000).await;
@@ -109,8 +97,6 @@ pub fn VerifyEmail(email: String) -> Element {
     }
 
     // ── 提交验证码 ────────────────────────────────────────────────
-    // 用一个共享的闭包 `do_verify` 让按钮点击和表单 submit（Enter 键）
-    // 共享同一份逻辑。闭包必须可多次调用 (FnMut)。
     let auth_for_verify = auth.clone();
     let email_for_verify = email.clone();
     let mut do_verify = move || {
@@ -119,13 +105,11 @@ pub fn VerifyEmail(email: String) -> Element {
         }
         let code_value = code.read().trim().to_string();
         if code_value.len() != 6 || !code_value.chars().all(|c| c.is_ascii_digit()) {
-            error_msg.set(Some("请输入 6 位数字验证码".to_string()));
+            error_msg.set(Some(t.verify_email_code_validation.to_string()));
             return;
         }
         if *failed_attempts.read() >= MAX_CLIENT_ATTEMPTS {
-            error_msg.set(Some(
-                "尝试次数过多，请点击下方按钮重新发送验证码".to_string(),
-            ));
+            error_msg.set(Some(t.verify_email_too_many_attempts.to_string()));
             return;
         }
 
@@ -159,9 +143,8 @@ pub fn VerifyEmail(email: String) -> Element {
                             // 自动登录失败（理论上不会发生，除非密码在用户不知情时被改）。
                             // 跳回 /auth 让用户重新登录。
                             let msg = humanize_error(&err, ErrorContext::EmailVerification);
-                            error_msg.set(Some(format!(
-                                "验证成功，但自动登录失败：{msg}，请返回登录页"
-                            )));
+                            error_msg
+                                .set(Some(tf(t.verify_email_auto_login_failed, &[("msg", &msg)])));
                             loading.set(false);
                             return;
                         }
@@ -169,7 +152,7 @@ pub fn VerifyEmail(email: String) -> Element {
                         loading.set(false);
                     } else {
                         // 极端情况：pending 在 verify 过程中被外部清空
-                        error_msg.set(Some("会话已过期，请重新登录".to_string()));
+                        error_msg.set(Some(t.verify_email_session_expired.to_string()));
                         loading.set(false);
                     }
                 }
@@ -179,7 +162,7 @@ pub fn VerifyEmail(email: String) -> Element {
                     failed_attempts.set(attempts);
                     let mut msg = humanize_error(&err, ErrorContext::EmailVerification);
                     if attempts >= MAX_CLIENT_ATTEMPTS {
-                        msg.push_str("（已达最大尝试次数）");
+                        msg.push_str(t.verify_email_attempts_suffix);
                     }
                     error_msg.set(Some(msg));
                 }
@@ -214,7 +197,7 @@ pub fn VerifyEmail(email: String) -> Element {
                     countdown.set(RESEND_COOLDOWN_SECS);
                     failed_attempts.set(0);
                     code.set(String::new());
-                    info_msg.set(Some("新验证码已发送至您的邮箱".to_string()));
+                    info_msg.set(Some(t.verify_email_info_sent.to_string()));
                 }
                 Err(err) => {
                     let msg = humanize_error(&err, ErrorContext::EmailVerification);
@@ -229,8 +212,6 @@ pub fn VerifyEmail(email: String) -> Element {
     };
 
     // ── 返回登录页 ────────────────────────────────────────────────
-    // 不接事件参数：在 <a> 的 onclick 闭包内部直接调用。
-    // 闭包体调用了 &mut self 方法，需声明 mut 才能调用（FnMut）。
     let mut auth_for_back = auth.clone();
     let mut on_back = move || {
         auth_for_back.clear_pending_registration();
@@ -238,9 +219,12 @@ pub fn VerifyEmail(email: String) -> Element {
     };
 
     let resend_label = if *countdown.read() > 0 {
-        format!("重新发送 ({}s)", *countdown.read())
+        tf(
+            t.verify_email_resend_countdown,
+            &[("count", &countdown.read().to_string())],
+        )
     } else {
-        "重新发送验证码".to_string()
+        t.verify_email_resend.to_string()
     };
     let code_value = code.read().trim().to_string();
     let verify_disabled =
@@ -259,11 +243,11 @@ pub fn VerifyEmail(email: String) -> Element {
             div { class: "ws-verify__card",
                 div { class: "ws-verify__icon" }
 
-                h1 { class: "ws-verify__title", "验证您的邮箱" }
+                h1 { class: "ws-verify__title", {t.verify_email_title} }
                 p { class: "ws-verify__subtitle",
-                    "验证码已发送至 "
+                    {t.verify_email_code_sent_prefix}
                     strong { "{email}" }
-                    " ，10 分钟内有效"
+                    {t.verify_email_code_sent_suffix}
                 }
 
                 form {
@@ -272,7 +256,7 @@ pub fn VerifyEmail(email: String) -> Element {
                         e.prevent_default();
                         do_verify();
                     },
-                    label { class: "ws-verify__label", "6 位数字验证码" }
+                    label { class: "ws-verify__label", {t.verify_email_code_label} }
                     input {
                         class: "ws-verify__code-input",
                         r#type: "text",
@@ -294,7 +278,7 @@ pub fn VerifyEmail(email: String) -> Element {
                             error_msg.set(None);
                         },
                     }
-                    p { class: "ws-verify__hint", "请检查垃圾邮件夹" }
+                    p { class: "ws-verify__hint", {t.verify_email_spam_hint} }
 
                     if let Some(info) = info_msg.read().as_ref() {
                         p { class: "ws-verify__info", "{info}" }
@@ -305,8 +289,8 @@ pub fn VerifyEmail(email: String) -> Element {
 
                     if locked {
                         div { class: "ws-verify__locked",
-                            strong { "已达最大尝试次数" }
-                            " — 请重新发送验证码以继续"
+                            strong { {t.verify_email_max_attempts} }
+                            {t.verify_email_locked_hint}
                         }
                     }
 
@@ -315,11 +299,11 @@ pub fn VerifyEmail(email: String) -> Element {
                         r#type: "submit",
                         disabled: verify_disabled,
                         if *loading.read() {
-                            "验证中..."
+                            {t.verify_email_verifying}
                         } else if locked {
-                            "请先重新发送"
+                            {t.verify_email_locked}
                         } else {
-                            "验证"
+                            {t.verify_email_verify}
                         }
                     }
                 }
@@ -339,7 +323,7 @@ pub fn VerifyEmail(email: String) -> Element {
                             e.prevent_default();
                             on_back();
                         },
-                        "返回登录"
+                        {t.verify_email_back_to_login}
                     }
                 }
             }

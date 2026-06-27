@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
 ui = { workspace = true }
+i18n = { workspace = true }
 
 [features]
 default = ["desktop"]

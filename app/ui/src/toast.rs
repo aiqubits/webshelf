@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::X;
 
+use crate::{EN, I18nContext, tf};
+
 /// 一条 toast 通知的展示数据。
 ///
 /// 由 `LogBus` 写入，`<ToastStack>` 渲染。
@@ -102,18 +104,14 @@ pub fn ToastStack(
 
 #[component]
 fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u64>) -> Element {
+    let i18n = try_use_context::<I18nContext>();
+    let t = i18n.as_ref().map(|c| c.t()).unwrap_or(&EN);
+
     let id = entry.id;
     let mut exiting = use_signal(|| false);
 
-    // 使用 use_resource 替代 use_effect + spawn：
-    // use_resource 的 Future 在组件卸载时自动取消，避免旧 timer 在已销毁
-    // 组件上调用 exiting.set() / on_dismiss.call() 导致未定义行为。
-    //
-    // 必须与 app/ui/assets/styling/toast.css 中 .ws-toast--exiting 的
-    // transition-duration 保持同步（默认 300ms ease-in-out）。
     const EXIT_ANIM_MS: u64 = 300;
     use_resource(move || async move {
-        // 自动 dismiss 延迟
         #[cfg(target_arch = "wasm32")]
         {
             gloo_timers::future::TimeoutFuture::new(auto_dismiss_ms.min(u32::MAX as u64) as u32)
@@ -125,7 +123,6 @@ fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u64>)
         }
         exiting.set(true);
 
-        // 退出动画持续时间
         #[cfg(target_arch = "wasm32")]
         {
             gloo_timers::future::TimeoutFuture::new(EXIT_ANIM_MS as u32).await;
@@ -151,6 +148,8 @@ fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u64>)
         )
     };
 
+    let status_text = tf(t.toast_status_msg, &[("status", &entry.status)]);
+
     rsx! {
         div { class: "{class}",
             span { class: "ws-toast__method",
@@ -159,7 +158,7 @@ fn Toast(entry: ToastEntry, auto_dismiss_ms: u64, on_dismiss: EventHandler<u64>)
             div { class: "ws-toast__body",
                 div { class: "ws-toast__path", "{entry.path}" }
                 div { class: "ws-toast__status {entry.kind.status_class()}",
-                    "响应状态: {entry.status}"
+                    "{status_text}"
                 }
             }
             button {

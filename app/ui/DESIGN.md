@@ -922,7 +922,7 @@ API 日志流模拟终端。
 
 **头部区域规格**：
 - 标题：`{typography.heading-md}` (14px / 700)，`{colors.text-primary}`，文字 "服务链路追踪监控"
-- 副标题：`{typography.caption}` (11px)，`{colors.text-muted}`，文字 "实时拦截捕获的 WebShelf Axum 后端路由流量"
+- 副标题：`{typography.caption}` (11px)，`{colors.text-muted}`，文字 "实时拦截捕获的 WebShelf 后端路由流量"
 - Live Stream 标签：`{typography.fine-print}` (10px)，`font-family: {typography.font-mono}`，`background: #f1f5f9`，`{colors.text-muted}`，`padding: 2px 8px`，`{rounded.md}`
 
 **规格**：

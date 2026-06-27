@@ -7,8 +7,8 @@ use dioxus::prelude::dioxus_router::Navigator;
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{Gauge, HeartPulse, ShieldHalf, Users as UsersIcon};
 use ui::{
-    Button, CodeConsole, ConsoleKind, ConsoleLine, RouteCard, RouteMethod, StatsAccent, StatsCard,
-    StatsValueColor,
+    Button, CodeConsole, ConsoleKind, ConsoleLine, I18nContext, RouteCard, RouteMethod,
+    StatsAccent, StatsCard, StatsValueColor, Translations, tf,
 };
 
 use crate::auth::AuthState;
@@ -18,8 +18,8 @@ use crate::components::{
 
 #[derive(Debug, Clone, Default)]
 struct HealthState {
-    status_label: String, // "—" / "UP (200 OK)" / "503 SERVICE_UNAVAILABLE"
-    version: String,      // 服务版本，作为 sub
+    status_label: String,    // "—" / "UP (200 OK)" / "503 SERVICE_UNAVAILABLE"
+    version: Option<String>, // None = 尚未检测, Some(v) = 版本字符串
     ok: bool,
 }
 
@@ -29,94 +29,30 @@ pub fn Dashboard() -> Element {
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
     let SearchSignal(search_query) = use_context::<SearchSignal>();
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
 
     let health = use_signal(|| HealthState {
         status_label: "—".to_string(),
-        version: "尚未检测".to_string(),
+        version: None, // None = not yet checked; label applied at render time via t at that point
         ok: false,
     });
     let latency_ms = use_signal(|| Option::<f64>::None);
     let total_users = use_signal(|| Option::<u64>::None);
     let mut checking = use_signal(|| false);
-    // use_effect 异步任务版本号 —— 防止旧任务覆盖新任务的 checking 状态。
-    // 工作原理同 users.rs 中的 list_version 模式。
+    // 异步任务版本号 —— 防止旧任务覆盖新任务的状态。
+    // 初始值 0，每次点击按钮时递增。
     let mut health_version = use_signal(|| 0u64);
-    let user_count_version = use_signal(|| 0u64);
-    // 初始拉取健康信息 + 用户总数（如果是 admin）。
-    // effect 追踪 auth.user 变化：当用户登录、登出、角色变更时自动刷新数据。
-    {
-        let client = auth.client.clone();
-        let bus = log_bus;
-        let nav_for_effect = nav;
-        let checking_for_effect = checking;
-        let auth_for_effect = auth.clone();
-        let mut version_signal = health_version;
-        let mut uc_version_signal = user_count_version;
-        use_effect(move || {
-            // 递增版本号并快照当前值，供异步任务完成后校验。
-            let version = version_signal.with_mut(|v| {
-                *v += 1;
-                *v
-            });
-            let uc_version = uc_version_signal.with_mut(|v| {
-                *v += 1;
-                *v
-            });
-            let client = client.clone();
-            let bus = bus;
-            let auth_inner = auth_for_effect.clone();
-            let nav_inner = nav_for_effect;
-            let mut checking_inner = checking_for_effect;
-            let version_check = version_signal;
-            let uc_version_check = uc_version_signal;
-            // 在 effect 闭包内实时读取 auth.user 以建立信号追踪，
-            // 确保用户角色变更时触发重取。
-            // system 角色同样具备 admin 能力，因此也拉取用户总数。
-            let is_admin = auth_for_effect
-                .user
-                .read()
-                .as_ref()
-                .map(|u| u.is_admin())
-                .unwrap_or(false);
-            spawn(async move {
-                checking_inner.set(true);
-                run_health_check(
-                    client.clone(),
-                    health,
-                    latency_ms,
-                    bus,
-                    version,
-                    version_check,
-                )
-                .await;
-                if is_admin {
-                    run_user_count(
-                        client,
-                        total_users,
-                        bus,
-                        auth_inner,
-                        nav_inner,
-                        uc_version,
-                        uc_version_check,
-                    )
-                    .await;
-                }
-                // 版本校验：仅当本任务仍为最新版本时才修改信号状态，
-                // 避免旧任务误覆盖新任务的 loading / 数据。
-                if version_check() == version {
-                    checking_inner.set(false);
-                }
-            });
-        });
-    }
+    let mut user_count_version = use_signal(|| 0u64);
 
     // 控制台行：从 LogBus 取并附加种子注释，支持搜索框实时过滤。
     let bus_entries = log_bus.entries;
     let console_lines = use_memo(move || {
+        let t = i18n.t();
         let entries = bus_entries.read();
         let q = search_query.read().clone();
         if q.is_empty() {
-            build_console_lines(&entries)
+            build_console_lines(&entries, t)
         } else {
             let q_lower = q.to_lowercase();
             let filtered: Vec<LogEntry> = entries
@@ -128,7 +64,7 @@ pub fn Dashboard() -> Element {
                 })
                 .cloned()
                 .collect();
-            build_console_lines(&filtered)
+            build_console_lines(&filtered, t)
         }
     });
     let console_lines_signal: ReadSignal<Vec<ConsoleLine>> = console_lines.into();
@@ -156,11 +92,43 @@ pub fn Dashboard() -> Element {
             *v += 1;
             *v
         });
+        let uc_version = user_count_version.with_mut(|v| {
+            *v += 1;
+            *v
+        });
+        let is_admin = auth
+            .user
+            .read()
+            .as_ref()
+            .map(|u| u.is_admin())
+            .unwrap_or(false);
+        // 克隆供 spawn 使用，保持外层闭包为 FnMut（onclick 要求）
+        let auth_for_spawn = auth.clone();
+        let nav_for_spawn = nav;
         checking.set(true);
         spawn(async move {
-            run_health_check(client, health, latency_ms, bus, version, health_version).await;
-            // 版本号校验：仅最新任务才能重置 checking，
-            // 旧任务不触碰信号，避免按钮提前释放。
+            run_health_check(
+                client.clone(),
+                health,
+                latency_ms,
+                bus,
+                version,
+                health_version,
+                i18n,
+            )
+            .await;
+            if is_admin {
+                run_user_count(
+                    client,
+                    total_users,
+                    bus,
+                    auth_for_spawn,
+                    nav_for_spawn,
+                    uc_version,
+                    user_count_version,
+                )
+                .await;
+            }
             if health_version() == version {
                 checking.set(false);
             }
@@ -224,12 +192,11 @@ pub fn Dashboard() -> Element {
                 span { class: "ws-hero__orb ws-hero__orb--pink" }
                 div { class: "ws-hero__body",
                     div { class: "ws-hero__text",
-                        h1 { class: "ws-hero__title",
-                            "欢迎来到 WebShelf Rust 全端全栈管理系统 🚀"
-                        }
+                        h1 { class: "ws-hero__title", {t.dashboard_title} }
                         p { class: "ws-hero__subtitle",
-                            "你好 {user_name}！"
-                            "点击右侧按钮发起一次真实的健康检查请求。"
+                            {tf(t.dashboard_hello_user, &[("name", &user_name)])}
+                            " "
+                            {t.dashboard_click_health_hint}
                         }
                     }
                     div { class: "ws-hero__cta",
@@ -238,7 +205,7 @@ pub fn Dashboard() -> Element {
                             disabled: checking(),
                             loading: checking(),
                             HeartPulse { class: "ws-hero__cta-icon" }
-                            "点此调用健康检查 (GET /health)"
+                            {t.dashboard_call_health_btn}
                         }
                     }
                 }
@@ -246,9 +213,13 @@ pub fn Dashboard() -> Element {
 
             section { class: "ws-stats-grid",
                 StatsCard {
-                    label: "服务健康度".to_string(),
+                    label: t.dashboard_stats_health_label.to_string(),
                     value: health_snapshot.status_label.clone(),
-                    sub: format!("版本: {}", health_snapshot.version),
+                    sub: format!(
+                        "{}: {}",
+                        t.dashboard_version_label,
+                        health_snapshot.version.as_deref().unwrap_or(t.dashboard_not_yet_checked),
+                    ),
                     icon: rsx! {
                         HeartPulse {}
                     },
@@ -258,12 +229,12 @@ pub fn Dashboard() -> Element {
                 // 管控用户数：仅对 admin / system 角色可见。
                 if show_user_count {
                     StatsCard {
-                        label: "当前管控用户数".to_string(),
+                        label: t.dashboard_stats_users_label.to_string(),
                         value: match users_snapshot {
                             Some(n) => n.to_string(),
                             None => "—".to_string(),
                         },
-                        sub: "GET /api/users".to_string(),
+                        sub: t.dashboard_stats_users_sub.to_string(),
                         icon: rsx! {
                             UsersIcon {}
                         },
@@ -271,21 +242,21 @@ pub fn Dashboard() -> Element {
                     }
                 }
                 StatsCard {
-                    label: "接口平均耗时".to_string(),
+                    label: t.dashboard_stats_latency_label.to_string(),
                     value: match latency_snapshot {
                         Some(ms) => format!("{ms:.2} ms"),
                         None => "—".to_string(),
                     },
-                    sub: "/api/health 单次 RTT".to_string(),
+                    sub: t.dashboard_stats_latency_sub.to_string(),
                     icon: rsx! {
                         Gauge {}
                     },
                     accent: StatsAccent::Purple,
                 }
                 StatsCard {
-                    label: "中间件拦截器状态".to_string(),
-                    value: "Active".to_string(),
-                    sub: "拦截器: require_admin".to_string(),
+                    label: t.dashboard_stats_middleware_label.to_string(),
+                    value: t.dashboard_middleware_active.to_string(),
+                    sub: t.dashboard_stats_middleware_sub.to_string(),
                     icon: rsx! {
                         ShieldHalf {}
                     },
@@ -300,8 +271,8 @@ pub fn Dashboard() -> Element {
                 }
                 div { class: "ws-panel ws-panel--routes",
                     header { class: "ws-routes__header",
-                        h2 { class: "ws-routes__title", "路由架构图" }
-                        p { class: "ws-routes__subtitle", "axum::Router 的关键端点速查" }
+                        h2 { class: "ws-routes__title", {t.dashboard_routes_title} }
+                        p { class: "ws-routes__subtitle", {t.dashboard_routes_subtitle} }
                     }
                     div { class: "ws-routes__list",
                         {
@@ -320,7 +291,7 @@ pub fn Dashboard() -> Element {
                             };
                             if filtered_routes.is_empty() && !search_text.is_empty() {
                                 rsx! {
-                                    p { class: "ws-routes__empty", "无匹配结果" }
+                                    p { class: "ws-routes__empty", {t.dashboard_no_match} }
                                 }
                             } else {
                                 rsx! {
@@ -344,6 +315,7 @@ async fn run_health_check(
     bus: LogBus,
     version: u64,
     health_version: Signal<u64>,
+    ctx: I18nContext,
 ) {
     let started = now_unix_ms();
     let res = client.health_check().await;
@@ -357,17 +329,18 @@ async fn run_health_check(
             latency_ms.set(Some(elapsed));
             health.set(HealthState {
                 status_label: format!("UP ({})", hr.status),
-                version: hr.version,
+                version: Some(hr.version),
                 ok: true,
             });
             push_log_ok(bus, HttpMethod::Get, "/api/health");
         }
         Err(err) => {
             latency_ms.set(None);
-            let (_, label) = error_summary(&err);
+            let t = ctx.t();
+            let (_, label) = error_summary(&err, t);
             health.set(HealthState {
                 status_label: label.clone(),
-                version: "—".to_string(),
+                version: Some("—".to_string()),
                 ok: false,
             });
             push_log_err(bus, HttpMethod::Get, "/api/health", &err);
@@ -403,33 +376,39 @@ async fn run_user_count(
     }
 }
 
-fn error_summary(err: &ClientError) -> (String, String) {
+fn error_summary(err: &ClientError, t: &Translations) -> (String, String) {
     match err {
         ClientError::Other(s, _) | ClientError::ServerError(s, _) => {
             (s.to_string(), format!("HTTP {s}"))
         }
-        ClientError::Network(_) => ("NET".to_string(), "网络异常".to_string()),
-        ClientError::RateLimited(_) => ("429".to_string(), "请求过于频繁".to_string()),
-        ClientError::Config(_) => ("CFG".to_string(), "客户端配置异常".to_string()),
-        ClientError::Deserialization(_) => ("JSON".to_string(), "响应数据解析失败".to_string()),
+        ClientError::Network(_) => ("NET".to_string(), t.dashboard_error_network.to_string()),
+        ClientError::RateLimited(_) => (
+            "429".to_string(),
+            t.dashboard_error_rate_limited.to_string(),
+        ),
+        ClientError::Config(_) => ("CFG".to_string(), t.dashboard_error_config.to_string()),
+        ClientError::Deserialization(_) => (
+            "JSON".to_string(),
+            t.dashboard_error_deserialize.to_string(),
+        ),
         // `ClientError` 标记为 #[non_exhaustive]，保留通配臂以兼容未来新增变体
-        _ => (err.status_or_label(), "未知错误".to_string()),
+        _ => (err.status_or_label(), t.dashboard_error_unknown.to_string()),
     }
 }
 
-fn build_console_lines(entries: &[LogEntry]) -> Vec<ConsoleLine> {
+fn build_console_lines(entries: &[LogEntry], t: &Translations) -> Vec<ConsoleLine> {
     let mut out = Vec::with_capacity(entries.len() + 2);
     out.push(ConsoleLine {
         timestamp: None,
         method: None,
-        path: "// 监控引擎已就绪，等待 axum tower stack 路由事件…".to_string(),
+        path: t.dashboard_console_line_ready.to_string(),
         status: String::new(),
         kind: ConsoleKind::Info,
     });
     out.push(ConsoleLine {
         timestamp: None,
         method: None,
-        path: "// 历史回放：以下为本次会话已捕获的真实请求 ↓".to_string(),
+        path: t.dashboard_console_line_replay.to_string(),
         status: String::new(),
         kind: ConsoleKind::Info,
     });

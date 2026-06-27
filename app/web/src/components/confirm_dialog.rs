@@ -18,7 +18,7 @@
 
 use dioxus::prelude::*;
 use dioxus_icons::lucide::LoaderCircle;
-use ui::Modal;
+use ui::{EN, I18nContext, Modal};
 
 #[component]
 pub fn ConfirmDialog(
@@ -38,16 +38,30 @@ pub fn ConfirmDialog(
     /// 确认按钮是否处于加载中状态，默认 false
     #[props(default = false)]
     loading: bool,
-    /// 确认按钮文案，默认"确认"
-    #[props(default = "确认".to_string())]
+    /// 确认按钮文案，默认从 i18n 获取
+    #[props(default = "".to_string())]
     confirm_label: String,
-    /// 取消按钮文案，默认"取消"
-    #[props(default = "取消".to_string())]
+    /// 取消按钮文案，默认从 i18n 获取
+    #[props(default = "".to_string())]
     cancel_label: String,
     /// 是否禁用点击遮罩层关闭弹窗，默认 true（避免误触）
     #[props(default = true)]
     disable_backdrop: bool,
 ) -> Element {
+    let i18n = try_use_context::<I18nContext>();
+    let t = i18n.as_ref().map(|c| c.t()).unwrap_or(&EN);
+
+    let confirm_text = if confirm_label.is_empty() {
+        t.confirm_label
+    } else {
+        confirm_label.as_str()
+    };
+    let cancel_text = if cancel_label.is_empty() {
+        t.cancel_label
+    } else {
+        cancel_label.as_str()
+    };
+
     let confirm_class = if danger {
         "ws-btn ws-btn--danger"
     } else {
@@ -75,7 +89,7 @@ pub fn ConfirmDialog(
                             class: "ws-btn ws-btn--secondary",
                             r#type: "button",
                             onclick: move |e| on_cancel.call(e),
-                            "{cancel_label}"
+                            "{cancel_text}"
                         }
                         button {
                             class: "{confirm_class}",
@@ -89,7 +103,7 @@ pub fn ConfirmDialog(
                             if loading {
                                 LoaderCircle { class: "ws-btn__spinner" }
                             }
-                            "{confirm_label}"
+                            "{confirm_text}"
                         }
                     }
                 }

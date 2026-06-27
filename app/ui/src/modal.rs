@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::X;
 
+use crate::{EN, I18nContext};
+
 /// 通用 Modal 容器 —— 按 DESIGN.md §3.7 规格实现。
 ///
 /// 用法：
@@ -17,6 +19,9 @@ pub fn Modal(
     #[props(default = false)] disable_backdrop: bool,
     children: Element,
 ) -> Element {
+    let i18n = try_use_context::<I18nContext>();
+    let t = i18n.as_ref().map(|c| c.t()).unwrap_or(&EN);
+
     if !open {
         return rsx! {};
     }
@@ -38,7 +43,7 @@ pub fn Modal(
                     button {
                         class: "ws-modal__close",
                         r#type: "button",
-                        aria_label: "关闭",
+                        aria_label: t.modal_close,
                         onclick: move |e| on_close.call(e),
                         X {}
                     }

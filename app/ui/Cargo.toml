@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 dioxus = { workspace = true }
 dioxus-icons = { workspace = true }
+i18n = { workspace = true, features = ["dioxus"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { version = "0.3", features = ["futures"] }

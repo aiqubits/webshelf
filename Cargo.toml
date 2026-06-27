@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver", "crates/distributed-ratelimit", "crates/webshelf-runtime", "crates/webshelf-axum", "crates/webshelf-salvo"]
+members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver", "crates/distributed-ratelimit", "crates/webshelf-runtime", "crates/webshelf-axum", "crates/webshelf-salvo", "crates/i18n"]
 # resolver = "3" is required for Rust edition 2024
 # Minimum Rust version: 1.92+
 resolver = "3"
@@ -13,7 +13,7 @@ authors = [
 ]
 license = "MIT"
 repository = "https://github.com/aiqubits/webshelf"
-homepage = "https://www.openpick.org/webshelf"
+homepage = "https://www.openpick.org/"
 
 [workspace.dependencies]
 # Serialization
@@ -55,6 +55,9 @@ http = "1"
 http-body-util = "0.1"
 tokio = { version = "1", features = ["full"] }
 salvo = { version = "0.93", features = ["server", "server-handle", "affix-state", "cors", "compression", "catch-panic", "size-limiter", "logging"] }
+
+# i18n
+i18n = { path = "crates/i18n" }
 
 # Phase 0: 新增 workspace 依赖
 bytes = "1"

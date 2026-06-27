@@ -6,7 +6,7 @@
 
 use dioxus::prelude::*;
 
-use ui::{Button, ButtonType, InputType, TextInput};
+use ui::{Button, ButtonType, I18nContext, InputType, TextInput};
 
 use crate::Route;
 use crate::api::{ErrorContext, humanize_error};
@@ -15,6 +15,8 @@ use crate::components::{HttpMethod, LogBus, push_log_result};
 
 #[component]
 pub fn ForgotPassword() -> Element {
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
@@ -49,9 +51,9 @@ pub fn ForgotPassword() -> Element {
 
             div { class: "ws-forgot__card",
                 div { class: "ws-forgot__icon" }
-                h1 { class: "ws-forgot__title", "找回密码" }
+                h1 { class: "ws-forgot__title", {t.forgot_pw_title} }
                 p { class: "ws-forgot__subtitle",
-                    "输入注册邮箱，我们会向你发送一封含验证码的邮件"
+                    {t.forgot_pw_subtitle}
                 }
 
                 form {
@@ -63,11 +65,11 @@ pub fn ForgotPassword() -> Element {
                         }
                         let value = email.read().trim().to_string();
                         if value.is_empty() {
-                            error_msg.set(Some("请输入邮箱地址".into()));
+                            error_msg.set(Some(t.forgot_pw_email_empty.to_string()));
                             return;
                         }
                         if !value.contains('@') {
-                            error_msg.set(Some("邮箱格式不正确".into()));
+                            error_msg.set(Some(t.forgot_pw_email_invalid.to_string()));
                             return;
                         }
                         let auth_async = auth.clone();
@@ -97,7 +99,7 @@ pub fn ForgotPassword() -> Element {
                         });
                     },
                     TextInput {
-                        label: "注册邮箱".to_string(),
+                        label: t.forgot_pw_email_label.to_string(),
                         placeholder: Some("name@domain.com".to_string()),
                         value: email,
                         input_type: InputType::Email,
@@ -114,7 +116,7 @@ pub fn ForgotPassword() -> Element {
                         full_width: true,
                         disabled: *submitting.read(),
                         loading: *submitting.read(),
-                        "发送验证码 [POST /forgot-password]"
+                        "{t.forgot_pw_submit} [POST /forgot-password]"
                     }
                 }
 
@@ -126,7 +128,7 @@ pub fn ForgotPassword() -> Element {
                             e.prevent_default();
                             nav.push(Route::LoginLanding {});
                         },
-                        "← 返回登录"
+                        {t.forgot_pw_back_to_login}
                     }
                 }
             }

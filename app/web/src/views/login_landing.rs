@@ -4,7 +4,7 @@
 //! 已登录用户自动跳转到 `/dashboard`。
 
 use dioxus::prelude::*;
-use ui::{AuthForm, AuthMode, AuthPayload};
+use ui::{AuthForm, AuthMode, AuthPayload, I18nContext, LanguageSwitcher, LanguageSwitcherVariant};
 
 use crate::Route;
 use crate::api::{ErrorContext, humanize_error};
@@ -21,6 +21,8 @@ enum SubmitAction {
 
 #[component]
 pub fn LoginLanding() -> Element {
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
@@ -89,7 +91,7 @@ pub fn LoginLanding() -> Element {
             div { class: "ws-landing__left",
                 div { class: "ws-landing__brand",
                     h1 { class: "ws-landing__brand-title", "WebShelf" }
-                    p { class: "ws-landing__brand-subtitle", "Rust 全端全栈管理系统" }
+                    p { class: "ws-landing__brand-subtitle", {t.login_brand_subtitle} }
                 }
                 AuthForm {
                     mode,
@@ -109,20 +111,20 @@ pub fn LoginLanding() -> Element {
                         }
                         // 前端表单校验
                         if payload.email.trim().is_empty() {
-                            error_msg.set(Some("邮箱地址不能为空".into()));
+                            error_msg.set(Some(t.login_email_empty.to_string()));
                             return;
                         }
                         if payload.password.is_empty() {
-                            error_msg.set(Some("密码不能为空".into()));
+                            error_msg.set(Some(t.login_password_empty.to_string()));
                             return;
                         }
                         if payload.mode == AuthMode::Register {
                             if payload.name.trim().is_empty() {
-                                error_msg.set(Some("用户名不能为空".into()));
+                                error_msg.set(Some(t.login_name_empty.to_string()));
                                 return;
                             }
                             if payload.password != payload.password_confirm {
-                                error_msg.set(Some("两次输入的密码不一致".into()));
+                                error_msg.set(Some(t.login_password_mismatch.to_string()));
                                 return;
                             }
                         }
@@ -206,8 +208,8 @@ pub fn LoginLanding() -> Element {
                                 src: QRCODE_IMG,
                                 alt: "openpick qrcode",
                             }
-                            p { class: "ws-landing__qr-label", "关注公众号" }
-                            p { class: "ws-landing__qr-hint", "获取验证码与最新技术动态" }
+                            p { class: "ws-landing__qr-label", {t.login_qr_label} }
+                            p { class: "ws-landing__qr-hint", {t.login_qr_hint} }
                         }
                     }
 
@@ -228,19 +230,22 @@ pub fn LoginLanding() -> Element {
                                 fill: "currentColor",
                                 path { d: "M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z" }
                             }
-                            span { "GitHub 仓库" }
+                            span { {t.login_github_label} }
                         }
                     }
 
                     // 版权声明
                     div { class: "ws-landing__copyright",
                         p { class: "ws-landing__copyright-text",
-                            "© 2024 WebShelf. All rights reserved."
+                            "© 2026 WebShelf. All rights reserved."
                         }
-                        p { class: "ws-landing__copyright-sub", "Fullend Admin System" }
+                        p { class: "ws-landing__copyright-sub", {t.login_copyright_sub} }
                     }
                 }
             }
         }
+
+        // 语言切换浮动按钮
+        LanguageSwitcher { variant: LanguageSwitcherVariant::Floating }
     }
 }

@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 use dioxus_icons::lucide::{ChevronDown, LogOut, Menu, Search, Settings};
 
+use crate::{I18nContext, LanguageSwitcher, LanguageSwitcherVariant};
+
 /// TopHeader —— 80px sticky 顶栏。
 ///
 /// 按 DESIGN.md §3.3 规格。
@@ -18,6 +20,8 @@ pub fn TopHeader(
     #[props(default)]
     on_logout: Option<EventHandler<MouseEvent>>,
 ) -> Element {
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
     let mut dropdown_open = use_signal(|| false);
 
     rsx! {
@@ -35,18 +39,21 @@ pub fn TopHeader(
                     input {
                         class: "ws-top-header__search-input",
                         r#type: "text",
-                        placeholder: "搜索资源与 API 端点...",
+                        placeholder: t.top_header_search_placeholder,
                         value: search_value,
                         oninput: move |e| *search_value.write() = e.value(),
                     }
                 }
             }
 
-            // 右侧：状态 + 用户下拉菜单
+            // 右侧：语言切换 + 状态 + 用户下拉菜单
             div { class: "ws-top-header__right",
+                // 语言切换单按钮
+                LanguageSwitcher { variant: LanguageSwitcherVariant::Header }
+
                 span { class: "ws-top-header__status",
                     span { class: "ws-top-header__status-dot" }
-                    span { class: "ws-top-header__status-text", "Node Online" }
+                    span { class: "ws-top-header__status-text", {t.top_header_node_online} }
                 }
 
                 // 用户下拉菜单容器
@@ -54,7 +61,7 @@ pub fn TopHeader(
                     // 触发区：头像 + 身份
                     div {
                         class: "ws-top-header__user ws-top-header__user--clickable",
-                        title: "点击展开菜单",
+                        title: t.top_header_click_to_expand,
                         onclick: move |_| dropdown_open.toggle(),
                         div { class: "ws-top-header__avatar", "WS" }
                         div { class: "ws-top-header__identity",
@@ -83,7 +90,7 @@ pub fn TopHeader(
                                     }
                                 },
                                 Settings { class: "ws-top-header__dropdown-icon" }
-                                span { "个人设置" }
+                                span { {t.top_header_settings_label} }
                             }
                             // 分隔线
                             div { class: "ws-top-header__dropdown-divider" }
@@ -98,7 +105,7 @@ pub fn TopHeader(
                                     }
                                 },
                                 LogOut { class: "ws-top-header__dropdown-icon" }
-                                span { "登出" }
+                                span { {t.top_header_logout_label} }
                             }
                         }
                     }

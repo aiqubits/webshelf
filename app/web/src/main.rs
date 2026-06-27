@@ -2,6 +2,8 @@ use dioxus::prelude::*;
 
 use auth::AuthState;
 use components::{AppShellLayout, LogBus, RequireAuth};
+use i18n::Language;
+use ui::I18nContext;
 use views::{
     Auth, Dashboard, ForgotPassword, LoginLanding, NotFound, ResetPassword, Settings, Users,
     VerifyEmail,
@@ -54,8 +56,49 @@ fn main() {
     dioxus::launch(App);
 }
 
+fn init_language() -> Language {
+    #[cfg(target_arch = "wasm32")]
+    {
+        if let Some(window) = web_sys::window() {
+            // 1) 优先读取 localStorage 中的用户选择
+            if let Some(val) = window
+                .local_storage()
+                .ok()
+                .and_then(|s| s?.get_item("webshelf_lang_v1").ok().flatten())
+            {
+                match val.as_str() {
+                    "zh" => return Language::Zh,
+                    "en" => return Language::En,
+                    _ => {}
+                }
+            }
+            // 2) 未存储过 → 探测浏览器语言
+            if let Some(lang) = window.navigator().language() {
+                // TODO: distinguish zh-Hant from zh-Hans when adding Traditional Chinese
+                if !lang.is_empty() && lang.starts_with("zh") {
+                    return Language::Zh;
+                }
+            }
+            // Safari 隐私模式回退：navigator.languages
+            let languages = window.navigator().languages();
+            if languages.length() > 0 {
+                let first = languages.get(0);
+                if let Some(lang_str) = first.as_string() {
+                    if lang_str.starts_with("zh") {
+                        return Language::Zh;
+                    }
+                }
+            }
+        }
+    }
+    // wasm32（无存储 + 非中文浏览器）和非 wasm32（desktop/mobile）统一返回 En
+    Language::En
+}
+
 #[component]
 fn App() -> Element {
+    let lang = init_language();
+    use_context_provider(|| I18nContext::new(lang));
     use_context_provider(AuthState::new);
     let log_bus = use_context_provider(LogBus::new);
     let auth = use_context::<AuthState>();

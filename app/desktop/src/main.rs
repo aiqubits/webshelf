@@ -1,6 +1,7 @@
 use dioxus::prelude::*;
 
-use ui::Navbar;
+use i18n::Language;
+use ui::{I18nContext, Navbar};
 use views::{Blog, Home};
 
 mod views;
@@ -21,8 +22,16 @@ fn main() {
     dioxus::launch(App);
 }
 
+fn init_language() -> Language {
+    // desktop: no persistence, default to En
+    Language::En
+}
+
 #[component]
 fn App() -> Element {
+    let lang = init_language();
+    use_context_provider(|| I18nContext::new(lang));
+
     rsx! {
         ui::GlobalStyles {}
         document::Link { rel: "stylesheet", href: MAIN_CSS }

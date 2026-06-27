@@ -13,7 +13,8 @@ use dioxus::prelude::*;
 use dioxus_icons::lucide::{LoaderCircle, Pencil, Plus, ShieldHalf, Trash2, TriangleAlert};
 
 use ui::{
-    Align, Badge, BadgeVariant, Button, ButtonType, Column, DataTable, InputType, Modal, TextInput,
+    Align, Badge, BadgeVariant, Button, ButtonType, Column, DataTable, I18nContext, InputType,
+    Modal, TextInput, Translations, tf,
 };
 
 use crate::api::{ErrorContext, humanize_error};
@@ -70,6 +71,8 @@ pub fn Users() -> Element {
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
 
     let list = use_signal(|| ListState::Loading);
     let list_version = use_signal(|| 0u64);
@@ -201,19 +204,19 @@ pub fn Users() -> Element {
         div { class: "ws-users",
             header { class: "ws-users__header",
                 div { class: "ws-users__title-block",
-                    h1 { class: "ws-users__title", "用户管理" }
+                    h1 { class: "ws-users__title", "{t.users_title}" }
                     p { class: "ws-users__subtitle",
-                        "管理员可创建、编辑与移除系统用户实例"
+                        "{t.users_subtitle}"
                     }
                 }
                 div { class: "ws-users__header-actions",
                     span { class: "ws-users__guard-pill",
                         ShieldHalf {}
-                        "require_admin 保护"
+                        "{t.users_guard_pill}"
                     }
                     Button { onclick: open_create,
                         Plus {}
-                        "创建新用户 (POST)"
+                        "{t.users_create_btn}"
                     }
                 }
             }
@@ -221,6 +224,7 @@ pub fn Users() -> Element {
             {
                 {
                     render_table(
+                        t,
                         list_snapshot,
                         search_text,
                         signals,
@@ -240,6 +244,7 @@ pub fn Users() -> Element {
 
             {
                 render_modal(
+                    t,
                     kind_snapshot,
                     form_error_snapshot,
                     submitting_snapshot,
@@ -257,7 +262,9 @@ pub fn Users() -> Element {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn render_table(
+    t: &'static Translations,
     list_snapshot: ListState,
     search_text: String,
     mut signals: UsersSignals,
@@ -270,7 +277,7 @@ fn render_table(
         ListState::Loading => rsx! {
             div { class: "ws-users__status",
                 LoaderCircle { class: "ws-btn__spinner" }
-                "正在加载用户列表…"
+                "{t.users_loading}"
             }
         },
         ListState::Error(msg) => rsx! {
@@ -292,11 +299,12 @@ fn render_table(
                     })
                     .collect()
             };
-            let columns = build_columns();
+            let columns = build_columns(t);
             let rows: Vec<Element> = filtered
                 .into_iter()
                 .map(|u| {
                     row_element(
+                        t,
                         u,
                         signals,
                         actor_is_system,
@@ -325,9 +333,16 @@ fn render_table(
                 next_sig.set((page + 1).min(total_pages));
             };
             let pagination_info = if total_pages == 0 {
-                format!("共 {total} 个用户")
+                tf(t.users_count_simple, &[("total", &total.to_string())])
             } else {
-                format!("共 {total} 个用户，第 {page} / {total_pages} 页")
+                tf(
+                    t.users_count_info,
+                    &[
+                        ("total", &total.to_string()),
+                        ("page", &page.to_string()),
+                        ("total_pages", &total_pages.to_string()),
+                    ],
+                )
             };
 
             rsx! {
@@ -335,7 +350,7 @@ fn render_table(
                     DataTable {
                         columns,
                         rows,
-                        empty: Some(rsx! { "暂无用户" }),
+                        empty: Some(rsx! { "{t.users_empty}" }),
                     }
                     div { class: "ws-pagination",
                         div { class: "ws-pagination__info", "{pagination_info}" }
@@ -344,16 +359,16 @@ fn render_table(
                                 class: "ws-pagination__btn",
                                 disabled: !has_prev,
                                 onclick: on_prev,
-                                "上一页"
+                                "{t.users_prev_page}"
                             }
                             button {
                                 class: "ws-pagination__btn",
                                 disabled: !has_next,
                                 onclick: on_next,
-                                "下一页"
+                                "{t.users_next_page}"
                             }
                             div { class: "ws-pagination__per-page",
-                                span { "每页" }
+                                span { "{t.users_per_page_label}" }
                                 select {
                                     class: "ws-pagination__select",
                                     value: "{per_page}",
@@ -368,7 +383,7 @@ fn render_table(
                                     option { value: "50", "50" }
                                     option { value: "100", "100" }
                                 }
-                                span { "条" }
+                                span { "{t.users_per_page_unit}" }
                             }
                         }
                     }
@@ -379,6 +394,7 @@ fn render_table(
 }
 
 fn row_element(
+    t: &'static Translations,
     u: UserResponse,
     signals: UsersSignals,
     actor_is_system: bool,
@@ -433,11 +449,11 @@ fn row_element(
             td { "{email}" }
             td {
                 if role == "admin" {
-                    Badge { variant: BadgeVariant::Admin, "管理员" }
+                    Badge { variant: BadgeVariant::Admin, "{t.users_badge_admin}" }
                 } else if role == "system" {
-                    Badge { variant: BadgeVariant::Admin, "系统管理员" }
+                    Badge { variant: BadgeVariant::Admin, "{t.users_badge_system}" }
                 } else {
-                    Badge { variant: BadgeVariant::User, "普通用户" }
+                    Badge { variant: BadgeVariant::User, "{t.users_badge_user}" }
                 }
             }
             td { class: "ws-table__mono ws-table__align--right", "{format_balance(balance)}" }
@@ -447,14 +463,14 @@ fn row_element(
                     div { class: "ws-table__row-actions",
                         span { class: "ws-table__protected",
                             ShieldHalf {}
-                            " 受保护"
+                            "{t.users_protected_label}"
                         }
                     }
                 } else if !can_edit && !can_delete {
                     div { class: "ws-table__row-actions",
                         span { class: "ws-table__protected",
                             ShieldHalf {}
-                            " 权限不足"
+                            "{t.users_no_permission}"
                         }
                     }
                 } else {
@@ -462,7 +478,7 @@ fn row_element(
                         if can_edit {
                             button {
                                 class: "ws-table__action",
-                                title: "编辑",
+                                title: "{t.users_edit_title}",
                                 onclick: edit_handler,
                                 Pencil {}
                             }
@@ -470,7 +486,7 @@ fn row_element(
                         if can_delete {
                             button {
                                 class: "ws-table__action ws-table__action--danger",
-                                title: "删除",
+                                title: "{t.users_delete_title}",
                                 onclick: delete_handler,
                                 Trash2 {}
                             }
@@ -505,7 +521,8 @@ fn make_adjust_handler(
     auth: AuthState,
     nav: Navigator,
     multiplier: i64,
-) -> impl FnMut(MouseEvent) {
+    t: &'static Translations,
+) -> impl FnMut(MouseEvent) + 'static {
     move |_: MouseEvent| {
         if *signals.submitting.read() {
             return;
@@ -516,7 +533,9 @@ fn make_adjust_handler(
         let target_id = u.id.clone();
         let text = signals.form_balance.cloned();
         if text.trim().is_empty() {
-            signals.form_error.set(Some("请输入调整金额".into()));
+            signals
+                .form_error
+                .set(Some(t.users_adjust_empty.to_string()));
             return;
         }
         let display: f64 = match text.parse() {
@@ -524,26 +543,28 @@ fn make_adjust_handler(
             Err(_) => {
                 signals
                     .form_error
-                    .set(Some("金额格式无效，请输入数字 (如 0.50)".into()));
+                    .set(Some(t.users_adjust_invalid.to_string()));
                 return;
             }
         };
         if display <= 0.0 {
-            signals.form_error.set(Some("金额必须大于 0".into()));
+            signals
+                .form_error
+                .set(Some(t.users_adjust_positive.to_string()));
             return;
         }
         // Reject non-finite values (NaN, infinity) that can bypass the >0 check
         if !display.is_finite() {
             signals
                 .form_error
-                .set(Some("金额格式无效，请输入数字 (如 0.50)".into()));
+                .set(Some(t.users_adjust_invalid.to_string()));
             return;
         }
         // Protect against i64 overflow: display * BALANCE_SCALE must fit in i64
         if display > 1_000_000.0 {
             signals
                 .form_error
-                .set(Some("金额超出允许范围，最大 1,000,000".into()));
+                .set(Some(t.users_adjust_overflow.to_string()));
             return;
         }
         let stored = (display * BALANCE_SCALE as f64).round() as i64 * multiplier;
@@ -590,6 +611,7 @@ fn make_adjust_handler(
 
 #[allow(clippy::too_many_arguments)]
 fn render_modal(
+    t: &'static Translations,
     kind: ModalKind,
     form_error: Option<String>,
     submitting: bool,
@@ -608,6 +630,7 @@ fn render_modal(
 
     if kind == ModalKind::DeleteConfirm {
         return render_delete_confirm(
+            t,
             kind,
             deleting,
             submitting,
@@ -621,6 +644,7 @@ fn render_modal(
     }
 
     render_form_modal(
+        t,
         kind,
         form_error,
         submitting,
@@ -636,6 +660,7 @@ fn render_modal(
 
 #[allow(clippy::too_many_arguments)]
 fn render_delete_confirm(
+    t: &'static Translations,
     kind: ModalKind,
     deleting: Option<UserResponse>,
     submitting: bool,
@@ -649,8 +674,14 @@ fn render_delete_confirm(
     let open = kind == ModalKind::DeleteConfirm;
     let message = deleting
         .as_ref()
-        .map(|u| format!("确定要删除用户 {} ({}) 吗？此操作不可撤销。", u.name, u.id))
-        .unwrap_or_else(|| "未选择目标用户".to_string());
+        .map(|u| {
+            tf(
+                t.users_confirm_delete_msg,
+                &[("name", &u.name), ("id", &u.id)],
+            )
+        })
+        .unwrap_or_else(|| t.users_no_target.to_string());
+    let confirm_delete_title = t.users_confirm_delete_title.to_string();
 
     let on_cancel = move |_: MouseEvent| close_all(signals);
     let mut s_async = signals;
@@ -717,7 +748,7 @@ fn render_delete_confirm(
     rsx! {
         ConfirmDialog {
             open,
-            title: "确认删除".to_string(),
+            title: confirm_delete_title,
             message,
             danger: true,
             loading: submitting,
@@ -730,6 +761,7 @@ fn render_delete_confirm(
 
 #[allow(clippy::too_many_arguments)]
 fn render_form_modal(
+    t: &'static Translations,
     kind: ModalKind,
     form_error: Option<String>,
     submitting: bool,
@@ -741,22 +773,44 @@ fn render_form_modal(
     nav: Navigator,
     current_role: String,
 ) -> Element {
-    let title = if kind == ModalKind::Create {
-        "创建新用户"
+    let title_str = if kind == ModalKind::Create {
+        t.users_modal_create_title
     } else {
-        "编辑用户节点"
+        t.users_modal_edit_title
     };
     let password_required = kind == ModalKind::Create;
     let submit_label = if kind == ModalKind::Create {
-        "创建实体 (POST)"
+        t.users_modal_create_submit
     } else {
-        "保存实体 (PUT)"
+        t.users_modal_edit_submit
     };
-    let password_placeholder = if kind == ModalKind::Create {
-        "≥8 字符，含大小写 / 数字 / 标点"
+    let password_placeholder_str = if kind == ModalKind::Create {
+        t.users_form_password_placeholder_create
     } else {
-        "留空表示不修改"
+        t.users_form_password_placeholder_edit
     };
+
+    // Extract all t.* values to owned strings before closures to avoid lifetime issues
+    let sys_editable = t.users_system_editable.to_string();
+    let name_empty = t.users_name_empty.to_string();
+    let email_empty = t.users_email_empty.to_string();
+    let password_empty = t.users_password_empty.to_string();
+    let form_name_label = t.users_form_name_label.to_string();
+    let form_name_placeholder = t.users_form_name_placeholder.to_string();
+    let form_email_label = t.users_form_email_label.to_string();
+    let form_email_placeholder = t.users_form_email_placeholder.to_string();
+    let form_password_label = t.users_form_password_label.to_string();
+    let form_password_hint = t.users_form_password_hint.to_string();
+    let role_label = t.users_form_role_label.to_string();
+    let role_admin = t.users_form_role_admin.to_string();
+    let role_user = t.users_form_role_user.to_string();
+    let initial_role_label = t.users_form_initial_role_label.to_string();
+    let balance_section_label = t.users_balance_section_label.to_string();
+    let balance_current_label = t.users_balance_current_label.to_string();
+    let balance_input_label = t.users_balance_input_label.to_string();
+    let balance_input_placeholder = t.users_balance_input_placeholder.to_string();
+    let balance_increase = t.users_balance_increase_btn.to_string();
+    let balance_decrease = t.users_balance_decrease_btn.to_string();
 
     let on_close = move |_: MouseEvent| close_all(signals);
     let mut signals_for_role = signals;
@@ -790,24 +844,22 @@ fn render_form_modal(
         {
             signals_for_submit
                 .form_error
-                .set(Some("系统管理员不可编辑".into()));
+                .set(Some(sys_editable.clone()));
             return;
         }
         // 同步校验：避免空字段浪费网络请求（Create 与 Edit 模式均需校验 name/email）
         if name.trim().is_empty() {
-            signals_for_submit.form_error.set(Some("用户名为空".into()));
+            signals_for_submit.form_error.set(Some(name_empty.clone()));
             return;
         }
         if email.trim().is_empty() {
-            signals_for_submit
-                .form_error
-                .set(Some("邮箱不能为空".into()));
+            signals_for_submit.form_error.set(Some(email_empty.clone()));
             return;
         }
         if kind_now == ModalKind::Create && password.is_empty() {
             signals_for_submit
                 .form_error
-                .set(Some("密码不能为空".into()));
+                .set(Some(password_empty.clone()));
             return;
         }
         let client_async = client_for_submit.clone();
@@ -911,12 +963,14 @@ fn render_form_modal(
         })
         .unwrap_or(false);
 
-    let on_increase = make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, 1);
-    let on_decrease = make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, -1);
+    let on_increase =
+        make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, 1, t);
+    let on_decrease =
+        make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, -1, t);
 
     rsx! {
         Modal {
-            title: title.to_string(),
+            title: title_str.to_string(),
             on_close,
             open: true,
             disable_backdrop: submitting,
@@ -925,16 +979,16 @@ fn render_form_modal(
                     p { class: "ws-form-error", "{err}" }
                 }
                 TextInput {
-                    label: "账户名".to_string(),
-                    placeholder: Some("e.g., rust_master".to_string()),
+                    label: form_name_label.clone(),
+                    placeholder: Some(form_name_placeholder.clone()),
                     value: signals.form_name,
                     required: true,
                     disabled: submitting,
                     name: Some("name".to_string()),
                 }
                 TextInput {
-                    label: "邮箱地址".to_string(),
-                    placeholder: Some("master@rust.org".to_string()),
+                    label: form_email_label.clone(),
+                    placeholder: Some(form_email_placeholder.clone()),
                     value: signals.form_email,
                     input_type: InputType::Email,
                     required: true,
@@ -943,34 +997,33 @@ fn render_form_modal(
                 }
                 if kind == ModalKind::Create {
                     TextInput {
-                        label: "安全密码".to_string(),
-                        placeholder: Some(password_placeholder.to_string()),
+                        label: form_password_label.clone(),
+                        placeholder: Some(password_placeholder_str.to_string()),
                         value: signals.form_password,
                         input_type: InputType::Password,
                         required: password_required,
                         disabled: submitting,
                         name: Some("password".to_string()),
                         hint: Some(
-                            "密码需 ≥8 字符，包含大小写字母、数字和 ASCII 标点"
-                                .to_string(),
+                            form_password_hint.clone(),
                         ),
                     }
                 }
                 if kind == ModalKind::Edit && current_role == "system" {
                     div { class: "ws-form-field",
-                        label { class: "ws-form-label", "系统授权标签" }
+                        label { class: "ws-form-label", "{role_label}" }
                         div { class: "ws-form-pill-group",
                             button {
                                 r#type: "button",
                                 class: if role_now == "admin" { "ws-form-pill ws-form-pill--active" } else { "ws-form-pill" },
                                 onclick: pick_admin,
-                                "管理员"
+                                "{role_admin}"
                             }
                             button {
                                 r#type: "button",
                                 class: if role_now == "user" { "ws-form-pill ws-form-pill--active" } else { "ws-form-pill" },
                                 onclick: pick_user,
-                                "普通用户"
+                                "{role_user}"
                             }
                         }
                     }
@@ -978,19 +1031,19 @@ fn render_form_modal(
                 // 创建模式：仅 system 角色可设置初始角色
                 if kind == ModalKind::Create && current_role == "system" {
                     div { class: "ws-form-field",
-                        label { class: "ws-form-label", "初始授权标签" }
+                        label { class: "ws-form-label", "{initial_role_label}" }
                         div { class: "ws-form-pill-group",
                             button {
                                 r#type: "button",
                                 class: if role_now == "admin" { "ws-form-pill ws-form-pill--active" } else { "ws-form-pill" },
                                 onclick: pick_admin,
-                                "管理员"
+                                "{role_admin}"
                             }
                             button {
                                 r#type: "button",
                                 class: if role_now == "user" { "ws-form-pill ws-form-pill--active" } else { "ws-form-pill" },
                                 onclick: pick_user,
-                                "普通用户"
+                                "{role_user}"
                             }
                         }
                     }
@@ -1008,14 +1061,14 @@ fn render_form_modal(
                     if let Some(u) = editing.as_ref() {
                         div { class: "ws-form-field",
                             hr {}
-                            div { class: "ws-form-label", "余额调整" }
+                            div { class: "ws-form-label", "{balance_section_label}" }
                             p { class: "ws-form-description",
-                                "当前余额: "
+                                "{balance_current_label}"
                                 strong { "{format_balance(u.balance)}" }
                             }
                             TextInput {
-                                label: "调整金额".to_string(),
-                                placeholder: Some("例如 0.50".to_string()),
+                                label: balance_input_label.clone(),
+                                placeholder: Some(balance_input_placeholder.clone()),
                                 value: signals.form_balance,
                                 input_type: InputType::Text,
                                 required: false,
@@ -1027,14 +1080,14 @@ fn render_form_modal(
                                     r#type: "button",
                                     disabled: submitting,
                                     onclick: on_increase,
-                                    "增加余额"
+                                    "{balance_increase}"
                                 }
                                 button {
                                     class: "ws-btn ws-btn--primary ws-btn--pill",
                                     r#type: "button",
                                     disabled: submitting,
                                     onclick: on_decrease,
-                                    "减少余额"
+                                    "{balance_decrease}"
                                 }
                             }
                         }
@@ -1045,14 +1098,20 @@ fn render_form_modal(
     }
 }
 
-fn build_columns() -> Vec<Column> {
+fn build_columns(t: &'static Translations) -> Vec<Column> {
     vec![
-        Column::new("用户名").align(Align::Left),
-        Column::new("邮箱").align(Align::Left),
-        Column::new("角色").align(Align::Left),
-        Column::new("余额").width("w-24").align(Align::Right),
-        Column::new("注册时间").width("w-40").align(Align::Left),
-        Column::new("操作").width("w-44").align(Align::Center),
+        Column::new(t.users_column_name).align(Align::Left),
+        Column::new(t.users_column_email).align(Align::Left),
+        Column::new(t.users_column_role).align(Align::Left),
+        Column::new(t.users_column_balance)
+            .width("w-24")
+            .align(Align::Right),
+        Column::new(t.users_column_created)
+            .width("w-40")
+            .align(Align::Left),
+        Column::new(t.users_column_actions)
+            .width("w-44")
+            .align(Align::Center),
     ]
 }
 

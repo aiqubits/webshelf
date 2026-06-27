@@ -12,9 +12,11 @@ chrono = { workspace = true }
 base64 = "0.22"
 serde = { workspace = true }
 serde_json = { workspace = true }
+# i18n crate — 仅使用 Language 枚举（无需 dioxus feature；I18nContext 通过 ui 的 re-export 间接获取）
+i18n = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-web-sys = { version = "0.3", features = ["Window", "Storage", "Document", "HtmlDocument", "console"] }
+web-sys = { version = "0.3", features = ["Window", "Navigator", "Storage", "Document", "HtmlDocument", "console"] }
 js-sys = "0.3"
 gloo-timers = { version = "0.3", features = ["futures"] }
 

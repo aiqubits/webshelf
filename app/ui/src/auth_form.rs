@@ -2,6 +2,7 @@ use dioxus::prelude::*;
 
 use crate::button::{Button, ButtonType};
 use crate::text_input::{InputType, TextInput};
+use crate::{EN, I18nContext};
 
 /// AuthForm —— 登录 / 注册 双模表单。
 ///
@@ -41,6 +42,9 @@ pub fn AuthForm(
     on_forgot: Option<EventHandler<MouseEvent>>,
     on_submit: EventHandler<AuthPayload>,
 ) -> Element {
+    let i18n = try_use_context::<I18nContext>();
+    let t = i18n.as_ref().map(|c| c.t()).unwrap_or(&EN);
+
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/styling/auth_form.css") }
         div { class: "ws-auth",
@@ -52,13 +56,13 @@ pub fn AuthForm(
                     r#type: "button",
                     class: if *mode.read() == AuthMode::Login { "ws-auth__tab ws-auth__tab--active" } else { "ws-auth__tab" },
                     onclick: move |_| mode.set(AuthMode::Login),
-                    "登录入口 (/login)"
+                    "{t.auth_login_tab} (/login)"
                 }
                 button {
                     r#type: "button",
                     class: if *mode.read() == AuthMode::Register { "ws-auth__tab ws-auth__tab--active" } else { "ws-auth__tab" },
                     onclick: move |_| mode.set(AuthMode::Register),
-                    "注册端口 (/register)"
+                    "{t.auth_register_tab} (/register)"
                 }
             }
 
@@ -79,8 +83,8 @@ pub fn AuthForm(
                 },
                 if *mode.read() == AuthMode::Register {
                     TextInput {
-                        label: "拟定用户昵称".to_string(),
-                        placeholder: Some("e.g., rust_master".to_string()),
+                        label: t.auth_name_label.to_string(),
+                        placeholder: Some(t.auth_name_placeholder.to_string()),
                         value: name,
                         required: true,
                         disabled: loading,
@@ -90,12 +94,12 @@ pub fn AuthForm(
                 }
 
                 TextInput {
-                    label: if *mode.read() == AuthMode::Login { "注册绑定的邮箱".to_string() } else { "电子邮箱载体".to_string() },
+                    label: if *mode.read() == AuthMode::Login { t.auth_email_label_login.to_string() } else { t.auth_email_label_register.to_string() },
                     placeholder: Some(
                         if *mode.read() == AuthMode::Login {
-                            "name@domain.com".to_string()
+                            t.auth_email_placeholder_login.to_string()
                         } else {
-                            "master@rust.org".to_string()
+                            t.auth_email_placeholder_register.to_string()
                         },
                     ),
                     value: email,
@@ -107,8 +111,8 @@ pub fn AuthForm(
                 }
 
                 TextInput {
-                    label: if *mode.read() == AuthMode::Login { "鉴权安全口令".to_string() } else { "强安全密码".to_string() },
-                    placeholder: Some("••••••••".to_string()),
+                    label: if *mode.read() == AuthMode::Login { t.auth_password_label_login.to_string() } else { t.auth_password_label_register.to_string() },
+                    placeholder: Some(t.auth_password_placeholder.to_string()),
                     value: password,
                     input_type: InputType::Password,
                     required: true,
@@ -122,15 +126,14 @@ pub fn AuthForm(
                         },
                     ),
                     hint: if *mode.read() == AuthMode::Register { Some(
-                        "密码需 ≥8 字符，包含大小写字母、数字和 ASCII 标点"
-                            .to_string(),
+                        t.auth_password_hint.to_string(),
                     ) } else { None },
                 }
 
                 if *mode.read() == AuthMode::Register {
                     TextInput {
-                        label: "确认密码".to_string(),
-                        placeholder: Some("••••••••".to_string()),
+                        label: t.auth_password_confirm_label.to_string(),
+                        placeholder: Some(t.auth_password_placeholder.to_string()),
                         value: password_confirm,
                         input_type: InputType::Password,
                         required: true,
@@ -157,7 +160,7 @@ pub fn AuthForm(
                                     }
                                 },
                             }
-                            "维持持久化登录"
+                            {t.auth_remember_label}
                         }
                         // 「忘记凭证?」链接 —— 旧版硬编码 `href="#"` 是死链；
                         // 现由调用方注入 on_forgot 实现真正的导航，未传则降级为不可点击。
@@ -170,7 +173,7 @@ pub fn AuthForm(
                                     h.call(e);
                                 }
                             },
-                            "忘记凭证?"
+                            {t.auth_forgot_label}
                         }
                     }
                 }
@@ -181,9 +184,9 @@ pub fn AuthForm(
                     disabled: loading,
                     loading,
                     if *mode.read() == AuthMode::Login {
-                        "提交请求验证 [POST /login]"
+                        "{t.auth_submit_login} [POST /login]"
                     } else {
-                        "初始化账户实例 [POST /register]"
+                        "{t.auth_submit_register} [POST /register]"
                     }
                 }
             }

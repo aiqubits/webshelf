@@ -57,3 +57,9 @@ pub use code_console::{CodeConsole, ConsoleKind, ConsoleLine};
 
 mod global_styles;
 pub use global_styles::GlobalStyles;
+
+// i18n
+pub use i18n::{EN, I18nContext, Language, Translations, ZH, tf};
+
+mod language_switcher;
+pub use language_switcher::{LanguageSwitcher, LanguageSwitcherVariant};

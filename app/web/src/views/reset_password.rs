@@ -8,7 +8,7 @@
 
 use dioxus::prelude::*;
 
-use ui::{Button, ButtonType, InputType, TextInput};
+use ui::{Button, ButtonType, I18nContext, InputType, TextInput};
 
 use crate::Route;
 use crate::api::{ErrorContext, humanize_error};
@@ -17,6 +17,8 @@ use crate::components::{HttpMethod, LogBus, push_log_result};
 
 #[component]
 pub fn ResetPassword(email: Option<String>) -> Element {
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
@@ -55,9 +57,9 @@ pub fn ResetPassword(email: Option<String>) -> Element {
 
             div { class: "ws-reset__card",
                 div { class: "ws-reset__icon" }
-                h1 { class: "ws-reset__title", "重置密码" }
+                h1 { class: "ws-reset__title", {t.reset_pw_title} }
                 p { class: "ws-reset__subtitle",
-                    "输入注册邮箱和邮件中的 6 位验证码，设置新密码"
+                    {t.reset_pw_subtitle}
                 }
 
                 form {
@@ -74,23 +76,23 @@ pub fn ResetPassword(email: Option<String>) -> Element {
 
                         // 前置同步校验 —— 避免空字段浪费网络请求。
                         if email_value.is_empty() {
-                            error_msg.set(Some("请输入注册邮箱".into()));
+                            error_msg.set(Some(t.reset_pw_email_empty.to_string()));
                             return;
                         }
                         if !email_value.contains('@') {
-                            error_msg.set(Some("邮箱格式不正确".into()));
+                            error_msg.set(Some(t.reset_pw_email_invalid.to_string()));
                             return;
                         }
                         if code_value.len() != 6 || !code_value.chars().all(|c| c.is_ascii_digit()) {
-                            error_msg.set(Some("验证码格式错误（应为 6 位数字）".into()));
+                            error_msg.set(Some(t.reset_pw_code_invalid.to_string()));
                             return;
                         }
                         if new_pw.len() < 8 {
-                            error_msg.set(Some("新密码至少需要 8 个字符".into()));
+                            error_msg.set(Some(t.reset_pw_password_short.to_string()));
                             return;
                         }
                         if new_pw != confirm_pw {
-                            error_msg.set(Some("两次输入的密码不一致".into()));
+                            error_msg.set(Some(t.reset_pw_password_mismatch.to_string()));
                             return;
                         }
                         let mut auth_async = auth.clone();
@@ -122,7 +124,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         });
                     },
                     TextInput {
-                        label: "注册邮箱".to_string(),
+                        label: t.reset_pw_email_label.to_string(),
                         placeholder: Some("name@domain.com".to_string()),
                         value: email_signal,
                         input_type: InputType::Email,
@@ -132,7 +134,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         autocomplete: Some("email".to_string()),
                     }
                     TextInput {
-                        label: "验证码 (邮件中的 6 位数字)".to_string(),
+                        label: t.reset_pw_code_label.to_string(),
                         placeholder: Some("000000".to_string()),
                         value: code,
                         input_type: InputType::Number,
@@ -140,11 +142,11 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         disabled: *submitting.read(),
                         name: Some("code".to_string()),
                         autocomplete: Some("one-time-code".to_string()),
-                        hint: Some("从密码重置邮件中获取，10 分钟内有效".to_string()),
+                        hint: Some(t.reset_pw_code_hint.to_string()),
                     }
                     TextInput {
-                        label: "新密码".to_string(),
-                        placeholder: Some("≥8 字符，含大小写字母、数字和 ASCII 标点".to_string()),
+                        label: t.reset_pw_password_label.to_string(),
+                        placeholder: Some(t.reset_pw_password_placeholder.to_string()),
                         value: new_password,
                         input_type: InputType::Password,
                         required: true,
@@ -152,13 +154,12 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         name: Some("new_password".to_string()),
                         autocomplete: Some("new-password".to_string()),
                         hint: Some(
-                            "密码需 ≥8 字符，包含大小写字母、数字和 ASCII 标点"
-                                .to_string(),
+                            t.reset_pw_password_hint.to_string(),
                         ),
                     }
                     TextInput {
-                        label: "确认新密码".to_string(),
-                        placeholder: Some("再次输入新密码".to_string()),
+                        label: t.reset_pw_confirm_label.to_string(),
+                        placeholder: Some(t.reset_pw_confirm_placeholder.to_string()),
                         value: confirm_password,
                         input_type: InputType::Password,
                         required: true,
@@ -174,7 +175,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         full_width: true,
                         disabled: *submitting.read(),
                         loading: *submitting.read(),
-                        "重置密码并登录 [POST /reset-password]"
+                        "{t.reset_pw_submit} [POST /reset-password]"
                     }
                 }
 
@@ -186,7 +187,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                             e.prevent_default();
                             nav.push(Route::LoginLanding {});
                         },
-                        "← 返回登录"
+                        {t.reset_pw_back_to_login}
                     }
                 }
             }

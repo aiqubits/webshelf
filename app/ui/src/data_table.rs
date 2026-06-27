@@ -1,5 +1,7 @@
 use dioxus::prelude::*;
 
+use crate::{EN, I18nContext};
+
 /// 通用数据表 —— 按 DESIGN.md §3.9 规格实现。
 ///
 /// 风格：毛玻璃容器、24px 圆角、表头 `bg-slate-50/70` + 大写 caption 字体、
@@ -60,6 +62,9 @@ pub fn DataTable(
     rows: Vec<Element>,
     #[props(default)] empty: Option<Element>,
 ) -> Element {
+    let i18n = try_use_context::<I18nContext>();
+    let t = i18n.as_ref().map(|c| c.t()).unwrap_or(&EN);
+
     rsx! {
         document::Link { rel: "stylesheet", href: asset!("/assets/styling/data_table.css") }
         div { class: "ws-table",
@@ -90,7 +95,7 @@ pub fn DataTable(
                                 td {
                                     class: "ws-table__empty",
                                     colspan: columns.len(),
-                                    "暂无数据"
+                                    {t.data_table_no_data}
                                 }
                             }
                         }

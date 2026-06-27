@@ -1,6 +1,6 @@
 use dioxus::prelude::*;
 
-use ui::{AppShell, NavKey, Sidebar, TopHeader};
+use ui::{AppShell, I18nContext, NavKey, Sidebar, TopHeader};
 
 /// 搜索信号包装类型，通过 `use_context_provider` 全局注入。
 ///
@@ -18,6 +18,8 @@ use crate::components::{ConfirmDialog, TokenExpiryGuard};
 /// 注入到 `TopHeader`。
 #[component]
 pub fn AppShellLayout() -> Element {
+    let i18n = use_context::<I18nContext>();
+    let t = i18n.t();
     let mut sidebar_open = use_signal(|| false);
     let search_value = use_signal(String::new);
     use_context_provider(|| SearchSignal(search_value));
@@ -42,7 +44,10 @@ pub fn AppShellLayout() -> Element {
     // 从 AuthState 派生展示用身份信息
     let (user_name, user_email) = match auth.user.read().as_ref() {
         Some(u) => (u.name.clone(), u.email.clone()),
-        None => ("Guest".to_string(), "未登录".to_string()),
+        None => (
+            t.app_shell_guest.to_string(),
+            t.app_shell_not_logged_in.to_string(),
+        ),
     };
     // 检查当前用户角色，控制 admin 模块的可见性
     let is_admin = auth
@@ -90,8 +95,8 @@ pub fn AppShellLayout() -> Element {
             // 登出确认弹窗
             ConfirmDialog {
                 open: *show_logout_confirm.read(),
-                title: "确认登出".to_string(),
-                message: "确定要退出当前账号吗？".to_string(),
+                title: t.app_shell_confirm_logout.to_string(),
+                message: t.app_shell_confirm_logout_msg.to_string(),
                 danger: true,
                 on_confirm: move |_| {
                     let mut auth_async = auth.clone();

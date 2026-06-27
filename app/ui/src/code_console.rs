@@ -1,10 +1,15 @@
 use dioxus::prelude::*;
 
+use crate::{EN, I18nContext};
+
 /// CodeConsole —— Dashboard 双栏区域左侧的「服务链路追踪监控」终端。
 ///
 /// 按 DESIGN.md §3.12 规格。读取一组 `ConsoleLine`，自动滚动到底部。
 #[component]
 pub fn CodeConsole(lines: ReadSignal<Vec<ConsoleLine>>) -> Element {
+    let i18n = try_use_context::<I18nContext>();
+    let t = i18n.as_ref().map(|c| c.t()).unwrap_or(&EN);
+
     use_effect(move || {
         let line_count = lines.read().len();
         if line_count == 0 {
@@ -27,8 +32,8 @@ pub fn CodeConsole(lines: ReadSignal<Vec<ConsoleLine>>) -> Element {
         section { class: "ws-console",
             header { class: "ws-console__header",
                 div { class: "ws-console__title-block",
-                    h2 { class: "ws-console__title", "服务链路追踪监控" }
-                    p { class: "ws-console__subtitle", "实时拦截捕获的 WebShelf Axum 后端路由流量" }
+                    h2 { class: "ws-console__title", {t.code_console_title} }
+                    p { class: "ws-console__subtitle", {t.code_console_subtitle} }
                 }
                 span { class: "ws-console__live-tag", "live_stream" }
             }

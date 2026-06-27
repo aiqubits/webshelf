@@ -1,0 +1,117 @@
+/* ============================================================
+   Language Switcher
+   ============================================================ */
+
+/* ── Header ────────────────────────────────────── */
+.ls-header-btn {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background: transparent;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+    border-radius: 6px;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.55));
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 4px 8px;
+    transition: all 0.15s ease;
+    line-height: 1.5;
+    white-space: nowrap;
+}
+
+.ls-header-btn:hover {
+    background: rgba(241, 245, 249, 0.7);
+    border-color: transparent;
+    color: var(--color-text-primary);
+}
+
+.ls-header-icon {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+}
+
+.ls-header-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+}
+
+/* ── Inline ─────────────────────────────────────── */
+.ls-inline {
+    display: flex;
+    gap: 4px;
+    align-items: center;
+}
+
+.ls-btn {
+    background: transparent;
+    border: 1px solid var(--color-border, rgba(255, 255, 255, 0.12));
+    border-radius: 6px;
+    color: var(--color-text-secondary, rgba(255, 255, 255, 0.55));
+    cursor: pointer;
+    font-size: 0.75rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    transition: all 0.15s ease;
+    line-height: 1.5;
+}
+
+.ls-btn:hover {
+    border-color: var(--color-accent, #6366f1);
+    color: var(--color-text, #fff);
+}
+
+.ls-btn--active {
+    background: var(--color-accent, #6366f1);
+    border-color: var(--color-accent, #6366f1);
+    color: #fff;
+}
+
+/* ── Floating ───────────────────────────────────── */
+.ls-floating {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    z-index: 9990;
+}
+
+.ls-floating__btn {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--glass-panel-bg, rgba(255, 255, 255, 0.7));
+    border: 1px solid var(--color-border-glass, rgba(226, 232, 240, 0.8));
+    border-radius: 24px;
+    color: var(--color-text-secondary, #475569);
+    cursor: pointer;
+    padding: 8px 14px;
+    transition: all 0.2s ease;
+    box-shadow: var(--shadow-sm, 0 1px 2px 0 rgba(0, 0, 0, 0.05));
+    backdrop-filter: blur(8px);
+}
+
+.ls-floating__btn:hover {
+    background: rgba(241, 245, 249, 0.7);
+    border-color: transparent;
+    color: var(--color-text-primary, #1e293b);
+}
+
+.ls-floating__icon {
+    width: 16px;
+    height: 16px;
+}
+
+.ls-floating__label {
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* 移动端适配 */
+@media (max-width: 640px) {
+    .ls-floating {
+        bottom: 12px;
+        right: 12px;
+    }
+}
