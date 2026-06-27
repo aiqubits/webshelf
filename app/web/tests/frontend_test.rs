@@ -13,6 +13,7 @@
 use dioxus::prelude::*;
 use dioxus_core::VirtualDom;
 use std::sync::atomic::{AtomicBool, Ordering};
+use ui::{I18nContext, Language};
 
 // ──────────────────────────────────────────────
 //  Dashboard 陈旧任务防护模式测试
@@ -298,5 +299,127 @@ fn system_role_guards_edit_delete_buttons() {
     assert!(
         USER_HAS_ACTIONS.load(Ordering::SeqCst),
         "user 角色应进入 action 按钮分支"
+    );
+}
+
+// ──────────────────────────────────────────────
+//  I18nContext 与 LanguageSwitcher 集成测试
+// ──────────────────────────────────────────────
+
+/// I18nContext 初始化后 lang() 默认返回 Language::En。
+#[test]
+fn i18n_context_defaults_to_en() {
+    static INITIAL_LANG: AtomicBool = AtomicBool::new(false);
+
+    let mut dom = VirtualDom::new(|| {
+        let ctx = I18nContext::new(Language::En);
+        use_context_provider(|| ctx);
+        if use_context::<I18nContext>().lang() == Language::En {
+            INITIAL_LANG.store(true, Ordering::SeqCst);
+        }
+        rsx! {
+            div {}
+        }
+    });
+    dom.rebuild_in_place();
+
+    assert!(
+        INITIAL_LANG.load(Ordering::SeqCst),
+        "I18nContext 默认语言应为 En"
+    );
+}
+
+/// I18nContext::set_lang() 切换语言后 lang() 正确反映新值。
+#[test]
+fn i18n_context_set_lang_switches_to_zh() {
+    static SWITCHED_TO_ZH: AtomicBool = AtomicBool::new(false);
+
+    let mut dom = VirtualDom::new(|| {
+        use_context_provider(|| I18nContext::new(Language::En));
+        let mut ctx = use_context::<I18nContext>();
+        ctx.set_lang(Language::Zh);
+        if ctx.lang() == Language::Zh {
+            SWITCHED_TO_ZH.store(true, Ordering::SeqCst);
+        }
+        rsx! {
+            div {}
+        }
+    });
+    dom.rebuild_in_place();
+
+    assert!(
+        SWITCHED_TO_ZH.load(Ordering::SeqCst),
+        "set_lang(Zh) 后 lang() 应为 Zh"
+    );
+}
+
+/// I18nContext::t() 在 En 和 Zh 下返回对应的 Translations。
+#[test]
+fn i18n_context_t_returns_correct_language_translations() {
+    static EN_CORRECT: AtomicBool = AtomicBool::new(false);
+    static ZH_CORRECT: AtomicBool = AtomicBool::new(false);
+
+    let mut dom = VirtualDom::new(|| {
+        use_context_provider(|| I18nContext::new(Language::En));
+        let mut ctx = use_context::<I18nContext>();
+
+        // 初始 En
+        let t = ctx.t();
+        if t.dashboard_title == "Welcome to WebShelf Rust Full-stack System 🚀" {
+            EN_CORRECT.store(true, Ordering::SeqCst);
+        }
+
+        // 切换到 Zh
+        ctx.set_lang(Language::Zh);
+        let t = ctx.t();
+        if t.dashboard_title == "欢迎来到 WebShelf Rust 全端全栈管理系统 🚀" {
+            ZH_CORRECT.store(true, Ordering::SeqCst);
+        }
+
+        rsx! {
+            div {}
+
+        }
+    });
+    dom.rebuild_in_place();
+
+    assert!(
+        EN_CORRECT.load(Ordering::SeqCst),
+        "En 下应返回英文 Translations"
+    );
+    assert!(
+        ZH_CORRECT.load(Ordering::SeqCst),
+        "Zh 下应返回中文 Translations"
+    );
+}
+
+/// I18nContext 在 En ↔ Zh 之间反复切换均正确。
+#[test]
+fn i18n_context_toggle_en_zh_en() {
+    static FINAL_IS_EN: AtomicBool = AtomicBool::new(false);
+
+    let mut dom = VirtualDom::new(|| {
+        use_context_provider(|| I18nContext::new(Language::Zh));
+        let mut ctx = use_context::<I18nContext>();
+
+        // Zh → En → Zh → En
+        ctx.set_lang(Language::En);
+        ctx.set_lang(Language::Zh);
+        ctx.set_lang(Language::En);
+
+        if ctx.lang() == Language::En {
+            FINAL_IS_EN.store(true, Ordering::SeqCst);
+        }
+
+        rsx! {
+            div {}
+
+        }
+    });
+    dom.rebuild_in_place();
+
+    assert!(
+        FINAL_IS_EN.load(Ordering::SeqCst),
+        "多次切换后最终语言应为 En"
     );
 }

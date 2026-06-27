@@ -4,7 +4,7 @@
 //! - `is_unauth(err)` 判定一个 `ClientError` 是否表示 token 失效。
 //! - `handle_unauth(err, auth, nav, log_bus)` 检测到 401 时执行 logout + 跳转 `/auth`
 //!   并写入 `LogKind::Important` 日志，与 `TokenExpiryGuard::fire_expiry` 行为对齐。
-//! - `humanize_error(err, ctx)` 将 API 错误翻译为中文提示。
+//! - `humanize_error(err, ctx, lang)` 将 API 错误翻译为当前语言提示。
 
 mod client;
 
@@ -12,6 +12,7 @@ pub use client::make_client;
 
 use client_api::ClientError;
 use dioxus::prelude::dioxus_router::Navigator;
+use i18n::Language;
 
 use crate::Route;
 use crate::auth::AuthState;
@@ -31,13 +32,17 @@ pub enum ErrorContext {
     PasswordReset,
 }
 
-/// 将 `ClientError` 翻译为中文提示，根据 `ctx` 差异化状态码文案。
-pub fn humanize_error(err: &ClientError, ctx: ErrorContext) -> String {
+/// 将 `ClientError` 翻译为当前语言提示，根据 `ctx` 差异化状态码文案。
+pub fn humanize_error(err: &ClientError, ctx: ErrorContext, lang: Language) -> String {
     match err {
-        ClientError::Network(msg) => format!("网络异常: {msg}"),
-        ClientError::ServerError(status, body) => {
-            format!("服务器错误 (HTTP {status}): {body}")
-        }
+        ClientError::Network(msg) => match lang {
+            Language::En => format!("Network error: {msg}"),
+            Language::Zh => format!("网络异常: {msg}"),
+        },
+        ClientError::ServerError(status, body) => match lang {
+            Language::En => format!("Server error (HTTP {status}): {body}"),
+            Language::Zh => format!("服务器错误 (HTTP {status}): {body}"),
+        },
         ClientError::Other(status, body) => {
             let json = serde_json::from_str::<serde_json::Value>(body).ok();
             let code = json
@@ -48,48 +53,80 @@ pub fn humanize_error(err: &ClientError, ctx: ErrorContext) -> String {
                 .as_ref()
                 .and_then(|v| v.get("message").and_then(|m| m.as_str().map(String::from)))
                 .unwrap_or_else(|| body.clone());
-            match ctx {
-                ErrorContext::Auth => match (status, code.as_str()) {
-                    (401, _) => "邮箱或密码错误".to_string(),
-                    (_, "validation_error") => format!("参数错误: {msg}"),
-                    (_, "conflict") => "该邮箱已注册".to_string(),
-                    _ => format!("请求失败 (HTTP {status}): {msg}"),
+            match lang {
+                Language::En => match ctx {
+                    ErrorContext::Auth => match (status, code.as_str()) {
+                        (401, _) => "Invalid email or password".to_string(),
+                        (_, "validation_error") => format!("Validation error: {msg}"),
+                        (_, "conflict") => "Email already registered".to_string(),
+                        _ => format!("Request failed (HTTP {status}): {msg}"),
+                    },
+                    ErrorContext::UserManagement => match (status, code.as_str()) {
+                        (401, _) => "Not logged in or session expired".to_string(),
+                        (403, _) => "Insufficient permissions (admin required)".to_string(),
+                        (404, _) => "User not found".to_string(),
+                        (_, "validation_error") => format!("Validation error: {msg}"),
+                        (_, "conflict") => {
+                            "Operation conflict (email already exists or constraint violation)"
+                                .to_string()
+                        }
+                        _ => format!("Request failed (HTTP {status}): {msg}"),
+                    },
+                    ErrorContext::EmailVerification => match (status, code.as_str()) {
+                        (400, _) => "Invalid or expired verification code".to_string(),
+                        (503, _) => "Email service not configured".to_string(),
+                        _ => format!("Request failed (HTTP {status}): {msg}"),
+                    },
+                    ErrorContext::PasswordReset => match (status, code.as_str()) {
+                        (400, _) => "Invalid or expired reset code".to_string(),
+                        (503, _) => "Password reset is currently unavailable".to_string(),
+                        _ => format!("Request failed (HTTP {status}): {msg}"),
+                    },
                 },
-                ErrorContext::UserManagement => match (status, code.as_str()) {
-                    (401, _) => "未登录或会话已过期".to_string(),
-                    (403, _) => "权限不足 (需 admin)".to_string(),
-                    (404, _) => "用户不存在".to_string(),
-                    (_, "validation_error") => format!("参数错误: {msg}"),
-                    (_, "conflict") => "操作冲突（邮箱已存在或违反约束）".to_string(),
-                    _ => format!("请求失败 (HTTP {status}): {msg}"),
-                },
-                ErrorContext::EmailVerification => match (status, code.as_str()) {
-                    // 400 是验证/重发接口的主错误码。
-                    // 服务端 anti-enumeration 把 "用户不存在"、"码错误"、"码过期"、
-                    // "超过尝试上限" 全部映射到同一文案 ("Invalid or expired
-                    // verification code")。前端也保持一致：不对用户暴露区分。
-                    // 表单级 validation_error（如 code 长度不对）同样返回 400，
-                    // 统一归入此臂——客户端表单校验已在前置拦截，此处兜底即可。
-                    (400, _) => "验证码错误或已过期".to_string(),
-                    (503, _) => "邮件服务未配置".to_string(),
-                    _ => format!("请求失败 (HTTP {status}): {msg}"),
-                },
-                ErrorContext::PasswordReset => match (status, code.as_str()) {
-                    // forgot-password: 服务端对未知邮箱与 cooldown 早请求均 200 兜底，
-                    // 真实错误只会是 503（邮件服务未配置）。
-                    // reset-password: 服务端把 "token 不存在 / 已过期 / 错误 /
-                    // 已被消费 / 暴力尝试上限 / 弱密码" 全部统一 400 + 通用文案，
-                    // 前端保持同样的反枚举语义。
-                    (400, _) => "重置验证码无效或已过期".to_string(),
-                    (503, _) => "密码重置功能暂不可用".to_string(),
-                    _ => format!("请求失败 (HTTP {status}): {msg}"),
+                Language::Zh => match ctx {
+                    ErrorContext::Auth => match (status, code.as_str()) {
+                        (401, _) => "邮箱或密码错误".to_string(),
+                        (_, "validation_error") => format!("参数错误: {msg}"),
+                        (_, "conflict") => "该邮箱已注册".to_string(),
+                        _ => format!("请求失败 (HTTP {status}): {msg}"),
+                    },
+                    ErrorContext::UserManagement => match (status, code.as_str()) {
+                        (401, _) => "未登录或会话已过期".to_string(),
+                        (403, _) => "权限不足 (需 admin)".to_string(),
+                        (404, _) => "用户不存在".to_string(),
+                        (_, "validation_error") => format!("参数错误: {msg}"),
+                        (_, "conflict") => "操作冲突（邮箱已存在或违反约束）".to_string(),
+                        _ => format!("请求失败 (HTTP {status}): {msg}"),
+                    },
+                    ErrorContext::EmailVerification => match (status, code.as_str()) {
+                        (400, _) => "验证码错误或已过期".to_string(),
+                        (503, _) => "邮件服务未配置".to_string(),
+                        _ => format!("请求失败 (HTTP {status}): {msg}"),
+                    },
+                    ErrorContext::PasswordReset => match (status, code.as_str()) {
+                        (400, _) => "重置验证码无效或已过期".to_string(),
+                        (503, _) => "密码重置功能暂不可用".to_string(),
+                        _ => format!("请求失败 (HTTP {status}): {msg}"),
+                    },
                 },
             }
         }
-        ClientError::RateLimited(_) => "请求过于频繁，请稍后再试".to_string(),
-        ClientError::Deserialization(msg) => format!("响应解析失败: {msg}"),
-        ClientError::Config(msg) => format!("客户端配置错误: {msg}"),
-        _ => format!("未知错误: {err}"),
+        ClientError::RateLimited(_) => match lang {
+            Language::En => "Too many requests, please try again later".to_string(),
+            Language::Zh => "请求过于频繁，请稍后再试".to_string(),
+        },
+        ClientError::Deserialization(msg) => match lang {
+            Language::En => format!("Response parse failed: {msg}"),
+            Language::Zh => format!("响应解析失败: {msg}"),
+        },
+        ClientError::Config(msg) => match lang {
+            Language::En => format!("Client configuration error: {msg}"),
+            Language::Zh => format!("客户端配置错误: {msg}"),
+        },
+        _ => match lang {
+            Language::En => format!("Unknown error: {err}"),
+            Language::Zh => format!("未知错误: {err}"),
+        },
     }
 }
 
@@ -182,119 +219,230 @@ mod tests {
     // ── humanize_error: Auth context ─────────────────────
 
     #[test]
-    fn humanize_auth_401() {
+    fn humanize_auth_401_zh() {
         let err = ClientError::Other(401, r#"{"error":"unauthorized"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::Auth);
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::Zh);
         assert_eq!(msg, "邮箱或密码错误");
     }
 
     #[test]
-    fn humanize_auth_validation_error() {
+    fn humanize_auth_401_en() {
+        let err = ClientError::Other(401, r#"{"error":"unauthorized"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::En);
+        assert_eq!(msg, "Invalid email or password");
+    }
+
+    #[test]
+    fn humanize_auth_validation_error_zh() {
         let err = ClientError::Other(
             400,
             r#"{"error":"validation_error","message":"email is invalid"}"#.into(),
         );
-        let msg = humanize_error(&err, ErrorContext::Auth);
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::Zh);
         assert!(msg.contains("参数错误"));
     }
 
     #[test]
-    fn humanize_auth_conflict() {
+    fn humanize_auth_validation_error_en() {
+        let err = ClientError::Other(
+            400,
+            r#"{"error":"validation_error","message":"email is invalid"}"#.into(),
+        );
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::En);
+        assert!(msg.contains("Validation error"));
+    }
+
+    #[test]
+    fn humanize_auth_conflict_zh() {
         let err = ClientError::Other(
             409,
             r#"{"error":"conflict","message":"email already registered"}"#.into(),
         );
-        let msg = humanize_error(&err, ErrorContext::Auth);
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::Zh);
         assert_eq!(msg, "该邮箱已注册");
     }
 
     #[test]
-    fn humanize_auth_network() {
+    fn humanize_auth_conflict_en() {
+        let err = ClientError::Other(
+            409,
+            r#"{"error":"conflict","message":"email already registered"}"#.into(),
+        );
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::En);
+        assert_eq!(msg, "Email already registered");
+    }
+
+    #[test]
+    fn humanize_auth_network_zh() {
         let err = ClientError::Network("connection refused".into());
-        let msg = humanize_error(&err, ErrorContext::Auth);
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::Zh);
         assert!(msg.contains("网络异常"));
+    }
+
+    #[test]
+    fn humanize_auth_network_en() {
+        let err = ClientError::Network("connection refused".into());
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::En);
+        assert!(msg.contains("Network error"));
     }
 
     // ── humanize_error: UserManagement context ───────────
 
     #[test]
-    fn humanize_usermgmt_401() {
+    fn humanize_usermgmt_401_zh() {
         let err = ClientError::Other(401, r#"{"error":"unauthorized"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::Zh);
         assert_eq!(msg, "未登录或会话已过期");
     }
 
     #[test]
-    fn humanize_usermgmt_403() {
+    fn humanize_usermgmt_401_en() {
+        let err = ClientError::Other(401, r#"{"error":"unauthorized"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::En);
+        assert_eq!(msg, "Not logged in or session expired");
+    }
+
+    #[test]
+    fn humanize_usermgmt_403_zh() {
         let err = ClientError::Other(403, r#"{"error":"forbidden"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::Zh);
         assert_eq!(msg, "权限不足 (需 admin)");
     }
 
     #[test]
-    fn humanize_usermgmt_404() {
+    fn humanize_usermgmt_403_en() {
+        let err = ClientError::Other(403, r#"{"error":"forbidden"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::En);
+        assert_eq!(msg, "Insufficient permissions (admin required)");
+    }
+
+    #[test]
+    fn humanize_usermgmt_404_zh() {
         let err = ClientError::Other(404, r#"{"error":"not_found"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::Zh);
         assert_eq!(msg, "用户不存在");
     }
 
     #[test]
-    fn humanize_usermgmt_server_error() {
+    fn humanize_usermgmt_404_en() {
+        let err = ClientError::Other(404, r#"{"error":"not_found"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::En);
+        assert_eq!(msg, "User not found");
+    }
+
+    #[test]
+    fn humanize_usermgmt_server_error_zh() {
         let err = ClientError::ServerError(500, "Internal Server Error".into());
-        let msg = humanize_error(&err, ErrorContext::UserManagement);
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::Zh);
         assert!(msg.contains("服务器错误"));
     }
 
     #[test]
-    fn humanize_rate_limited() {
+    fn humanize_usermgmt_server_error_en() {
+        let err = ClientError::ServerError(500, "Internal Server Error".into());
+        let msg = humanize_error(&err, ErrorContext::UserManagement, Language::En);
+        assert!(msg.contains("Server error"));
+    }
+
+    #[test]
+    fn humanize_rate_limited_zh() {
         let err = ClientError::RateLimited("Too many requests".into());
-        let msg = humanize_error(&err, ErrorContext::Auth);
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::Zh);
         assert_eq!(msg, "请求过于频繁，请稍后再试");
     }
 
     #[test]
-    fn humanize_deserialization() {
+    fn humanize_rate_limited_en() {
+        let err = ClientError::RateLimited("Too many requests".into());
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::En);
+        assert_eq!(msg, "Too many requests, please try again later");
+    }
+
+    #[test]
+    fn humanize_deserialization_zh() {
         let err = ClientError::Deserialization("expected `{`".into());
-        let msg = humanize_error(&err, ErrorContext::Auth);
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::Zh);
         assert!(msg.contains("响应解析失败"));
     }
 
     #[test]
-    fn humanize_config() {
+    fn humanize_deserialization_en() {
+        let err = ClientError::Deserialization("expected `{`".into());
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::En);
+        assert!(msg.contains("Response parse failed"));
+    }
+
+    #[test]
+    fn humanize_config_zh() {
         let err = ClientError::Config("bad base url".into());
-        let msg = humanize_error(&err, ErrorContext::Auth);
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::Zh);
         assert!(msg.contains("客户端配置错误"));
+    }
+
+    #[test]
+    fn humanize_config_en() {
+        let err = ClientError::Config("bad base url".into());
+        let msg = humanize_error(&err, ErrorContext::Auth, Language::En);
+        assert!(msg.contains("Client configuration error"));
     }
 
     // ── humanize_error: EmailVerification context ────────
 
     #[test]
-    fn humanize_verify_400() {
+    fn humanize_verify_400_zh() {
         let err = ClientError::Other(400, r#"{"error":"invalid_code"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::EmailVerification);
+        let msg = humanize_error(&err, ErrorContext::EmailVerification, Language::Zh);
         assert_eq!(msg, "验证码错误或已过期");
     }
 
     #[test]
-    fn humanize_verify_503() {
+    fn humanize_verify_400_en() {
+        let err = ClientError::Other(400, r#"{"error":"invalid_code"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::EmailVerification, Language::En);
+        assert_eq!(msg, "Invalid or expired verification code");
+    }
+
+    #[test]
+    fn humanize_verify_503_zh() {
         let err = ClientError::Other(503, r#"{"error":"mail_unconfigured"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::EmailVerification);
+        let msg = humanize_error(&err, ErrorContext::EmailVerification, Language::Zh);
         assert_eq!(msg, "邮件服务未配置");
+    }
+
+    #[test]
+    fn humanize_verify_503_en() {
+        let err = ClientError::Other(503, r#"{"error":"mail_unconfigured"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::EmailVerification, Language::En);
+        assert_eq!(msg, "Email service not configured");
     }
 
     // ── humanize_error: PasswordReset context ────────────
 
     #[test]
-    fn humanize_reset_400() {
+    fn humanize_reset_400_zh() {
         let err = ClientError::Other(400, r#"{"error":"invalid_token"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::PasswordReset);
+        let msg = humanize_error(&err, ErrorContext::PasswordReset, Language::Zh);
         assert_eq!(msg, "重置验证码无效或已过期");
     }
 
     #[test]
-    fn humanize_reset_503() {
+    fn humanize_reset_400_en() {
+        let err = ClientError::Other(400, r#"{"error":"invalid_token"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::PasswordReset, Language::En);
+        assert_eq!(msg, "Invalid or expired reset code");
+    }
+
+    #[test]
+    fn humanize_reset_503_zh() {
         let err = ClientError::Other(503, r#"{"error":"mail_unconfigured"}"#.into());
-        let msg = humanize_error(&err, ErrorContext::PasswordReset);
+        let msg = humanize_error(&err, ErrorContext::PasswordReset, Language::Zh);
         assert_eq!(msg, "密码重置功能暂不可用");
+    }
+
+    #[test]
+    fn humanize_reset_503_en() {
+        let err = ClientError::Other(503, r#"{"error":"mail_unconfigured"}"#.into());
+        let msg = humanize_error(&err, ErrorContext::PasswordReset, Language::En);
+        assert_eq!(msg, "Password reset is currently unavailable");
     }
 }

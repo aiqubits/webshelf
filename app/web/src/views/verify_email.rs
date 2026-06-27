@@ -142,7 +142,8 @@ pub fn VerifyEmail(email: String) -> Element {
                         if let Err(err) = login_res {
                             // 自动登录失败（理论上不会发生，除非密码在用户不知情时被改）。
                             // 跳回 /auth 让用户重新登录。
-                            let msg = humanize_error(&err, ErrorContext::EmailVerification);
+                            let msg =
+                                humanize_error(&err, ErrorContext::EmailVerification, i18n.lang());
                             error_msg
                                 .set(Some(tf(t.verify_email_auto_login_failed, &[("msg", &msg)])));
                             loading.set(false);
@@ -160,7 +161,8 @@ pub fn VerifyEmail(email: String) -> Element {
                     loading.set(false);
                     let attempts = *failed_attempts.read() + 1;
                     failed_attempts.set(attempts);
-                    let mut msg = humanize_error(&err, ErrorContext::EmailVerification);
+                    let mut msg =
+                        humanize_error(&err, ErrorContext::EmailVerification, i18n.lang());
                     if attempts >= MAX_CLIENT_ATTEMPTS {
                         msg.push_str(t.verify_email_attempts_suffix);
                     }
@@ -200,7 +202,7 @@ pub fn VerifyEmail(email: String) -> Element {
                     info_msg.set(Some(t.verify_email_info_sent.to_string()));
                 }
                 Err(err) => {
-                    let msg = humanize_error(&err, ErrorContext::EmailVerification);
+                    let msg = humanize_error(&err, ErrorContext::EmailVerification, i18n.lang());
                     // 若服务端提示冷却未到，强制倒计时为 10s 避免用户立刻再点
                     if matches!(err, client_api::ClientError::Other(400, _)) {
                         countdown.set(10);

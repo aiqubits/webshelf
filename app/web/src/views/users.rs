@@ -23,6 +23,7 @@ use crate::balance::{BALANCE_SCALE, format_balance};
 use crate::components::{
     ConfirmDialog, HttpMethod, LogBus, SearchSignal, push_log_err, push_log_ok,
 };
+use ui::Language;
 
 #[derive(Debug, Clone)]
 enum ListState {
@@ -71,8 +72,8 @@ pub fn Users() -> Element {
     let auth = use_context::<AuthState>();
     let log_bus = use_context::<LogBus>();
     let nav = use_navigator();
-    let i18n = use_context::<I18nContext>();
-    let t = i18n.t();
+    let locale = use_context::<I18nContext>();
+    let t = locale.t();
 
     let list = use_signal(|| ListState::Loading);
     let list_version = use_signal(|| 0u64);
@@ -131,9 +132,11 @@ pub fn Users() -> Element {
             let version_check = list_version;
             let mut total_signal = total;
             let mut total_pages_signal = total_pages;
+            let effect_lang = locale.lang();
             spawn(async move {
                 let version = version_check();
                 list.set(ListState::Loading);
+                let lang = effect_lang;
                 let res = client.list_users(current_page, current_per_page).await;
                 // 丢弃过期响应：list_version / page / per_page 任一变化均视为过期
                 if version_check() != version
@@ -157,6 +160,7 @@ pub fn Users() -> Element {
                         list.set(ListState::Error(humanize_error(
                             &err,
                             ErrorContext::UserManagement,
+                            lang,
                         )));
                     }
                 }
@@ -205,9 +209,7 @@ pub fn Users() -> Element {
             header { class: "ws-users__header",
                 div { class: "ws-users__title-block",
                     h1 { class: "ws-users__title", "{t.users_title}" }
-                    p { class: "ws-users__subtitle",
-                        "{t.users_subtitle}"
-                    }
+                    p { class: "ws-users__subtitle", "{t.users_subtitle}" }
                 }
                 div { class: "ws-users__header-actions",
                     span { class: "ws-users__guard-pill",
@@ -514,15 +516,29 @@ fn close_all(mut signals: UsersSignals) {
 /// Create a balance adjustment handler closure.
 ///
 /// `multiplier` controls direction: `1` = increase, `-1` = decrease.
-fn make_adjust_handler(
-    mut signals: UsersSignals,
+struct AdjustHandlerParams {
+    signals: UsersSignals,
     client: client_api::Client,
     log_bus: LogBus,
     auth: AuthState,
     nav: Navigator,
     multiplier: i64,
     t: &'static Translations,
-) -> impl FnMut(MouseEvent) + 'static {
+    lang: Language,
+}
+
+fn make_adjust_handler(params: AdjustHandlerParams) -> impl FnMut(MouseEvent) + 'static {
+    let AdjustHandlerParams {
+        mut signals,
+        client,
+        log_bus,
+        auth,
+        nav,
+        multiplier,
+        t,
+        lang,
+    } = params;
+
     move |_: MouseEvent| {
         if *signals.submitting.read() {
             return;
@@ -600,9 +616,11 @@ fn make_adjust_handler(
                         &format!("/api/users/{}/balance/adjust", target_id),
                         &err,
                     );
-                    s_async
-                        .form_error
-                        .set(Some(humanize_error(&err, ErrorContext::UserManagement)));
+                    s_async.form_error.set(Some(humanize_error(
+                        &err,
+                        ErrorContext::UserManagement,
+                        lang,
+                    )));
                 }
             }
         });
@@ -795,6 +813,7 @@ fn render_form_modal(
     let name_empty = t.users_name_empty.to_string();
     let email_empty = t.users_email_empty.to_string();
     let password_empty = t.users_password_empty.to_string();
+    let no_target_id = t.users_modal_no_target_id.to_string();
     let form_name_label = t.users_form_name_label.to_string();
     let form_name_placeholder = t.users_form_name_placeholder.to_string();
     let form_email_label = t.users_form_email_label.to_string();
@@ -824,6 +843,7 @@ fn render_form_modal(
     // Clone auth and client before on_submit moves them; originals used by balance adjustment closures
     let auth_for_submit = auth.clone();
     let client_for_submit = client.clone();
+    let current_lang = use_context::<I18nContext>().lang();
     let on_submit = move |_: MouseEvent| {
         // 防止快速双击触发两次 spawn
         if *signals_for_submit.submitting.read() {
@@ -866,6 +886,7 @@ fn render_form_modal(
         let bus_async = log_bus;
         let mut s_async = signals_for_submit;
         let auth_async = auth_for_submit.clone();
+        let no_target_id_async = no_target_id.clone();
         signals_for_submit.submitting.set(true);
         signals_for_submit.form_error.set(None);
         // Admin 不能修改 role，不发送该字段；仅 system 可以
@@ -889,7 +910,7 @@ fn render_form_modal(
                 }
                 ModalKind::Edit => {
                     let Some(ref id) = editing_id else {
-                        s_async.form_error.set(Some("缺少用户 ID".into()));
+                        s_async.form_error.set(Some(no_target_id_async));
                         s_async.submitting.set(false);
                         return;
                     };
@@ -944,9 +965,11 @@ fn render_form_modal(
                         format!("/api/users/{}", editing_id.unwrap_or_default())
                     };
                     push_log_err(bus_async, log_method, &log_path, &err);
-                    s_async
-                        .form_error
-                        .set(Some(humanize_error(&err, ErrorContext::UserManagement)));
+                    s_async.form_error.set(Some(humanize_error(
+                        &err,
+                        ErrorContext::UserManagement,
+                        current_lang,
+                    )));
                 }
             }
         });
@@ -963,10 +986,26 @@ fn render_form_modal(
         })
         .unwrap_or(false);
 
-    let on_increase =
-        make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, 1, t);
-    let on_decrease =
-        make_adjust_handler(signals, client.clone(), log_bus, auth.clone(), nav, -1, t);
+    let on_increase = make_adjust_handler(AdjustHandlerParams {
+        signals,
+        client: client.clone(),
+        log_bus,
+        auth: auth.clone(),
+        nav,
+        multiplier: 1,
+        t,
+        lang: current_lang,
+    });
+    let on_decrease = make_adjust_handler(AdjustHandlerParams {
+        signals,
+        client: client.clone(),
+        log_bus,
+        auth: auth.clone(),
+        nav,
+        multiplier: -1,
+        t,
+        lang: current_lang,
+    });
 
     rsx! {
         Modal {
@@ -1004,9 +1043,7 @@ fn render_form_modal(
                         required: password_required,
                         disabled: submitting,
                         name: Some("password".to_string()),
-                        hint: Some(
-                            form_password_hint.clone(),
-                        ),
+                        hint: Some(form_password_hint.clone()),
                     }
                 }
                 if kind == ModalKind::Edit && current_role == "system" {

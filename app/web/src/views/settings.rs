@@ -165,7 +165,15 @@ pub fn Settings() -> Element {
                                 }
                                 Err(err) => {
                                     form_error
-                                        .set(Some(humanize_error(&err, ErrorContext::UserManagement)));
+                                        .set(
+                                            Some(
+                                                humanize_error(
+                                                    &err,
+                                                    ErrorContext::UserManagement,
+                                                    i18n.lang(),
+                                                ),
+                                            ),
+                                        );
                                 }
                             }
                         });
@@ -219,9 +227,7 @@ pub fn Settings() -> Element {
 
             section { class: "ws-settings__section",
                 h2 { class: "ws-settings__section-title", "{t.settings_session_title}" }
-                p { class: "ws-settings__desc",
-                    "{t.settings_session_desc}"
-                }
+                p { class: "ws-settings__desc", "{t.settings_session_desc}" }
                 Button {
                     button_type: ButtonType::Danger,
                     full_width: true,

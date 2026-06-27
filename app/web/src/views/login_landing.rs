@@ -188,7 +188,10 @@ pub fn LoginLanding() -> Element {
                                 }
                                 Err(err) => {
                                     if *mode_check.read() == payload_mode {
-                                        error_msg.set(Some(humanize_error(&err, ErrorContext::Auth)));
+                                        error_msg
+                                            .set(
+                                                Some(humanize_error(&err, ErrorContext::Auth, i18n.lang())),
+                                            );
                                     }
                                 }
                             }

@@ -58,9 +58,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
             div { class: "ws-reset__card",
                 div { class: "ws-reset__icon" }
                 h1 { class: "ws-reset__title", {t.reset_pw_title} }
-                p { class: "ws-reset__subtitle",
-                    {t.reset_pw_subtitle}
-                }
+                p { class: "ws-reset__subtitle", {t.reset_pw_subtitle} }
 
                 form {
                     class: "ws-reset__form",
@@ -117,7 +115,11 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                                     nav.replace(Route::Dashboard {});
                                 }
                                 Err(err) => {
-                                    let msg = humanize_error(&err, ErrorContext::PasswordReset);
+                                    let msg = humanize_error(
+                                        &err,
+                                        ErrorContext::PasswordReset,
+                                        i18n.lang(),
+                                    );
                                     error_msg.set(Some(msg));
                                 }
                             }
@@ -153,9 +155,7 @@ pub fn ResetPassword(email: Option<String>) -> Element {
                         disabled: *submitting.read(),
                         name: Some("new_password".to_string()),
                         autocomplete: Some("new-password".to_string()),
-                        hint: Some(
-                            t.reset_pw_password_hint.to_string(),
-                        ),
+                        hint: Some(t.reset_pw_password_hint.to_string()),
                     }
                     TextInput {
                         label: t.reset_pw_confirm_label.to_string(),

@@ -102,6 +102,7 @@ translate! {
     users_prev_page: "Previous" => "上一页",
     users_next_page: "Next" => "下一页",
     users_per_page_label: "Per page" => "每页",
+   // 英文无需量词单位，留空；中文需要 "条" 作为页码量词
     users_per_page_unit: "" => "条",
     users_count_info: "{total} users, page {page} / {total_pages}" => "共 {total} 个用户，第 {page} / {total_pages} 页",
     users_count_simple: "{total} users" => "共 {total} 个用户",
@@ -145,6 +146,7 @@ translate! {
     users_adjust_invalid: "Invalid amount format" => "金额格式无效，请输入数字 (如 0.50)",
     users_adjust_positive: "Amount must be greater than 0" => "金额必须大于 0",
     users_adjust_overflow: "Amount exceeds maximum (1,000,000)" => "金额超出允许范围，最大 1,000,000",
+    users_modal_no_target_id: "No target user ID" => "缺少用户 ID",
 
     // settings.rs
     settings_title: "Settings" => "个人设置",

@@ -52,9 +52,7 @@ pub fn ForgotPassword() -> Element {
             div { class: "ws-forgot__card",
                 div { class: "ws-forgot__icon" }
                 h1 { class: "ws-forgot__title", {t.forgot_pw_title} }
-                p { class: "ws-forgot__subtitle",
-                    {t.forgot_pw_subtitle}
-                }
+                p { class: "ws-forgot__subtitle", {t.forgot_pw_subtitle} }
 
                 form {
                     class: "ws-forgot__form",
@@ -92,7 +90,11 @@ pub fn ForgotPassword() -> Element {
                                         });
                                 }
                                 Err(err) => {
-                                    let msg = humanize_error(&err, ErrorContext::PasswordReset);
+                                    let msg = humanize_error(
+                                        &err,
+                                        ErrorContext::PasswordReset,
+                                        i18n.lang(),
+                                    );
                                     error_msg.set(Some(msg));
                                 }
                             }
