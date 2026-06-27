@@ -119,8 +119,13 @@ pub fn LoginLanding() -> Element {
                             return;
                         }
                         if payload.mode == AuthMode::Register {
-                            if payload.name.trim().is_empty() {
+                            let name_trimmed = payload.name.trim();
+                            if name_trimmed.is_empty() {
                                 error_msg.set(Some(t.login_name_empty.to_string()));
+                                return;
+                            }
+                            if name_trimmed.len() < 6 || name_trimmed.len() > 50 {
+                                error_msg.set(Some(t.login_name_length.to_string()));
                                 return;
                             }
                             if payload.password != payload.password_confirm {

@@ -489,6 +489,255 @@ async fn test_user_registration_conflict() {
     assert_eq!(response2.status(), StatusCode::CONFLICT);
 }
 
+// ---------------------------------------------------------------------------
+// Name validation — registration endpoint (min=6, max=50)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_register_name_too_short() {
+    let app = create_test_app().await;
+
+    let payload = json!({
+        "email": unique_email("reg_name_short"),
+        "password": "Password123!",
+        "name": "12345" // 5 characters — below minimum (6)
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_register_name_too_long() {
+    let app = create_test_app().await;
+
+    let payload = json!({
+        "email": unique_email("reg_name_long"),
+        "password": "Password123!",
+        "name": "x".repeat(51) // 51 characters — above maximum (50)
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+// ---------------------------------------------------------------------------
+// Name validation — admin create user endpoint (POST /api/users)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_admin_create_user_name_too_short() {
+    let app = create_test_app().await;
+    let token = create_admin_and_login(&app, &unique_email("adm_name_short")).await;
+
+    let payload = json!({
+        "email": unique_email("create_name_short"),
+        "password": "Password123!",
+        "name": "12345" // 5 characters — below minimum (6)
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_admin_create_user_name_too_long() {
+    let app = create_test_app().await;
+    let token = create_admin_and_login(&app, &unique_email("adm_name_long")).await;
+
+    let payload = json!({
+        "email": unique_email("create_name_long"),
+        "password": "Password123!",
+        "name": "x".repeat(51) // 51 characters — above maximum (50)
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_admin_create_user_auto_verified() {
+    let app = create_test_app().await;
+    let token = create_admin_and_login(&app, &unique_email("adm_auto_vfy")).await;
+
+    let payload = json!({
+        "email": unique_email("auto_verified_user"),
+        "password": "Password123!",
+        "name": "Auto Verify"
+    });
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let body = body_to_json(response.into_body()).await;
+    assert_eq!(
+        body["email_verified"], true,
+        "Admin-created user must be auto-verified"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Name validation — admin update user endpoint (PUT /api/users/{id})
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_admin_update_user_name_too_short() {
+    let app = create_test_app().await;
+    let token = create_admin_and_login(&app, &unique_email("adm_upd_nm_short")).await;
+
+    // First create a user to update
+    let create_payload = json!({
+        "email": unique_email("to_update_short"),
+        "password": "Password123!",
+        "name": "Valid Name"
+    });
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token.clone()))
+                .body(Body::from(serde_json::to_string(&create_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), StatusCode::OK);
+    let create_body = body_to_json(create_resp.into_body()).await;
+    let user_id = create_body["id"].as_str().unwrap().to_string();
+
+    // Now try to update name to too-short value
+    let update_payload = json!({
+        "name": "12345" // 5 characters — below minimum (6)
+    });
+    let update_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/users/{}", user_id))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&update_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(update_resp.status(), StatusCode::BAD_REQUEST);
+}
+
+#[tokio::test]
+async fn test_admin_update_user_name_too_long() {
+    let app = create_test_app().await;
+    let token = create_admin_and_login(&app, &unique_email("adm_upd_nm_long")).await;
+
+    // First create a user to update
+    let create_payload = json!({
+        "email": unique_email("to_update_long"),
+        "password": "Password123!",
+        "name": "Valid Name"
+    });
+    let create_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/users")
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token.clone()))
+                .body(Body::from(serde_json::to_string(&create_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_resp.status(), StatusCode::OK);
+    let create_body = body_to_json(create_resp.into_body()).await;
+    let user_id = create_body["id"].as_str().unwrap().to_string();
+
+    // Now try to update name to too-long value
+    let update_payload = json!({
+        "name": "x".repeat(51) // 51 characters — above maximum (50)
+    });
+    let update_resp = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("PUT")
+                .uri(format!("/api/users/{}", user_id))
+                .header("content-type", "application/json")
+                .header("authorization", format!("Bearer {}", token))
+                .body(Body::from(serde_json::to_string(&update_payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(update_resp.status(), StatusCode::BAD_REQUEST);
+}
+
 #[tokio::test]
 async fn test_unauthenticated_request_rejected() {
     let app = create_test_app().await;

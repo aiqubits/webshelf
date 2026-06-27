@@ -58,6 +58,7 @@ translate! {
     login_email_empty: "Email cannot be empty" => "邮箱地址不能为空",
     login_password_empty: "Password cannot be empty" => "密码不能为空",
     login_name_empty: "Username cannot be empty" => "用户名不能为空",
+    login_name_length: "Username must be between 6 and 50 characters" => "用户名长度为 6-50 个字符",
     login_password_mismatch: "Passwords do not match" => "两次输入的密码不一致",
 
     // dashboard.rs

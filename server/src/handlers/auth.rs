@@ -181,9 +181,9 @@ pub struct RegisterRequestBody {
     password: String,
 
     #[validate(length(
-        min = 2,
+        min = 6,
         max = 50,
-        message = "name must be between 2 and 50 characters"
+        message = "name must be between 6 and 50 characters"
     ))]
     name: String,
 

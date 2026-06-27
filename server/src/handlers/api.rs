@@ -8,7 +8,7 @@ use crate::middlewares::{AuthUser, JWT_COOKIE, REFRESH_COOKIE};
 use crate::repositories::user::{CreateUserInput, UpdateUserInput, UserResponse};
 use crate::services::auth::AuthService;
 use crate::services::user::{BALANCE_SCALE, PaginatedResponse, PaginationParams, UserService};
-use crate::services::verification::{VerificationError, VerificationService};
+use crate::services::verification::VerificationService;
 use crate::utils::error::ApiError;
 use crate::utils::validator::check_password_strength;
 use webshelf_runtime::{HttpError, RequestContext, Response};
@@ -104,9 +104,9 @@ pub struct CreateUserRequest {
     password: String,
 
     #[validate(length(
-        min = 2,
+        min = 6,
         max = 50,
-        message = "name must be between 2 and 50 characters"
+        message = "name must be between 6 and 50 characters"
     ))]
     name: String,
 
@@ -115,7 +115,15 @@ pub struct CreateUserRequest {
     role: Option<String>,
 }
 
-/// Create a new user
+/// Create a new user (admin-only).
+///
+/// The created user is **auto-verified** — no verification email is sent and
+/// `email_verified` is set to `true` immediately.  This is intentional:
+/// admin-created accounts are trusted and should be usable right away.
+///
+/// If the auto-verify DB update fails the user is still created (though
+/// unverified); the request succeeds with `email_verified: false` so the
+/// client is not left guessing whether the user exists.
 pub async fn create_user(mut req: crate::ServerRequest) -> Result<Response, HttpError> {
     let (state, auth_user) = extract_handler_context(&req)?;
     let payload: CreateUserRequest = req
@@ -154,31 +162,27 @@ pub async fn create_user(mut req: crate::ServerRequest) -> Result<Response, Http
         .await
         .map_err(to_http)?;
 
+    // Auto-verify the admin-created user.  This is best-effort: if the DB
+    // update fails the user was already created, so we log a warning and
+    // return the response with `email_verified: false` rather than returning
+    // a 500 that leaves the client guessing.
     let verification = VerificationService::new(state.db.clone(), state.email.clone());
-    match verification.send_verification_email(&email).await {
+    match verification.auto_verify(&email).await {
         Ok(()) => {
-            tracing::info!("Verification code sent to admin-created user: {}", email);
-        }
-        Err(err) => {
-            match &err {
-                VerificationError::EmailNotConfigured => {
-                    tracing::warn!(
-                        "Email service not configured — auto-verifying admin-created user: {}",
-                        email
-                    );
-                }
-                _ => {
-                    tracing::error!("Failed to send verification email: {:?}", err);
-                }
-            }
-            if let Err(e) = verification.auto_verify(&email).await {
-                tracing::error!(
-                    "Failed to auto-verify admin-created user after email send failure: {:?}",
-                    e
-                );
-                return Err(HttpError::internal("An unexpected error occurred"));
-            }
             result.email_verified = true;
+            tracing::info!(
+                "Admin-created user {} (email: {}) is auto-verified",
+                result.id,
+                email
+            );
+        }
+        Err(e) => {
+            tracing::warn!(
+                "Admin-created user {} created but auto-verify failed: {:?}. \
+                 email_verified=false in DB.",
+                result.id,
+                e
+            );
         }
     }
 
@@ -385,9 +389,9 @@ pub struct UpdateUserRequest {
     email: Option<String>,
 
     #[validate(length(
-        min = 2,
+        min = 6,
         max = 50,
-        message = "name must be between 2 and 50 characters"
+        message = "name must be between 6 and 50 characters"
     ))]
     name: Option<String>,
 
