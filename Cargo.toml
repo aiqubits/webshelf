@@ -1,5 +1,5 @@
 [workspace]
-members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver", "crates/distributed-ratelimit", "crates/webshelf-runtime", "crates/webshelf-axum", "crates/webshelf-salvo", "crates/i18n"]
+members = ["server", "app/ui", "app/web", "app/desktop", "app/mobile", "app/client-api", "crates/emailserver", "crates/distributed-ratelimit", "crates/webshelf-runtime", "crates/webshelf-axum", "crates/webshelf-salvo", "crates/i18n", "crates/wechat-api"]
 # resolver = "3" is required for Rust edition 2024
 # Minimum Rust version: 1.92+
 resolver = "3"
@@ -58,6 +58,9 @@ salvo = { version = "0.93", features = ["server", "server-handle", "affix-state"
 
 # i18n
 i18n = { path = "crates/i18n" }
+
+# WeChat Official Account SDK
+wechat-api = { path = "crates/wechat-api" }
 
 # Phase 0: 新增 workspace 依赖
 bytes = "1"

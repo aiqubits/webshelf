@@ -29,7 +29,7 @@ async fn test_401_unauthorized() {
         .await;
 
     let err = client
-        .login("test@example.com", "wrong", false)
+        .login("test@example.com", "wrong", false, None)
         .await
         .unwrap_err();
 
@@ -166,7 +166,7 @@ async fn test_429_rate_limited() {
         .await;
 
     let err = client
-        .login("test@example.com", "password", false)
+        .login("test@example.com", "password", false, None)
         .await
         .unwrap_err();
 
@@ -245,7 +245,7 @@ async fn test_structured_error_body_raw_json() {
         .await;
 
     let err = client
-        .login("not-an-email", "password123", false)
+        .login("not-an-email", "password123", false, None)
         .await
         .unwrap_err();
 

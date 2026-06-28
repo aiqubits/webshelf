@@ -69,6 +69,10 @@ pub struct AppConfig {
     /// Email (SMTP) configuration
     #[serde(default)]
     pub email: emailserver::EmailConfig,
+
+    /// WeChat Official Account configuration (optional)
+    #[serde(default)]
+    pub wechat: WechatAccountConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -311,6 +315,113 @@ impl Default for ServerConfig {
     }
 }
 
+/// WeChat Official Account configuration (optional).
+///
+/// When enabled, users can log in via captcha codes obtained from the
+/// WeChat Official Account instead of using email + password.
+/// All fields must be configured for the feature to be enabled.
+#[derive(Debug, Deserialize, Clone)]
+pub struct WechatAccountConfig {
+    /// Whether the WeChat captcha-login feature is enabled.
+    #[serde(default)]
+    pub enabled: bool,
+
+    /// A logical identifier for this account (e.g. primary tenant id).
+    /// Used as a namespace prefix for cache keys so multiple accounts never
+    /// collide.
+    #[serde(default)]
+    pub account_id: String,
+
+    /// WeChat AppID.
+    #[serde(default)]
+    pub app_id: String,
+
+    /// WeChat AppSecret.
+    #[serde(default)]
+    pub app_secret: String,
+
+    /// The Token configured in the MP backend for signature verification.
+    #[serde(default)]
+    pub token: String,
+
+    /// The EncodingAESKey (43 chars) configured for "safe mode".
+    /// Only required when WeChat message encryption mode is set to Safe.
+    #[serde(default)]
+    pub encoding_aes_key: Option<String>,
+
+    /// The original ID of the official account (e.g. `gh_xxxx`).
+    /// Used to route incoming messages to the correct account config.
+    #[serde(default)]
+    pub original_id: Option<String>,
+
+    /// WeChat message encryption mode: plain, compatible, or safe.
+    #[serde(default)]
+    pub message_mode: String,
+
+    /// How long a generated captcha stays valid, in seconds. Default 300.
+    #[serde(default = "default_captcha_ttl")]
+    pub captcha_ttl_secs: u64,
+
+    /// Minimum interval between two captcha requests from the same user,
+    /// in seconds. Default 60.
+    #[serde(default = "default_resend_cooldown")]
+    pub resend_cooldown_secs: u64,
+
+    /// Maximum consecutive failed login attempts before the captcha is
+    /// invalidated. Default 5.
+    #[serde(default = "default_max_attempts")]
+    pub max_failed_attempts: u32,
+
+    /// Length of the generated captcha code. Default 5.
+    #[serde(default = "default_captcha_len")]
+    pub captcha_len: usize,
+
+    /// Keywords that trigger captcha generation when sent to the official
+    /// account by the user. Defaults to ["验证码", "登录码", "login"].
+    #[serde(default = "default_trigger_keywords")]
+    pub trigger_keywords: Vec<String>,
+}
+
+impl Default for WechatAccountConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            account_id: String::new(),
+            app_id: String::new(),
+            app_secret: String::new(),
+            token: String::new(),
+            encoding_aes_key: None,
+            original_id: None,
+            message_mode: "plain".to_string(),
+            captcha_ttl_secs: default_captcha_ttl(),
+            resend_cooldown_secs: default_resend_cooldown(),
+            max_failed_attempts: default_max_attempts(),
+            captcha_len: default_captcha_len(),
+            trigger_keywords: default_trigger_keywords(),
+        }
+    }
+}
+
+fn default_captcha_ttl() -> u64 {
+    300
+}
+fn default_resend_cooldown() -> u64 {
+    60
+}
+fn default_max_attempts() -> u32 {
+    5
+}
+fn default_captcha_len() -> usize {
+    5
+}
+fn default_trigger_keywords() -> Vec<String> {
+    vec![
+        "验证码".to_string(),
+        "登录码".to_string(),
+        "login".to_string(),
+    ]
+}
+
 /// Load application configuration from file and environment variables
 ///
 /// Configuration is loaded in the following order (later sources override earlier):
@@ -331,7 +442,8 @@ pub fn load_config(config_path: &str, env: &str) -> Result<AppConfig> {
                 .try_parsing(true)
                 .list_separator(",")
                 .with_list_parse_key("server.allowed_origins")
-                .with_list_parse_key("database_read_urls"),
+                .with_list_parse_key("database_read_urls")
+                .with_list_parse_key("wechat.trigger_keywords"),
         )
         .build()
         .context("Failed to build configuration")?;
@@ -409,6 +521,7 @@ mod tests {
             database_routing: DatabaseRoutingConfig::default(),
             database_read: DatabaseReadConfig::default(),
             email: emailserver::EmailConfig::default(),
+            wechat: WechatAccountConfig::default(),
         };
         let cloned = config.clone();
         assert_eq!(config.database_url, cloned.database_url);

@@ -136,7 +136,7 @@ pub fn VerifyEmail(email: String) -> Element {
                     if let Some(pending) = auth_async.take_pending_registration() {
                         let path_login = "/api/public/auth/login".to_string();
                         let login_res = auth_async
-                            .login(&pending.email, &pending.password, pending.remember)
+                            .login(&pending.email, &pending.password, pending.remember, None)
                             .await;
                         push_log_result(bus_async, HttpMethod::Post, &path_login, &login_res);
                         if let Err(err) = login_res {

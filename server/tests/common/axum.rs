@@ -32,6 +32,7 @@ pub async fn create_app_and_state() -> (Router, AppState) {
         cache,
         config,
         email: common::default_email_service(),
+        wechat: None,
     };
 
     // 使用生产级的 build_app_router，注入禁用的 rate limiter
@@ -94,6 +95,7 @@ pub async fn register_and_login(app: &Router, email: &str) -> String {
     let register_payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
 
@@ -119,6 +121,7 @@ pub async fn register_and_login_with_refresh(app: &Router, email: &str) -> (Stri
     let register_payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
 

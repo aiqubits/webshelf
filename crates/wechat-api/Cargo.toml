@@ -1,0 +1,53 @@
+[package]
+name = "wechat-api"
+version.workspace = true
+edition.workspace = true
+authors.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+description = "Extensible WeChat Official Account API for webshelf — signature verification, message callbacks, captcha-based login, and a pluggable store trait for future WeChat features."
+
+[features]
+default = ["client"]
+# HTTP client for calling WeChat Platform APIs (access_token, custom messages, etc.)
+client = ["dep:reqwest"]
+# In-memory store implementation for tests / dev / single-instance deployments.
+memory-store = ["tokio/sync"]
+# AES message decryption for WeChat "safe mode" (加密模式).
+crypto-safe-mode = ["dep:aes", "dep:cbc", "dep:base64"]
+
+[dependencies]
+# Serialization
+serde = { workspace = true, features = ["derive"] }
+serde_json = { workspace = true }
+quick-xml = { version = "0.36", features = ["serialize"] }
+
+# Error handling
+thiserror = { workspace = true }
+anyhow = { workspace = true }
+
+# Logging
+tracing = { workspace = true }
+
+# Utilities
+chrono = { workspace = true }
+async-trait = { workspace = true }
+rand = "0.8"
+
+# Crypto — signature verification only needs sha1 (always on).
+sha1 = "0.10"
+
+# Optional: HTTP client for WeChat Platform API calls.
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"], optional = true }
+
+# Optional: AES-CBC decryption for WeChat encrypted message mode.
+aes = { version = "0.8", optional = true }
+cbc = { version = "0.1", optional = true }
+base64 = { version = "0.22", optional = true }
+
+# Optional: in-memory store backing.
+tokio = { version = "1", features = ["sync"], optional = true }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["full", "macros", "rt"] }

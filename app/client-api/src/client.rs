@@ -24,7 +24,7 @@ use std::time::Duration;
 /// let client = Client::new(ClientConfig::new("http://127.0.0.1:8080"))?;
 ///
 /// // 登录
-/// let login = client.login("admin@example.com", "password123", false).await?;
+/// let login = client.login("admin@example.com", "password123", false, None::<String>).await?;
 /// client.set_token(login.token);
 ///
 /// // 列出用户
@@ -125,11 +125,13 @@ impl Client {
         email: impl Into<String>,
         password: impl Into<String>,
         remember: bool,
+        captcha_code: Option<String>,
     ) -> Result<LoginResponse, ClientError> {
         let body = LoginRequest {
             email: email.into(),
             password: password.into(),
             remember,
+            captcha_code,
         };
         self.post_json_no_auth("/api/public/auth/login", &body)
             .await
@@ -142,12 +144,14 @@ impl Client {
         password: impl Into<String>,
         name: impl Into<String>,
         remember: bool,
+        password_confirm: impl Into<String>,
     ) -> Result<RegisterResponse, ClientError> {
         let body = RegisterRequest {
             email: email.into(),
             password: password.into(),
             name: name.into(),
             remember,
+            password_confirm: password_confirm.into(),
         };
         self.post_json_no_auth("/api/public/auth/register", &body)
             .await
@@ -231,6 +235,26 @@ impl Client {
     /// 不需要手动设置 Authorization 头。成功时返回新 JWT + 新 refresh token。
     pub async fn refresh(&self) -> Result<RefreshResponse, ClientError> {
         self.post_json_no_auth("/api/public/auth/refresh", &serde_json::json!({}))
+            .await
+    }
+
+    /// WeChat 验证码登录 — `POST /api/public/auth/wx-login`
+    ///
+    /// 用户从微信公众号获取验证码后，传入 code 进行登录。
+    /// 如果 WeChat 账号未绑定任何用户，请先用 email/password 登录并在设置页绑定。
+    pub async fn wx_login(&self, code: &str) -> Result<WxLoginResponse, ClientError> {
+        let body = WxLoginRequest {
+            code: code.to_string(),
+        };
+        self.post_json_no_auth("/api/public/auth/wx-login", &body)
+            .await
+    }
+
+    /// WeChat captcha-login 功能开关 — `GET /api/public/auth/wechat-enabled`
+    ///
+    /// 返回 WeChat 验证码登录功能是否已启用。前端据此决定是否显示 captcha 登录标签。
+    pub async fn wechat_enabled(&self) -> Result<WechatEnabledResponse, ClientError> {
+        self.get_json_no_auth("/api/public/auth/wechat-enabled")
             .await
     }
 
@@ -497,7 +521,8 @@ impl Client {
                 Self::sleep_ms(delay_ms.min(u32::MAX as u64) as u32).await;
             }
 
-            // 入口守卫（第 329 行）已确保 builder 可克隆才进入循环；
+            // 入口守卫（上方 `try_clone().is_none()` 检查）已确保 builder
+            // 可克隆才进入循环；
             // try_clone 行为由 body 类型决定且不随迭代变化，此处必然成功。
             let req = builder
                 .try_clone()

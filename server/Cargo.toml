@@ -45,6 +45,9 @@ cookie = "0.18"
 # Email
 emailserver.workspace = true
 
+# WeChat Official Account captcha-login
+wechat-api.workspace = true
+
 # Validation
 validator = { version = "0.19", features = ["derive"] }
 

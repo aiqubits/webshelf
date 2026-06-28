@@ -1,6 +1,8 @@
 //! Salvo-specific bootstrap: router construction.
 
+use crate::handlers::wechat::{wechat_callback_get, wechat_callback_post};
 use crate::middlewares::AuthMiddleware;
+use crate::routes::helpers::{get, post};
 use crate::routes::{api_routes, auth_routes};
 use crate::{AppRouter, AppState};
 use distributed_ratelimit::RedisRateLimiter;
@@ -28,6 +30,14 @@ pub fn build_app_router(state: AppState, env: &str, rate_limiter: RedisRateLimit
     AppRouter::new()
         .nest("/api", api_routes().hoop(AuthMiddleware::<AppState>::new()))
         .nest("/api/public/auth", auth_routes(rate_limiter))
+        // Conditionally register WeChat callback routes.
+        .merge(if state.wechat.is_some() {
+            AppRouter::new()
+                .route("/api/public/wechat/callback", get(wechat_callback_get))
+                .route("/api/public/wechat/callback", post(wechat_callback_post))
+        } else {
+            AppRouter::new()
+        })
         .hoop(max_body_size(10 * 1024 * 1024))
         .hoop(compression())
         .hoop(cors_handler)

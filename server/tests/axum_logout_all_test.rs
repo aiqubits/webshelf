@@ -57,6 +57,7 @@ async fn create_test_app() -> Router {
         cache,
         config: Arc::new(config),
         email: emailserver::EmailService::new(emailserver::EmailConfig::default()),
+        wechat: None,
     };
 
     let cors = CorsLayer::new()
@@ -104,6 +105,7 @@ async fn register_and_login(app: &Router, email: &str) -> String {
     let register_payload = json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
 
@@ -160,6 +162,7 @@ async fn register_and_login_with_refresh(app: &Router, email: &str) -> (String, 
     let register_payload = json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
     let resp = app

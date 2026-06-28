@@ -66,6 +66,7 @@ async fn create_test_app_and_state() -> (Router, webshelf_server::AppState) {
         cache,
         config: Arc::new(config),
         email: emailserver::EmailService::new(emailserver::EmailConfig::default()),
+        wechat: None,
     };
 
     // Configure CORS
@@ -134,6 +135,7 @@ async fn register_and_login(app: &Router, email: &str) -> String {
     let register_payload = json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
 
@@ -308,6 +310,7 @@ async fn test_user_registration() {
     let payload = json!({
         "email": format!("test_user_{}@example.com", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
 
@@ -328,6 +331,35 @@ async fn test_user_registration() {
     let body = body_to_json(response.into_body()).await;
     assert_eq!(body["message"], "User registered successfully");
     assert!(body["user_id"].is_string());
+}
+
+#[tokio::test]
+async fn test_registration_password_confirm_mismatch() {
+    let app = create_test_app().await;
+
+    let payload = json!({
+        "email": format!("test_pwconfirm_{}@example.com", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos()),
+        "password": "Password123!",
+        "password_confirm": "DifferentPassword456!",
+        "name": "Test User"
+    });
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/public/auth/register")
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_string(&payload).unwrap()))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+    let body = body_to_json(response.into_body()).await;
+    assert_eq!(body["error"], "bad_request");
 }
 
 #[tokio::test]
@@ -453,6 +485,7 @@ async fn test_user_registration_conflict() {
     let payload1 = json!({
         "email": &email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Conflict Test User"
     });
 
@@ -1388,6 +1421,7 @@ async fn test_registration_without_email_service_succeeds() {
     let payload = json!({
         "email": &email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "No Email Test"
     });
 
@@ -1434,6 +1468,7 @@ async fn test_verify_email_rejects_already_verified_user() {
     let payload = json!({
         "email": &email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Verify Test"
     });
 
@@ -1598,6 +1633,7 @@ async fn test_resend_code_with_unconfigured_email_service() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": "Password123!",
+                        "password_confirm": "Password123!",
                         "name": "Resend 200 Test",
                     }))
                     .unwrap(),
@@ -1753,6 +1789,7 @@ async fn test_resend_code_unverified_user_returns_503() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": "Password123!",
+                        "password_confirm": "Password123!",
                         "name": "Resend503Test",
                     }))
                     .unwrap(),
@@ -1825,6 +1862,7 @@ async fn test_auto_verified_user_can_login() {
     let register_payload = json!({
         "email": &email,
         "password": password,
+        "password_confirm": password,
         "name": "AutoVerify Test"
     });
 
@@ -1915,6 +1953,7 @@ async fn test_unverified_email_cannot_login() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": password,
+                        "password_confirm": password,
                         "name": "UnverifiedTest"
                     }))
                     .unwrap(),
@@ -2109,6 +2148,7 @@ async fn test_forgot_password_email_not_configured() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": "Password123!",
+                        "password_confirm": "Password123!",
                         "name": "FPG Test",
                     }))
                     .unwrap(),
@@ -2447,6 +2487,7 @@ async fn test_reset_password_wrong_code() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": "Password123!",
+                        "password_confirm": "Password123!",
                         "name": "Wrong Code"
                     }))
                     .unwrap(),
@@ -2538,6 +2579,7 @@ async fn test_reset_password_expired_code() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": "Password123!",
+                        "password_confirm": "Password123!",
                         "name": "Expired Code"
                     }))
                     .unwrap(),

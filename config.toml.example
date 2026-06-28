@@ -167,3 +167,45 @@ from_name = "Webshelf"
 use_tls = true
 # Connection timeout in seconds (0 = no timeout)
 timeout_secs = 30
+
+# WeChat Official Account configuration for captcha login
+# When enabled, users can log in by sending a keyword (e.g. "验证码") to the
+# WeChat Official Account, receiving a captcha code, and entering it on the
+# login page.
+# All fields below must be properly configured for the feature to work.
+[wechat]
+# Whether to enable WeChat captcha-login (default: false)
+# enabled = true
+
+# Your WeChat Official Account AppID
+# app_id = "wx..."
+
+# Your WeChat Official Account AppSecret
+# app_secret = "..."
+
+# The Token configured in the WeChat MP backend for signature verification
+# token = "..."
+
+# Optional: logical account identifier for multi-account setups
+# account_id = "default"
+
+# Optional: encoding AES key for safe mode (43 chars)
+# encoding_aes_key = "..."
+
+# Optional: message encryption mode: plain, compatible, safe (default: plain)
+# message_mode = "plain"
+
+# Captcha validity in seconds (default: 300)
+# captcha_ttl_secs = 300
+
+# Cooldown between captcha requests in seconds (default: 60)
+# resend_cooldown_secs = 60
+
+# Max failed attempts before captcha is invalidated (default: 5)
+# max_failed_attempts = 5
+
+# Captcha code length (default: 5)
+# captcha_len = 5
+
+# Keywords that trigger captcha generation (comma-separated)
+# trigger_keywords = ["验证码", "登录码", "login"]

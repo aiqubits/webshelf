@@ -173,6 +173,7 @@ impl UserService {
             password_reset_sent_at: Set(None),
             password_reset_failed_attempts: Set(0),
             balance: Set(0),
+            wx_openid: Set(None),
         };
 
         tracing::debug!("Inserting user into database");
@@ -988,6 +989,7 @@ mod tests {
             updated_at: Utc::now(),
             token_version: 1,
             balance: 0,
+            wx_openid: None,
         };
 
         let response = PaginatedResponse {
@@ -1094,6 +1096,7 @@ mod tests {
             password_reset_sent_at: None,
             password_reset_failed_attempts: 0,
             balance: 0,
+            wx_openid: None,
         };
         let result = check_balance_rbac(&target, "admin");
         assert!(matches!(result, Err(UserError::NotFound)));
@@ -1120,6 +1123,7 @@ mod tests {
             password_reset_sent_at: None,
             password_reset_failed_attempts: 0,
             balance: 0,
+            wx_openid: None,
         };
         let result = check_balance_rbac(&target, "admin");
         assert!(matches!(result, Err(UserError::NotFound)));
@@ -1146,6 +1150,7 @@ mod tests {
             password_reset_sent_at: None,
             password_reset_failed_attempts: 0,
             balance: 0,
+            wx_openid: None,
         };
         let result = check_balance_rbac(&target, "user");
         assert!(matches!(result, Err(UserError::NotAllowed(_))));
@@ -1172,6 +1177,7 @@ mod tests {
             password_reset_sent_at: None,
             password_reset_failed_attempts: 0,
             balance: 0,
+            wx_openid: None,
         };
         let result = check_balance_rbac(&target, "system");
         assert!(result.is_ok());
@@ -1198,6 +1204,7 @@ mod tests {
             password_reset_sent_at: None,
             password_reset_failed_attempts: 0,
             balance: 0,
+            wx_openid: None,
         };
         let result = check_balance_rbac(&target, "admin");
         assert!(result.is_ok());

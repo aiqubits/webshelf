@@ -1,9 +1,10 @@
 use crate::AppRouter;
-use crate::routes::helpers::{apply_rate_limit, post};
+use crate::routes::helpers::{apply_rate_limit, get, post};
 
 use crate::handlers::auth::{
     forgot_password, login, logout, refresh, register, resend_code, reset_password, verify_email,
 };
+use crate::handlers::wechat::{wechat_enabled, wx_login};
 use crate::middlewares::RateLimitGuard;
 use distributed_ratelimit::RedisRateLimiter;
 
@@ -58,5 +59,13 @@ pub fn auth_routes(rate_limiter: RedisRateLimiter) -> AppRouter {
         .merge(apply_rate_limit(
             AppRouter::new().route("/logout", post(logout)),
             make_guard("logout", 30, None),
+        ))
+        .merge(apply_rate_limit(
+            AppRouter::new().route("/wechat-enabled", get(wechat_enabled)),
+            make_guard("wechat-enabled", 60, None),
+        ))
+        .merge(apply_rate_limit(
+            AppRouter::new().route("/wx-login", post(wx_login)),
+            make_guard("wx-login", 20, None),
         ))
 }

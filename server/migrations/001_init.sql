@@ -20,11 +20,13 @@ CREATE TABLE IF NOT EXISTS users (
     password_reset_failed_attempts INTEGER NOT NULL DEFAULT 0,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    balance BIGINT NOT NULL DEFAULT 0
+    balance BIGINT NOT NULL DEFAULT 0,
+    wx_openid VARCHAR(255) UNIQUE
 );
 
--- Add balance column for existing dev databases that pre-date this column
-ALTER TABLE users ADD COLUMN IF NOT EXISTS balance BIGINT NOT NULL DEFAULT 0;
+-- Add wx_openid column for existing dev databases
+ALTER TABLE users ADD COLUMN IF NOT EXISTS wx_openid VARCHAR(255);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_users_wx_openid ON users(wx_openid);
 
 -- Idempotent ALTERs for existing dev databases that pre-date the password-reset columns.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS password_reset_token_hash VARCHAR(255);

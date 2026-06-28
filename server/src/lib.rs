@@ -42,6 +42,8 @@ pub struct AppState {
     pub cache: CacheService,
     pub config: Arc<AppConfig>,
     pub email: emailserver::EmailService,
+    /// WeChat captcha-login components (None when disabled).
+    pub wechat: Option<crate::services::wechat::WechatComponents>,
 }
 
 #[async_trait]

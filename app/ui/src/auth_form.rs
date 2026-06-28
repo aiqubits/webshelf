@@ -7,6 +7,7 @@ use crate::{EN, I18nContext};
 /// AuthForm —— 登录 / 注册 双模表单。
 ///
 /// 按 DESIGN.md §3.10 规格实现：玻璃面板 + 装饰光晕 + Tab 切换。
+/// 当 `show_captcha_input` 为 true 时，登录模式下额外显示微信验证码输入框。
 /// 业务逻辑（`on_submit`）由 web 层注入。
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum AuthMode {
@@ -24,6 +25,8 @@ pub struct AuthPayload {
     pub password: String,
     pub password_confirm: String,
     pub remember: bool,
+    /// WeChat captcha code (only relevant when wechat captcha-login is enabled).
+    pub captcha_code: String,
 }
 
 #[component]
@@ -33,6 +36,7 @@ pub fn AuthForm(
     email: Signal<String>,
     password: Signal<String>,
     password_confirm: Signal<String>,
+    #[props(default)] captcha_code: Option<Signal<String>>,
     #[props(default)] remember: Option<Signal<bool>>,
     #[props(default = false)] loading: bool,
     #[props(default)] error: Option<String>,
@@ -41,6 +45,9 @@ pub fn AuthForm(
     #[props(default)]
     on_forgot: Option<EventHandler<MouseEvent>>,
     on_submit: EventHandler<AuthPayload>,
+    /// 是否在登录模式下显示微信验证码输入框。前端应在确认服务端启用了 WeChat 功能后设为 true。
+    #[props(default = false)]
+    show_captcha_input: bool,
 ) -> Element {
     let i18n = try_use_context::<I18nContext>();
     let t = i18n.as_ref().map(|c| c.t()).unwrap_or(&EN);
@@ -79,6 +86,10 @@ pub fn AuthForm(
                             password: password.read().clone(),
                             password_confirm: password_confirm.read().clone(),
                             remember: remember.as_ref().map(|s| *s.read()).unwrap_or(false),
+                            captcha_code: captcha_code
+                                .as_ref()
+                                .map(|s| s.read().clone())
+                                .unwrap_or_default(),
                         });
                 },
                 if *mode.read() == AuthMode::Register {
@@ -125,9 +136,7 @@ pub fn AuthForm(
                             "new-password".to_string()
                         },
                     ),
-                    hint: if *mode.read() == AuthMode::Register { Some(
-                        t.auth_password_hint.to_string(),
-                    ) } else { None },
+                    hint: if *mode.read() == AuthMode::Register { Some(t.auth_password_hint.to_string()) } else { None },
                 }
 
                 if *mode.read() == AuthMode::Register {
@@ -140,6 +149,23 @@ pub fn AuthForm(
                         disabled: loading,
                         name: Some("password_confirm".to_string()),
                         autocomplete: Some("new-password".to_string()),
+                    }
+                }
+
+                if *mode.read() == AuthMode::Login && show_captcha_input {
+                    // Captcha login hint + code input (shown inside Login mode when WeChat enabled).
+                    p { class: "ws-auth__captcha-hint", "{t.auth_captcha_hint}" }
+                    if let Some(ref cc) = captcha_code {
+                        TextInput {
+                            label: t.auth_captcha_label.to_string(),
+                            placeholder: Some(t.auth_captcha_placeholder.to_string()),
+                            value: *cc,
+                            input_type: InputType::Text,
+                            required: true,
+                            disabled: loading,
+                            name: Some("captcha_code".to_string()),
+                            autocomplete: Some("off".to_string()),
+                        }
                     }
                 }
 

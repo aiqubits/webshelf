@@ -149,11 +149,14 @@ pub fn create_app_state(
     config: AppConfig,
 ) -> AppState {
     let email_service = emailserver::EmailService::new(config.email.clone());
+    let wechat =
+        crate::services::wechat::init_wechat_components(&config.wechat, &cache, db.clone());
     AppState {
         db,
         cache,
         config: Arc::new(config),
         email: email_service,
+        wechat,
     }
 }
 
@@ -307,6 +310,7 @@ async fn seed_system_admin(db: &sea_orm::DatabaseConnection, config: &AppConfig)
         password_reset_sent_at: Set(None),
         password_reset_failed_attempts: Set(0),
         balance: Set(0),
+        wx_openid: Set(None),
     };
 
     match user.insert(db).await {

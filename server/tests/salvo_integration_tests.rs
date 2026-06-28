@@ -38,6 +38,7 @@ async fn test_user_registration() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
 
@@ -47,6 +48,23 @@ async fn test_user_registration() {
     assert_eq!(body["message"], "User registered successfully");
     assert!(body["user_id"].is_string(), "user_id should be a string");
     assert_eq!(body["email_verified"], true);
+}
+
+#[tokio::test]
+async fn test_registration_password_confirm_mismatch() {
+    let server = create_server().await;
+    let email = common::unique_email("pwconfirm");
+
+    let payload = serde_json::json!({
+        "email": email,
+        "password": "Password123!",
+        "password_confirm": "DifferentPassword456!",
+        "name": "Test User"
+    });
+
+    let (status, body) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
+    assert_eq!(status, reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(body["error"], "bad_request");
 }
 
 #[tokio::test]
@@ -378,6 +396,7 @@ async fn test_refresh_token_rotation() {
     let register_payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
     let (status, _) =
@@ -587,6 +606,7 @@ async fn test_user_registration_conflict() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Conflict Test"
     });
 
@@ -611,6 +631,7 @@ async fn test_auto_verified_user_can_login() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "AutoVerify Test"
     });
 
@@ -645,6 +666,7 @@ async fn test_unverified_email_cannot_login() {
     let payload = serde_json::json!({
         "email": email,
         "password": password,
+        "password_confirm": password,
         "name": "Unverified Test"
     });
     let (status, body) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -898,6 +920,7 @@ async fn test_resend_code_with_unconfigured_email_service() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Resend200"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -951,6 +974,7 @@ async fn test_resend_code_unverified_user_returns_503() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Resend503"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -998,6 +1022,7 @@ async fn test_forgot_password_email_not_configured() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "FPG Test"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -1048,6 +1073,7 @@ async fn test_reset_password_success_and_token_invalidation() {
     let payload = serde_json::json!({
         "email": email,
         "password": original_password,
+        "password_confirm": original_password,
         "name": "Reset OK"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -1119,6 +1145,7 @@ async fn test_reset_password_wrong_code() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Wrong Code"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -1161,6 +1188,7 @@ async fn test_reset_password_expired_code() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Expired Code"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;

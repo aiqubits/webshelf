@@ -51,6 +51,7 @@ pub async fn create_test_server() -> TestServer {
         cache,
         config,
         email: common::default_email_service(),
+        wechat: None,
     };
 
     // 使用生产级的 build_app_router，注入禁用的 rate limiter 以避免测试中
@@ -205,6 +206,7 @@ pub async fn register_and_login(server: &TestServer, email: &str) -> String {
     let register_payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
 
@@ -231,6 +233,7 @@ pub async fn create_test_state() -> webshelf_server::AppState {
         cache,
         config,
         email: crate::common::default_email_service(),
+        wechat: None,
     }
 }
 
@@ -239,6 +242,7 @@ pub async fn register_and_login_with_refresh(server: &TestServer, email: &str) -
     let register_payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
     let (status, _) = post_json(server, "/api/public/auth/register", &register_payload).await;

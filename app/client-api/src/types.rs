@@ -12,6 +12,9 @@ pub struct LoginRequest {
     pub password: String,
     #[serde(default)]
     pub remember: bool,
+    /// WeChat captcha code (only required when wechat captcha-login is enabled).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captcha_code: Option<String>,
 }
 
 /// Login response
@@ -34,6 +37,8 @@ pub struct RegisterRequest {
     pub email: String,
     pub password: String,
     pub name: String,
+    /// Password confirmation (must match password).
+    pub password_confirm: String,
     #[serde(default)]
     pub remember: bool,
 }
@@ -237,6 +242,32 @@ pub struct ChangePasswordRequest {
 pub struct ChangePasswordResponse {
     pub message: String,
     pub new_token: String,
+}
+
+// ──────────────────────────────────────────────
+//  WeChat captcha-login types
+// ──────────────────────────────────────────────
+
+/// WeChat captcha login request body
+#[derive(Debug, Serialize)]
+pub struct WxLoginRequest {
+    pub code: String,
+}
+
+/// WeChat captcha login response
+#[derive(Debug, Deserialize)]
+pub struct WxLoginResponse {
+    pub token: String,
+    pub token_type: String,
+    pub expires_in: u64,
+    pub user_id: String,
+    pub role: String,
+}
+
+/// WeChat enabled check response
+#[derive(Debug, Deserialize)]
+pub struct WechatEnabledResponse {
+    pub enabled: bool,
 }
 
 // ──────────────────────────────────────────────

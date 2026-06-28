@@ -60,6 +60,12 @@ translate! {
     login_name_empty: "Username cannot be empty" => "用户名不能为空",
     login_name_length: "Username must be between 6 and 50 characters" => "用户名长度为 6-50 个字符",
     login_password_mismatch: "Passwords do not match" => "两次输入的密码不一致",
+    login_captcha_empty: "Captcha code cannot be empty" => "验证码不能为空",
+    auth_captcha_tab: "Captcha" => "验证码",
+    auth_captcha_hint: "Send \"验证码\" to our WeChat Official Account, then enter the code you received below" => "发送「验证码」至微信公众号，将收到的验证码填入下方",
+    auth_captcha_label: "Captcha Code" => "验证码",
+    auth_captcha_placeholder: "Enter the code from WeChat" => "请输入微信收到的验证码",
+    auth_submit_captcha: "Sign In with Captcha" => "验证码登录",
 
     // dashboard.rs
     dashboard_title: "Welcome to WebShelf Rust Fullend System 🚀" => "欢迎来到 WebShelf Rust 全端管理系统 🚀",

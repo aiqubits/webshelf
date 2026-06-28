@@ -66,17 +66,33 @@ pub fn LoginLanding() -> Element {
     let mut email = use_signal(String::new);
     let mut password = use_signal(String::new);
     let mut password_confirm = use_signal(String::new);
+    let mut captcha_code = use_signal(String::new);
     let remember = use_signal(|| false);
     let mut loading = use_signal(|| false);
     let mut error_msg = use_signal(|| Option::<String>::None);
+    let mut wechat_enabled = use_signal(|| false);
 
-    // 每次切换登录/注册模式时清空表单与状态
+    // 检查服务端是否启用了 WeChat 验证码登录功能
+    {
+        let client = auth.client.clone();
+        use_effect(move || {
+            let client = client.clone();
+            spawn(async move {
+                if let Ok(resp) = client.wechat_enabled().await {
+                    wechat_enabled.set(resp.enabled);
+                }
+            });
+        });
+    }
+
+    // 每次切换登录/注册/验证码模式时清空表单与状态
     use_effect(move || {
         let _ = mode();
         name.set(String::new());
         email.set(String::new());
         password.set(String::new());
         password_confirm.set(String::new());
+        captcha_code.set(String::new());
         error_msg.set(None);
         loading.set(false);
     });
@@ -99,9 +115,11 @@ pub fn LoginLanding() -> Element {
                     email,
                     password,
                     password_confirm,
+                    captcha_code: Some(captcha_code),
                     remember: Some(remember),
                     loading: *loading.read(),
                     error: error_msg.read().clone(),
+                    show_captcha_input: *wechat_enabled.read(),
                     on_forgot: move |_: MouseEvent| {
                         nav.push(Route::ForgotPassword {});
                     },
@@ -110,6 +128,12 @@ pub fn LoginLanding() -> Element {
                             return;
                         }
                         // 前端表单校验
+                        if payload.mode == AuthMode::Login && *wechat_enabled.read()
+                            && payload.captcha_code.trim().is_empty()
+                        {
+                            error_msg.set(Some(t.login_captcha_empty.to_string()));
+                            return;
+                        }
                         if payload.email.trim().is_empty() {
                             error_msg.set(Some(t.login_email_empty.to_string()));
                             return;
@@ -136,6 +160,7 @@ pub fn LoginLanding() -> Element {
                         let payload_email = payload.email.clone();
                         let payload_password = payload.password.clone();
                         let payload_name = payload.name.clone();
+                        let payload_captcha_code = payload.captcha_code.clone();
                         let payload_mode = payload.mode;
                         let payload_remember = payload.remember;
 
@@ -152,8 +177,18 @@ pub fn LoginLanding() -> Element {
                             let result: Result<SubmitAction, client_api::ClientError> = match payload_mode {
                                 AuthMode::Login => {
                                     let path = "/api/public/auth/login".to_string();
+                                    let captcha = if payload_captcha_code.is_empty() {
+                                        None
+                                    } else {
+                                        Some(payload_captcha_code.clone())
+                                    };
                                     let res = auth_async
-                                        .login(&payload_email, &payload_password, payload_remember)
+                                        .login(
+                                            &payload_email,
+                                            &payload_password,
+                                            payload_remember,
+                                            captcha,
+                                        )
                                         .await;
                                     if *mode_check.read() == AuthMode::Login {
                                         push_log_result(bus_async, HttpMethod::Post, &path, &res);
@@ -165,9 +200,10 @@ pub fn LoginLanding() -> Element {
                                     let res = auth_async
                                         .register(
                                             &payload_email,
-                                            &payload_password,
+                                            &payload_password, // 导航由 auth.user 变化触发的 use_effect 统一处理
                                             &payload_name,
                                             payload_remember,
+                                            &payload.password_confirm,
                                         )
                                         .await;
                                     if *mode_check.read() == AuthMode::Register {
@@ -183,11 +219,9 @@ pub fn LoginLanding() -> Element {
                                     })
                                 }
                             };
-
                             loading.set(false);
-
                             match result {
-                                Ok(SubmitAction::Nothing) => {} // 导航由 auth.user 变化触发的 use_effect 统一处理
+                                Ok(SubmitAction::Nothing) => {}
                                 Ok(SubmitAction::NavigateToVerify { email }) => {
                                     nav_async.push(Route::VerifyEmail { email });
                                 }

@@ -1,12 +1,13 @@
 //! Axum-specific bootstrap: CORS configuration and router construction.
 
+use crate::handlers::wechat::{wechat_callback_get, wechat_callback_post};
 use crate::middlewares::{auth_middleware, panic_middleware};
 use crate::routes::{api_routes, auth_routes};
 use crate::{AppRouter, AppState};
 use distributed_ratelimit::RedisRateLimiter;
 use webshelf_axum::{
     Any, CompressionLayer, CorsLayer, HeaderValue, Method, RequestBodyLimitLayer, TraceLayer,
-    from_fn, from_fn_with_state,
+    from_fn, from_fn_with_state, get, post,
 };
 
 /// Configure CORS layer (Axum mode)
@@ -114,6 +115,15 @@ pub fn build_app_router(state: AppState, env: &str, rate_limiter: RedisRateLimit
             )),
         )
         .nest("/api/public/auth", auth_routes(rate_limiter))
+        // Conditionally register WeChat callback routes.
+        .merge(if state.wechat.is_some() {
+            AppRouter::new().route(
+                "/api/public/wechat/callback",
+                get(wechat_callback_get).merge(post(wechat_callback_post)),
+            )
+        } else {
+            AppRouter::new()
+        })
         .layer(from_fn(panic_middleware))
         .layer(TraceLayer::new_for_http())
         .layer(cors)

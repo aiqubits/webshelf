@@ -27,6 +27,7 @@ async fn test_normal_request_allowed() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -55,6 +56,7 @@ async fn test_login_endpoint_has_rate_limiting_configured() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;

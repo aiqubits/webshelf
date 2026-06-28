@@ -351,13 +351,20 @@ impl AuthState {
     /// 均通过 httpOnly cookie 下发；`remember = false` 时签发 1 小时 JWT。
     /// 前端将 JWT token 保存到 sessionStorage（页面刷新后恢复），
     /// 并将 JWT 过期时间保存到可读 cookie。
+    ///
+    /// `captcha_code` 是可选的微信验证码 —— 当后端启用微信验证码登录时，
+    /// 需传入用户在微信公众号获取的验证码才能完成登录。
     pub async fn login(
         &mut self,
         email: &str,
         password: &str,
         remember: bool,
+        captcha_code: Option<String>,
     ) -> Result<LoginResponse, ClientError> {
-        let resp = self.client.login(email, password, remember).await?;
+        let resp = self
+            .client
+            .login(email, password, remember, captcha_code)
+            .await?;
         let expires_at = now_unix_secs() + resp.expires_in;
         self.client.set_token(&resp.token);
         self.token_expires_at.set(Some(expires_at));
@@ -405,14 +412,15 @@ impl AuthState {
         password: &str,
         name: &str,
         remember: bool,
+        password_confirm: &str,
     ) -> Result<RegisterOutcome, ClientError> {
         let resp: RegisterResponse = self
             .client
-            .register(email, password, name, remember)
+            .register(email, password, name, remember, password_confirm)
             .await?;
 
         if resp.email_verified {
-            self.login(email, password, remember).await?;
+            self.login(email, password, remember, None).await?;
             Ok(RegisterOutcome::LoggedIn)
         } else {
             self.set_pending_registration(PendingRegistration {

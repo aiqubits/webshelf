@@ -31,7 +31,7 @@ async fn test_login_success() {
         .await;
 
     let result = client
-        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD, false)
+        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD, false, None)
         .await;
 
     assert!(result.is_ok());
@@ -65,7 +65,7 @@ async fn test_login_admin_role() {
         .await;
 
     let result = client
-        .login("admin@example.com", "admin123!@#", false)
+        .login("admin@example.com", "admin123!@#", false, None)
         .await;
 
     assert!(result.is_ok());
@@ -88,7 +88,7 @@ async fn test_login_invalid_credentials() {
         .await;
 
     let result = client
-        .login("wrong@example.com", "wrongpassword", false)
+        .login("wrong@example.com", "wrongpassword", false, None)
         .await;
 
     match result.unwrap_err() {
@@ -122,7 +122,7 @@ async fn test_login_body_matches_request() {
         .await;
 
     let result = client
-        .login(fixtures::TEST_EMAIL, "my-password", false)
+        .login(fixtures::TEST_EMAIL, "my-password", false, None)
         .await;
     assert!(result.is_ok());
 }
@@ -142,6 +142,7 @@ async fn test_register_success() {
             "password": "SecurePass123!",
             "name": "New User",
             "remember": false,
+            "password_confirm": "SecurePass123!",
         })))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "message": "User registered successfully",
@@ -151,7 +152,13 @@ async fn test_register_success() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User", false)
+        .register(
+            "newuser@example.com",
+            "SecurePass123!",
+            "New User",
+            false,
+            "SecurePass123!",
+        )
         .await;
 
     assert!(result.is_ok());
@@ -179,6 +186,7 @@ async fn test_register_email_conflict() {
             "SecurePass123!",
             "Existing User",
             false,
+            "SecurePass123!",
         )
         .await;
 
@@ -204,7 +212,7 @@ async fn test_register_validation_error() {
         .await;
 
     let result = client
-        .register("test@example.com", "short", "Test User", false)
+        .register("test@example.com", "short", "Test User", false, "short")
         .await;
 
     match result.unwrap_err() {
@@ -344,7 +352,13 @@ async fn test_register_response_parses_email_verified_false() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User", false)
+        .register(
+            "newuser@example.com",
+            "SecurePass123!",
+            "New User",
+            false,
+            "SecurePass123!",
+        )
         .await;
 
     assert!(result.is_ok());
@@ -367,7 +381,13 @@ async fn test_register_response_parses_email_verified_true() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User", false)
+        .register(
+            "newuser@example.com",
+            "SecurePass123!",
+            "New User",
+            false,
+            "SecurePass123!",
+        )
         .await;
 
     assert!(result.is_ok());
@@ -390,7 +410,13 @@ async fn test_register_response_missing_email_verified_defaults_to_false() {
         .await;
 
     let result = client
-        .register("newuser@example.com", "SecurePass123!", "New User", false)
+        .register(
+            "newuser@example.com",
+            "SecurePass123!",
+            "New User",
+            false,
+            "SecurePass123!",
+        )
         .await;
 
     assert!(result.is_ok());
@@ -419,7 +445,7 @@ async fn test_login_and_use_token_for_authenticated_request() {
         .await;
 
     let login = client
-        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD, false)
+        .login(fixtures::TEST_EMAIL, fixtures::TEST_PASSWORD, false, None)
         .await
         .unwrap();
     client.set_token(&login.token);

@@ -67,6 +67,9 @@ pub struct Model {
     /// User balance (stored as big value, 1 display unit = 10^10 stored units)
     #[sea_orm(default_value = 0)]
     pub balance: i64,
+
+    /// WeChat Official Account openid (bound on first wx-login)
+    pub wx_openid: Option<String>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -121,6 +124,13 @@ pub struct UserResponse {
     pub token_version: i32,
     /// User balance (stored as big value)
     pub balance: i64,
+    /// WeChat Official Account openid (bound on first wx-login)
+    /// NOTE: This is PII — always skipped from API responses to prevent
+    /// accidental exposure via list/get-user endpoints.  If the owning user
+    /// needs to see their binding status, add a dedicated bool flag or
+    /// a separate profile response struct.
+    #[serde(skip)]
+    pub wx_openid: Option<String>,
 }
 
 impl From<Model> for UserResponse {
@@ -135,6 +145,7 @@ impl From<Model> for UserResponse {
             updated_at: model.updated_at,
             token_version: model.token_version,
             balance: model.balance,
+            wx_openid: model.wx_openid,
         }
     }
 }
@@ -168,6 +179,7 @@ mod tests {
             password_reset_sent_at: None,
             password_reset_failed_attempts: 0,
             balance: 0,
+            wx_openid: None,
         };
 
         let response = UserResponse::from(model.clone());
@@ -179,6 +191,7 @@ mod tests {
         assert_eq!(response.created_at, now);
         assert_eq!(response.updated_at, now);
         assert_eq!(response.token_version, 1);
+        assert_eq!(response.wx_openid, None);
     }
 
     #[test]
@@ -234,6 +247,7 @@ mod tests {
             updated_at: now,
             token_version: 1,
             balance: 500,
+            wx_openid: None,
         };
 
         let json = serde_json::to_string(&response).unwrap();
@@ -242,6 +256,8 @@ mod tests {
         assert!(json.contains("user"));
         // token_version is intentionally skipped from external API responses
         assert!(!json.contains("token_version"));
+        // wx_openid is PII — intentionally skipped from all API responses
+        assert!(!json.contains("wx_openid"));
         // balance should be present in API responses
         assert!(json.contains("balance"));
     }

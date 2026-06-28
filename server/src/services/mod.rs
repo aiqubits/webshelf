@@ -4,6 +4,7 @@ pub mod lock;
 pub mod password_reset;
 pub mod user;
 pub mod verification;
+pub mod wechat;
 
 pub use auth::{AuthError, AuthService};
 pub use cache::CacheService;

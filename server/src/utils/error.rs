@@ -1,5 +1,6 @@
 use thiserror::Error;
 use webshelf_runtime::HttpError;
+use wechat_api::WechatError;
 
 /// Unified API error type for HTTP boundary
 #[derive(Error, Debug)]
@@ -178,9 +179,49 @@ impl From<crate::services::password_reset::PasswordResetError> for ApiError {
     }
 }
 
+// Convert WechatError to ApiError for WeChat captcha-login error mapping
+impl From<WechatError> for ApiError {
+    fn from(err: WechatError) -> Self {
+        match err {
+            WechatError::CaptchaNotFound | WechatError::CaptchaMismatch => {
+                ApiError::BadRequest("Invalid or expired captcha code".to_string())
+            }
+            WechatError::TooManyAttempts => {
+                tracing::warn!("Captcha brute-force limit reached");
+                ApiError::BadRequest("Invalid or expired captcha code".to_string())
+            }
+            WechatError::CooldownActive => {
+                ApiError::BadRequest("Please wait before requesting a new code".to_string())
+            }
+            WechatError::UserNotBound(_) => {
+                ApiError::BadRequest("WeChat account is not bound to any user".to_string())
+            }
+            WechatError::ConfigIncomplete(msg) => {
+                tracing::warn!("WeChat config incomplete: {msg}");
+                ApiError::ServiceUnavailable("WeChat login is not fully configured".to_string())
+            }
+            WechatError::SignatureMismatch | WechatError::XmlParse(_) | WechatError::Decrypt(_) => {
+                ApiError::BadRequest("Invalid WeChat callback".to_string())
+            }
+            WechatError::ApiRequest(msg) | WechatError::Store(msg) => {
+                tracing::error!("WeChat API/Store error: {msg}");
+                ApiError::Internal("An unexpected error occurred".to_string())
+            }
+            WechatError::ApiBusiness { errcode, errmsg } => {
+                tracing::error!("WeChat API business error (code={errcode}): {errmsg}");
+                ApiError::Internal("An unexpected error occurred".to_string())
+            }
+            WechatError::Internal(_) => {
+                ApiError::Internal("An unexpected error occurred".to_string())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use wechat_api::WechatError;
 
     #[test]
     fn test_error_display() {
@@ -189,5 +230,116 @@ mod tests {
 
         let error = ApiError::Forbidden("Access denied".to_string());
         assert_eq!(error.to_string(), "Forbidden: Access denied");
+    }
+
+    // ── WechatError → ApiError mapping ────────────────────────────────────
+
+    /// All captcha-validation errors share the same generic message to prevent
+    /// attackers from distinguishing "wrong code" from "expired" from
+    /// "nonexistent" (anti-enumeration).
+    const GENERIC_CAPTCHA_MSG: &str = "Invalid or expired captcha code";
+    const GENERIC_INTERNAL_MSG: &str = "An unexpected error occurred";
+
+    #[test]
+    fn test_wechat_captcha_not_found_maps_to_generic() {
+        let api = ApiError::from(WechatError::CaptchaNotFound);
+        assert!(matches!(api, ApiError::BadRequest(ref m) if m == GENERIC_CAPTCHA_MSG));
+    }
+
+    #[test]
+    fn test_wechat_captcha_mismatch_maps_to_generic() {
+        let api = ApiError::from(WechatError::CaptchaMismatch);
+        assert!(matches!(api, ApiError::BadRequest(ref m) if m == GENERIC_CAPTCHA_MSG));
+    }
+
+    #[test]
+    fn test_wechat_too_many_attempts_maps_to_generic() {
+        // TooManyAttempts also uses the same generic message (no hint about
+        // brute-force detection).
+        let api = ApiError::from(WechatError::TooManyAttempts);
+        assert!(matches!(api, ApiError::BadRequest(ref m) if m == GENERIC_CAPTCHA_MSG));
+    }
+
+    #[test]
+    fn test_wechat_cooldown_active() {
+        let api = ApiError::from(WechatError::CooldownActive);
+        assert!(
+            matches!(api, ApiError::BadRequest(ref m) if m == "Please wait before requesting a new code")
+        );
+    }
+
+    #[test]
+    fn test_wechat_user_not_bound() {
+        let api = ApiError::from(WechatError::UserNotBound("oActualOpenId".into()));
+        assert!(
+            matches!(api, ApiError::BadRequest(ref m) if m == "WeChat account is not bound to any user")
+        );
+        // The openid must NOT leak into the response.
+        assert!(!api.to_string().contains("oActualOpenId"));
+    }
+
+    #[test]
+    fn test_wechat_config_incomplete() {
+        let api = ApiError::from(WechatError::ConfigIncomplete("missing app_id".into()));
+        assert!(
+            matches!(api, ApiError::ServiceUnavailable(ref m) if m == "WeChat login is not fully configured")
+        );
+        // Specific reason must NOT be exposed to the client.
+        assert!(!api.to_string().contains("missing app_id"));
+    }
+
+    #[test]
+    fn test_wechat_signature_mismatch() {
+        let api = ApiError::from(WechatError::SignatureMismatch);
+        assert!(matches!(api, ApiError::BadRequest(ref m) if m == "Invalid WeChat callback"));
+    }
+
+    #[test]
+    fn test_wechat_xml_parse_hides_details() {
+        let api = ApiError::from(WechatError::XmlParse("malformed XML at line 7".into()));
+        assert!(matches!(api, ApiError::BadRequest(ref m) if m == "Invalid WeChat callback"));
+        assert!(!api.to_string().contains("malformed XML"));
+    }
+
+    #[test]
+    fn test_wechat_decrypt_hides_details() {
+        let api = ApiError::from(WechatError::Decrypt("AES key too short".into()));
+        assert!(matches!(api, ApiError::BadRequest(ref m) if m == "Invalid WeChat callback"));
+        assert!(!api.to_string().contains("AES key"));
+    }
+
+    #[test]
+    fn test_wechat_api_request_hides_internal_details() {
+        let api = ApiError::from(WechatError::ApiRequest("connection refused".into()));
+        assert!(matches!(api, ApiError::Internal(ref m) if m == GENERIC_INTERNAL_MSG));
+        assert!(!api.to_string().contains("connection refused"));
+    }
+
+    #[test]
+    fn test_wechat_store_hides_internal_details() {
+        let api = ApiError::from(WechatError::Store("redis timeout".into()));
+        assert!(matches!(api, ApiError::Internal(ref m) if m == GENERIC_INTERNAL_MSG));
+        assert!(!api.to_string().contains("redis timeout"));
+    }
+
+    #[test]
+    fn test_wechat_api_business_hides_errcode() {
+        let api = ApiError::from(WechatError::ApiBusiness {
+            errcode: 40013,
+            errmsg: "invalid appid".into(),
+        });
+        assert!(matches!(api, ApiError::Internal(ref m) if m == GENERIC_INTERNAL_MSG));
+        // Errcode and errmsg must not leak to the client.
+        assert!(!api.to_string().contains("40013"));
+        assert!(!api.to_string().contains("invalid appid"));
+    }
+
+    #[test]
+    fn test_wechat_internal_hides_details() {
+        let api = ApiError::from(WechatError::Internal(anyhow::anyhow!(
+            "db connection pool exhausted"
+        )));
+        assert!(matches!(api, ApiError::Internal(ref m) if m == GENERIC_INTERNAL_MSG));
+        assert!(!api.to_string().contains("db connection"));
     }
 }
