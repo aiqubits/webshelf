@@ -1268,6 +1268,7 @@ async fn test_old_token_invalidated_after_role_change() {
     let register_payload = json!({
         "email": &user_email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "RoleChange Test"
     });
 
@@ -2264,6 +2265,7 @@ async fn test_reset_password_success_and_token_invalidation() {
                     serde_json::to_string(&json!({
                         "email": &email,
                         "password": original_password,
+                        "password_confirm": original_password,
                         "name": "Reset OK"
                     }))
                     .unwrap(),
