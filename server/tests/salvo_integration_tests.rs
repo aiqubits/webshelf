@@ -117,6 +117,7 @@ async fn test_login_invalid_credentials() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
@@ -350,6 +351,7 @@ async fn test_verify_email_rejects_already_verified_user() {
     let payload = serde_json::json!({
         "email": email,
         "password": "Password123!",
+        "password_confirm": "Password123!",
         "name": "Test User"
     });
     let (status, _) = salvo::post_json(&server, "/api/public/auth/register", &payload).await;
