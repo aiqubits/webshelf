@@ -13,6 +13,7 @@ FROM rust:1.92.0-slim AS builder
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
+    curl \
     pkg-config \
     libssl-dev \
     && rm -rf /var/lib/apt/lists/*
@@ -21,11 +22,6 @@ RUN apt-get update && apt-get install -y \
 RUN rustup target add wasm32-unknown-unknown
 
 # Install dioxus-cli via cargo-binstall for pre-built binaries (much faster than cargo install).
-# Uses a pinned version and optional SHA256 checksum verification to prevent supply-chain attacks.
-# For CI/production builds, set BINSTALL_SHA256 via --build-arg:
-#   docker build --build-arg BINSTALL_SHA256=<sha256> -f Dockerfile.web .
-# To obtain the SHA256:
-#   curl -sL "https://github.com/cargo-bins/cargo-binstall/releases/download/v1.10.22/cargo-binstall-$(uname -m)-unknown-linux-musl.tgz" | sha256sum
 ENV BINSTALL_VERSION=v1.10.22
 ARG BINSTALL_SHA256=
 RUN curl -L --proto '=https' --tlsv1.2 -sSf \
@@ -35,64 +31,83 @@ RUN curl -L --proto '=https' --tlsv1.2 -sSf \
         echo "${BINSTALL_SHA256}  /tmp/binstall.tgz" | sha256sum -c -; \
     else \
         echo "WARNING: BINSTALL_SHA256 not set — skipping checksum verification."; \
-        echo "         For production builds, set --build-arg BINSTALL_SHA256=<hash>"; \
     fi && \
     tar xzf /tmp/binstall.tgz -C /usr/local/cargo/bin && \
     rm /tmp/binstall.tgz
 RUN cargo binstall dioxus-cli --version 0.7.9 -y
 
-# Copy workspace root and web crate manifests for dependency caching
+# ── Copy all workspace Cargo.toml manifests for dependency caching ──
 COPY Cargo.toml Cargo.lock ./
 COPY app/web/Cargo.toml ./app/web/Cargo.toml
 COPY app/web/Dioxus.toml ./app/web/Dioxus.toml
 COPY app/ui/Cargo.toml ./app/ui/Cargo.toml
-
-# Create dummy files for desktop/mobile members so cargo fetch can resolve all workspace members.
-# Neither package is built in this Dockerfile, but Cargo requires all member manifests to exist.
 COPY app/desktop/Cargo.toml ./app/desktop/Cargo.toml
 COPY app/mobile/Cargo.toml ./app/mobile/Cargo.toml
-
-# Copy emailserver crate manifest for cargo fetch to resolve workspace members.
-COPY crates/emailserver/Cargo.toml ./crates/emailserver/Cargo.toml
-
-# Create dummy source files to cache dependencies
-RUN mkdir -p app/web/src && echo 'fn main() {}' > app/web/src/main.rs
-RUN mkdir -p app/ui/src && echo 'pub fn placeholder() {}' > app/ui/src/lib.rs
-RUN mkdir -p server/src && echo 'fn main() {}' > server/src/main.rs
-RUN mkdir -p app/desktop/src && echo 'fn main() {}' > app/desktop/src/main.rs
-RUN mkdir -p app/mobile/src && echo 'fn main() {}' > app/mobile/src/main.rs
-RUN mkdir -p crates/emailserver/src && echo 'pub fn placeholder() {}' > crates/emailserver/src/lib.rs
+COPY app/client-api/Cargo.toml ./app/client-api/Cargo.toml
 COPY server/Cargo.toml ./server/Cargo.toml
+COPY crates/emailserver/Cargo.toml ./crates/emailserver/Cargo.toml
+COPY crates/distributed-ratelimit/Cargo.toml ./crates/distributed-ratelimit/Cargo.toml
+COPY crates/i18n/Cargo.toml ./crates/i18n/Cargo.toml
+COPY crates/wechat-api/Cargo.toml ./crates/wechat-api/Cargo.toml
+COPY crates/webshelf-runtime/Cargo.toml ./crates/webshelf-runtime/Cargo.toml
+COPY crates/webshelf-axum/Cargo.toml ./crates/webshelf-axum/Cargo.toml
+COPY crates/webshelf-salvo/Cargo.toml ./crates/webshelf-salvo/Cargo.toml
 
-# Fetch all dependencies first (fails on network errors, not on compilation)
+# ── Create dummy source files for ALL workspace members ──
+# Required for cargo fetch to resolve all workspace members.
+RUN for dir in \
+    server app/web app/ui app/desktop app/mobile app/client-api \
+    crates/emailserver crates/distributed-ratelimit crates/i18n \
+    crates/wechat-api crates/webshelf-runtime crates/webshelf-axum \
+    crates/webshelf-salvo; do \
+        mkdir -p "$dir/src"; \
+    done && \
+    echo 'fn main() {}' > app/web/src/main.rs && \
+    echo 'pub fn placeholder() {}' > app/ui/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > server/src/lib.rs && \
+    echo 'fn main() {}' > server/src/main.rs && \
+    echo 'fn main() {}' > app/desktop/src/main.rs && \
+    echo 'fn main() {}' > app/mobile/src/main.rs && \
+    echo 'pub fn placeholder() {}' > app/client-api/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/emailserver/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/distributed-ratelimit/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/i18n/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/wechat-api/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/webshelf-runtime/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/webshelf-axum/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/webshelf-salvo/src/lib.rs
+
+# Fetch all dependencies (fails on network errors)
 RUN cargo fetch
 
-# Pre-build to compile dependencies and cache them.
-# || true is needed because dummy source files (placeholder main/lib) cause
-# compilation errors — this is expected and harmless. Dependency download errors
-# are already caught by the cargo fetch step above.
+# Pre-build to compile and cache dependencies.
+# Dummy sources cause compilation errors for some packages — harmless.
 RUN cargo build --package web --target wasm32-unknown-unknown --release || true
 
-# Copy real source code
+# ── Copy real source code ──
 COPY app/web/src ./app/web/src
 COPY app/web/assets ./app/web/assets
 COPY app/ui/src ./app/ui/src
 COPY app/ui/assets ./app/ui/assets
+COPY crates/i18n/src ./crates/i18n/src
+COPY app/client-api/src ./app/client-api/src
 
-# Build the Dioxus frontend
-WORKDIR /app/app/web
-RUN dx build --release
+# Touch all copied crate source files to invalidate pre-build cache
+RUN find app/web/src app/ui/src crates/i18n/src app/client-api/src \
+    -type f -name '*.rs' -exec touch {} +
 
-# ============================================
-# Runtime stage - nginx static file server
-# ============================================
+# Build the Dioxus frontend (from workspace root for correct path resolution)
+WORKDIR /app
+RUN dx build --release --package web --platform web
+
+# ── Runtime stage - nginx static file server ──
 FROM nginx:alpine AS runtime
 
 # Install curl for health checks
 RUN apk add --no-cache curl
 
-# Copy built frontend assets
-COPY --from=builder /app/app/web/dist /usr/share/nginx/html
+# Copy built frontend assets (Dioxus outputs to target/dx/<package>/release/<platform>/public)
+COPY --from=builder /app/target/dx/web/release/web/public /usr/share/nginx/html
 
 # Copy default nginx configuration (can be overridden via volume mount)
 COPY nginx/default.conf /etc/nginx/conf.d/default.conf

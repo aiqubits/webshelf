@@ -14,60 +14,73 @@ RUN apt-get update && apt-get install -y \
     libpq-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Copy workspace root and server crate manifests for dependency caching
+# ── Copy all workspace Cargo.toml manifests for dependency caching ──
 COPY Cargo.toml Cargo.lock ./
 COPY server/Cargo.toml ./server/Cargo.toml
-
-# Create dummy source files to cache dependencies
-RUN mkdir -p server/src && \
-    echo 'pub fn placeholder() {}' > server/src/lib.rs && \
-    echo 'fn main() {}' > server/src/main.rs
-RUN mkdir -p app/web/src && echo 'fn main() {}' > app/web/src/main.rs
-RUN mkdir -p app/ui/src && echo 'pub fn placeholder() {}' > app/ui/src/lib.rs
 COPY app/web/Cargo.toml ./app/web/Cargo.toml
 COPY app/ui/Cargo.toml ./app/ui/Cargo.toml
-
-# Create dummy files for desktop/mobile members so cargo fetch can resolve all workspace members.
-# Neither package is built in this Dockerfile, but Cargo requires all member manifests to exist.
-RUN mkdir -p app/desktop/src && echo 'fn main() {}' > app/desktop/src/main.rs
-RUN mkdir -p app/mobile/src && echo 'fn main() {}' > app/mobile/src/main.rs
 COPY app/desktop/Cargo.toml ./app/desktop/Cargo.toml
 COPY app/mobile/Cargo.toml ./app/mobile/Cargo.toml
-
-# Copy emailserver crate manifest for cargo fetch to resolve workspace members.
+COPY app/client-api/Cargo.toml ./app/client-api/Cargo.toml
 COPY crates/emailserver/Cargo.toml ./crates/emailserver/Cargo.toml
-RUN mkdir -p crates/emailserver/src && echo 'pub fn placeholder() {}' > crates/emailserver/src/lib.rs
-
-# Copy webshelf-runtime and webshelf-axum manifests for dependency caching.
+COPY crates/distributed-ratelimit/Cargo.toml ./crates/distributed-ratelimit/Cargo.toml
+COPY crates/i18n/Cargo.toml ./crates/i18n/Cargo.toml
+COPY crates/wechat-api/Cargo.toml ./crates/wechat-api/Cargo.toml
 COPY crates/webshelf-runtime/Cargo.toml ./crates/webshelf-runtime/Cargo.toml
-RUN mkdir -p crates/webshelf-runtime/src && echo 'pub fn placeholder() {}' > crates/webshelf-runtime/src/lib.rs
 COPY crates/webshelf-axum/Cargo.toml ./crates/webshelf-axum/Cargo.toml
-RUN mkdir -p crates/webshelf-axum/src && echo 'pub fn placeholder() {}' > crates/webshelf-axum/src/lib.rs
+COPY crates/webshelf-salvo/Cargo.toml ./crates/webshelf-salvo/Cargo.toml
 
-# Fetch all dependencies first (fails on network errors, not on compilation)
+# ── Create dummy source files for ALL workspace members ──
+# Required for cargo fetch to resolve all workspace members.
+RUN for dir in \
+    server app/web app/ui app/desktop app/mobile app/client-api \
+    crates/emailserver crates/distributed-ratelimit crates/i18n \
+    crates/wechat-api crates/webshelf-runtime crates/webshelf-axum \
+    crates/webshelf-salvo; do \
+        mkdir -p "$dir/src"; \
+    done && \
+    echo 'pub fn placeholder() {}' > server/src/lib.rs && \
+    echo 'fn main() {}' > server/src/main.rs && \
+    echo 'fn main() {}' > app/web/src/main.rs && \
+    echo 'pub fn placeholder() {}' > app/ui/src/lib.rs && \
+    echo 'fn main() {}' > app/desktop/src/main.rs && \
+    echo 'fn main() {}' > app/mobile/src/main.rs && \
+    echo 'pub fn placeholder() {}' > app/client-api/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/emailserver/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/distributed-ratelimit/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/i18n/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/wechat-api/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/webshelf-runtime/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/webshelf-axum/src/lib.rs && \
+    echo 'pub fn placeholder() {}' > crates/webshelf-salvo/src/lib.rs
+
+# Fetch all dependencies (fails on network errors)
 RUN cargo fetch
 
-# Pre-build to compile dependencies and cache them.
-# || true is needed because dummy source files (placeholder main/lib) cause
-# compilation errors — this is expected and harmless. Dependency download errors
-# are already caught by the cargo fetch step above.
+# Pre-build to compile and cache dependencies.
+# Dummy sources cause compilation errors for some packages — harmless.
+# The || true swallows those errors while preserving cached dependency artifacts.
 RUN cargo build --release --package webshelf-server || true
 
-# Copy real source code and rebuild
+# ── Copy real source code ──
 COPY server/src ./server/src
 COPY server/migrations ./server/migrations
 COPY crates/emailserver/src ./crates/emailserver/src
+COPY crates/distributed-ratelimit/src ./crates/distributed-ratelimit/src
+COPY crates/wechat-api/src ./crates/wechat-api/src
 COPY crates/webshelf-runtime/src ./crates/webshelf-runtime/src
 COPY crates/webshelf-axum/src ./crates/webshelf-axum/src
 
-# Touch files to ensure rebuild after caching layer
-RUN touch server/src/main.rs
+# Touch all copied source files to invalidate pre-build cache
+RUN find server/src crates/emailserver/src crates/distributed-ratelimit/src \
+    crates/wechat-api/src crates/webshelf-runtime/src crates/webshelf-axum/src \
+    -type f -name '*.rs' -exec touch {} +
 
+# Final build with real source code
 RUN cargo build --release --package webshelf-server
 
-# Runtime stage
+# ── Runtime stage ──
 FROM debian:bookworm-slim AS runtime
-
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y \
@@ -75,22 +88,17 @@ RUN apt-get update && apt-get install -y \
     libssl3 \
     libpq5 \
     curl \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
+    && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user matching K8s securityContext (UID 1000)
 RUN groupadd -r webshelf && \
     useradd -r -g webshelf -u 1000 webshelf
 
 COPY --from=builder /app/target/release/webshelf-server /app/webshelf-server
-
-# Ensure the binary is owned by the webshelf user
 RUN chown webshelf:webshelf /app/webshelf-server
 
 USER webshelf
-
 EXPOSE 3000
-
 ENV RUST_LOG=info
 # Database and Redis connection URLs are injected at runtime
 # (via docker-compose environment or K8s secrets)

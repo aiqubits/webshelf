@@ -3,6 +3,7 @@ services:
   # Backend - WebShelf Server
   # ========================================
   webshelf-server:
+    image: webshelf-server
     build:
       context: .
       dockerfile: Dockerfile.server
@@ -51,6 +52,7 @@ services:
   # Frontend - WebShelf Web (Dioxus WASM from app/web)
   # ========================================
   webshelf-web:
+    image: webshelf-web
     build:
       context: .
       dockerfile: Dockerfile.web
