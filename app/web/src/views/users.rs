@@ -412,10 +412,17 @@ fn row_element(
     let balance = u.balance;
 
     let is_system = role == "system";
+    let is_admin_role = role == "admin";
+    // Protected rows: system accounts are editable only by other system accounts;
+    // admin accounts are also protected from admin-actor edits (only system can modify).
+    let is_protected = is_system || is_admin_role;
     let is_self = u.id == current_user_id;
 
-    // Edit permission: system can edit all non-system; admin can only edit users
-    let can_edit = (actor_is_system && !is_system) || (actor_is_admin && role == "user");
+    // Edit permission:
+    //   - system actor: can edit any role (including admin and other system accounts)
+    //   - admin actor:  can only edit user-role accounts (admin/system rows are protected)
+    // Protected rows (system & admin) are only editable by system actors.
+    let can_edit = actor_is_system || (actor_is_admin && role == "user");
     // Delete permission: same as edit, but cannot delete self
     let can_delete = can_edit && !is_self;
 
@@ -461,9 +468,15 @@ fn row_element(
             td { class: "ws-table__mono ws-table__align--right", "{format_balance(balance)}" }
             td { class: "ws-table__mono", "{format_dt(&created)}" }
             td {
-                if is_system {
+                if is_protected {
                     div { class: "ws-table__row-actions",
-                        span { class: "ws-table__protected",
+                        span {
+                            class: "ws-table__protected",
+                            title: if is_admin_role {
+                                "{t.users_protected_admin_label}"
+                            } else {
+                                "{t.users_system_editable}"
+                            },
                             ShieldHalf {}
                             "{t.users_protected_label}"
                         }

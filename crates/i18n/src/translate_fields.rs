@@ -117,6 +117,7 @@ translate! {
     users_badge_system: "System" => "系统管理员",
     users_badge_user: "User" => "普通用户",
     users_protected_label: " Protected" => " 受保护",
+    users_protected_admin_label: " Protected (Admin)" => " 受保护（仅系统管理员可修改）",
     users_no_permission: " No Permission" => " 权限不足",
     users_edit_title: "Edit" => "编辑",
     users_delete_title: "Delete" => "删除",

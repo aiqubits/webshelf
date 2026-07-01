@@ -61,8 +61,8 @@ mod tests {
     fn all_translation_fields_count() {
         let count = ALL_TRANSLATION_FIELDS.len();
         assert_eq!(
-            count, 218,
-            "ALL_TRANSLATION_FIELDS 计数 ({count}) 不符合预期 (218)。如果新增/删除了 translate! 字段，请同步更新此断言。"
+            count, 219,
+            "ALL_TRANSLATION_FIELDS 计数 ({count}) 不符合预期 (219)。如果新增/删除了 translate! 字段，请同步更新此断言。"
         );
     }
 }
